@@ -17,7 +17,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const DB_FILE: &str = "state.db";
 
 /// Ordered `(version, sql)` migrations. Versions are consecutive from 1.
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../migrations/0001_init.sql")),
+    (2, include_str!("../migrations/0002_deliveries.sql")),
+];
 
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -32,6 +35,10 @@ pub enum StoreError {
     },
     #[error("unknown task {0}")]
     NoSuchTask(String),
+    #[error("unknown delivery {0}")]
+    NoSuchDelivery(i64),
+    #[error("delivery {0} is already confirmed")]
+    DeliveryConfirmed(i64),
     #[error("task {0} already exists")]
     DuplicateTask(String),
     #[error(transparent)]
@@ -55,6 +62,56 @@ impl From<StoreError> for Error {
 }
 
 type Res<T> = std::result::Result<T, StoreError>;
+
+/// Who a prompt was delivered for: a coder working a task, or the reviewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryKind {
+    Coder,
+    Reviewer,
+}
+
+impl DeliveryKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeliveryKind::Coder => "coder",
+            DeliveryKind::Reviewer => "reviewer",
+        }
+    }
+
+    fn parse(s: &str) -> rusqlite::Result<Self> {
+        match s {
+            "coder" => Ok(DeliveryKind::Coder),
+            "reviewer" => Ok(DeliveryKind::Reviewer),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(TaskError::UnknownState(other.to_string())),
+            )),
+        }
+    }
+}
+
+/// One pending (or confirmed) prompt delivery, recorded durably before the
+/// prompt is sent and confirmed when the runtime accepts it (§15, §16).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delivery {
+    pub id: i64,
+    /// The one agent this prompt may be sent to; a re-send always uses it.
+    pub agent: String,
+    /// The task the prompt belongs to.
+    pub task: String,
+    /// The attempt the prompt starts.
+    pub attempt: u32,
+    pub kind: DeliveryKind,
+    pub prompt: String,
+    /// When the delivery was recorded (committed before the send).
+    pub recorded_at: i64,
+    pub confirmed: bool,
+    pub confirmed_at: Option<i64>,
+    /// Kind and message of the last send error, when the send failed.
+    pub error_kind: Option<String>,
+    pub error_message: Option<String>,
+}
 
 /// A request to change a task's state.
 #[derive(Debug, Clone)]
@@ -340,6 +397,150 @@ impl Store {
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
+
+    /// Record a prompt delivery, durably, before anything is sent to the
+    /// runtime (§15, §16). Returns its id. The task must exist.
+    pub fn record_delivery(
+        &mut self,
+        agent: &str,
+        task: &str,
+        attempt: u32,
+        kind: DeliveryKind,
+        prompt: &str,
+    ) -> Res<i64> {
+        self.conn.execute(
+            "INSERT INTO deliveries (agent, task_id, attempt, kind, prompt, recorded_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![agent, task, attempt, kind.as_str(), prompt, now()],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// One delivery by id.
+    pub fn delivery(&self, id: i64) -> Res<Delivery> {
+        self.conn
+            .query_row(
+                &format!("{DELIVERY_SELECT} WHERE id=?1"),
+                [id],
+                row_delivery,
+            )
+            .optional()?
+            .ok_or(StoreError::NoSuchDelivery(id))
+    }
+
+    /// Every unconfirmed delivery, oldest first (recovery walks these).
+    pub fn unconfirmed_deliveries(&self) -> Res<Vec<Delivery>> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("{DELIVERY_SELECT} WHERE confirmed=0 ORDER BY id"))?;
+        let rows = stmt.query_map([], row_delivery)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Mark a delivery confirmed (the runtime accepted the send). Idempotent
+    /// rejection: confirming a confirmed or missing delivery is an error.
+    pub fn confirm_delivery(&mut self, id: i64) -> Res<()> {
+        let n = self.conn.execute(
+            "UPDATE deliveries
+             SET confirmed=1, confirmed_at=?2, error_kind=NULL, error_message=NULL
+             WHERE id=?1 AND confirmed=0",
+            params![id, now()],
+        )?;
+        if n == 0 {
+            return Err(self.delivery_state_error(id));
+        }
+        Ok(())
+    }
+
+    /// Keep why a send failed: the delivery stays unconfirmed, with the error
+    /// kind and message preserved for the report.
+    pub fn record_delivery_error(
+        &mut self,
+        id: i64,
+        error_kind: &str,
+        message: &str,
+    ) -> Res<()> {
+        let n = self.conn.execute(
+            "UPDATE deliveries SET error_kind=?2, error_message=?3 WHERE id=?1 AND confirmed=0",
+            params![id, error_kind, message],
+        )?;
+        if n == 0 {
+            return Err(self.delivery_state_error(id));
+        }
+        Ok(())
+    }
+
+    fn delivery_state_error(&self, id: i64) -> StoreError {
+        let confirmed: Option<bool> = self
+            .conn
+            .query_row(
+                "SELECT confirmed FROM deliveries WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap_or(None);
+        match confirmed {
+            Some(true) => StoreError::DeliveryConfirmed(id),
+            Some(false) => StoreError::NoSuchDelivery(id), // unreachable
+            None => StoreError::NoSuchDelivery(id),
+        }
+    }
+
+    /// Add one to the agent's consecutive delivery failures (§15); returns the
+    /// new value.
+    pub fn bump_delivery_fails(&mut self, agent: &str) -> Res<u32> {
+        let v = self.conn.query_row(
+            "INSERT INTO delivery_fails (agent, fails) VALUES (?1, 1)
+             ON CONFLICT(agent) DO UPDATE SET fails=fails+1
+             RETURNING fails",
+            [agent],
+            |r| r.get(0),
+        )?;
+        Ok(v)
+    }
+
+    /// A confirmed send resets the agent's consecutive-failure count.
+    pub fn reset_delivery_fails(&mut self, agent: &str) -> Res<()> {
+        self.conn.execute(
+            "INSERT INTO delivery_fails (agent, fails) VALUES (?1, 0)
+             ON CONFLICT(agent) DO UPDATE SET fails=0",
+            [agent],
+        )?;
+        Ok(())
+    }
+
+    /// The agent's consecutive delivery failures (0 when none).
+    pub fn delivery_fails(&self, agent: &str) -> Res<u32> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT fails FROM delivery_fails WHERE agent=?1",
+                [agent],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
+}
+
+const DELIVERY_SELECT: &str = "SELECT id, agent, task_id, attempt, kind, prompt, recorded_at,
+    confirmed, confirmed_at, error_kind, error_message FROM deliveries";
+
+fn row_delivery(r: &rusqlite::Row<'_>) -> rusqlite::Result<Delivery> {
+    Ok(Delivery {
+        id: r.get(0)?,
+        agent: r.get(1)?,
+        task: r.get(2)?,
+        attempt: r.get(3)?,
+        kind: DeliveryKind::parse(&r.get::<_, String>(4)?)?,
+        prompt: r.get(5)?,
+        recorded_at: r.get(6)?,
+        confirmed: r.get(7)?,
+        confirmed_at: r.get(8)?,
+        error_kind: r.get(9)?,
+        error_message: r.get(10)?,
+    })
 }
 
 fn migrate(conn: &mut Connection, path: &Path) -> Res<()> {
@@ -751,5 +952,123 @@ mod tests {
             h.join().unwrap();
         }
         assert_eq!(a.get_task("M1").unwrap().fix_rounds, 40);
+    }
+
+    // §16/AC1: a schema-1 database upgrades in place when this build opens it.
+    #[test]
+    fn schema1_database_upgrades_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0].1).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+        }
+        let mut s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        assert_eq!(SCHEMA_VERSION, 2);
+        add(&mut s, "M1", &[]);
+        let id = s
+            .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")
+            .unwrap();
+        assert_eq!(s.delivery(id).unwrap().task, "M1");
+    }
+
+    #[test]
+    fn delivery_roundtrip_keeps_every_field() {
+        let (_d, mut s) = store();
+        add(&mut s, "M1", &[]);
+        let id = s
+            .record_delivery("claude-1", "M1", 3, DeliveryKind::Reviewer, "review this")
+            .unwrap();
+        let d = s.delivery(id).unwrap();
+        assert_eq!(
+            (
+                d.agent.as_str(),
+                d.task.as_str(),
+                d.attempt,
+                d.kind,
+                d.prompt.as_str()
+            ),
+            ("claude-1", "M1", 3, DeliveryKind::Reviewer, "review this")
+        );
+        assert!(!d.confirmed && d.confirmed_at.is_none());
+        assert!(d.recorded_at > 0);
+        assert!(d.error_kind.is_none() && d.error_message.is_none());
+        assert_eq!(s.unconfirmed_deliveries().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn confirming_and_error_records_are_visible() {
+        let (_d, mut s) = store();
+        add(&mut s, "M1", &[]);
+        add(&mut s, "M2", &[]);
+        let ok = s
+            .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")
+            .unwrap();
+        let bad = s
+            .record_delivery("codex-2", "M2", 1, DeliveryKind::Coder, "go")
+            .unwrap();
+        s.confirm_delivery(ok).unwrap();
+        let d = s.delivery(ok).unwrap();
+        assert!(d.confirmed && d.confirmed_at.is_some());
+        assert!(d.error_kind.is_none());
+        assert_eq!(
+            s.unconfirmed_deliveries().unwrap().iter().map(|d| d.id).collect::<Vec<_>>(),
+            [bad]
+        );
+        s.record_delivery_error(bad, "timed_out", "herdr call timed out after 30s")
+            .unwrap();
+        let d = s.delivery(bad).unwrap();
+        assert!(!d.confirmed);
+        assert_eq!(d.error_kind.as_deref(), Some("timed_out"));
+        assert_eq!(
+            d.error_message.as_deref(),
+            Some("herdr call timed out after 30s")
+        );
+        assert_eq!(s.unconfirmed_deliveries().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn confirming_twice_or_missing_delivery_is_an_error() {
+        let (_d, mut s) = store();
+        add(&mut s, "M1", &[]);
+        let id = s
+            .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")
+            .unwrap();
+        s.confirm_delivery(id).unwrap();
+        assert!(matches!(
+            s.confirm_delivery(id),
+            Err(StoreError::DeliveryConfirmed(_))
+        ));
+        assert!(matches!(
+            s.delivery(999),
+            Err(StoreError::NoSuchDelivery(999))
+        ));
+        assert!(matches!(
+            s.record_delivery_error(999, "other", "x"),
+            Err(StoreError::NoSuchDelivery(999))
+        ));
+    }
+
+    #[test]
+    fn a_delivery_needs_an_existing_task() {
+        let (_d, mut s) = store();
+        assert!(s
+            .record_delivery("claude-1", "nope", 1, DeliveryKind::Coder, "go")
+            .is_err());
+    }
+
+    #[test]
+    fn failure_streaks_bump_and_reset_per_agent() {
+        let (_d, mut s) = store();
+        assert_eq!(s.delivery_fails("claude-1").unwrap(), 0);
+        assert_eq!(s.bump_delivery_fails("claude-1").unwrap(), 1);
+        assert_eq!(s.bump_delivery_fails("claude-1").unwrap(), 2);
+        assert_eq!(s.bump_delivery_fails("codex-2").unwrap(), 1);
+        assert_eq!(s.delivery_fails("claude-1").unwrap(), 2);
+        s.reset_delivery_fails("claude-1").unwrap();
+        assert_eq!(s.delivery_fails("claude-1").unwrap(), 0);
+        assert_eq!(s.delivery_fails("codex-2").unwrap(), 1);
     }
 }
