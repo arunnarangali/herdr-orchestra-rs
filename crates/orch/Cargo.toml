@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 orch-core.workspace = true
 orch-config.workspace = true
+orch-herdr.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
