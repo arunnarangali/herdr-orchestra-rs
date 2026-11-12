@@ -1,0 +1,23 @@
+[package]
+name = "orch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "orch"
+path = "src/main.rs"
+
+[dependencies]
+orch-core.workspace = true
+orch-config.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
