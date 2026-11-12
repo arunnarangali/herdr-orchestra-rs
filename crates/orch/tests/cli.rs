@@ -88,7 +88,6 @@ fn every_command_is_accepted_and_not_implemented() {
     for args in [
         &["lead", "plan"][..],
         &["lead", "run"],
-        &["lead", "check"],
         &["lead", "whoami"],
         &["agents", "launch", "claude", "--model", "x"],
         &["agents", "sync"],
@@ -112,4 +111,93 @@ fn logging_quiet_by_default_and_on_stderr() {
         .unwrap();
     assert!(String::from_utf8_lossy(&o.stderr).contains("dispatch"));
     assert!(o.stdout.is_empty());
+}
+
+/// `orch` run with the developer's `HERDR_*` variables removed, so the result is the same
+/// inside and outside a real herdr pane; `extra` sets what the test wants.
+fn orch_clean(args: &[&str], extra: &[(&str, &str)]) -> Output {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_orch"));
+    c.args(args);
+    for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("HERDR")) {
+        c.env_remove(k);
+    }
+    for (k, v) in extra {
+        c.env(k, v);
+    }
+    c.output().unwrap()
+}
+
+/// The `fake-herdr` executable the workspace builds, next to the `orch` binary.
+fn fake_herdr() -> std::path::PathBuf {
+    let p = std::path::Path::new(env!("CARGO_BIN_EXE_orch")).with_file_name("fake-herdr");
+    assert!(p.exists(), "{} is missing: run `cargo build --workspace` or `cargo test --workspace`", p.display());
+    p
+}
+
+fn fake_state(current_pane: bool) -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    if current_pane {
+        std::fs::create_dir_all(d.path().join("panes")).unwrap();
+        std::fs::write(
+            d.path().join("panes/w1:p1.json"),
+            r#"{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1","agent_status":"idle"}"#,
+        )
+        .unwrap();
+        std::fs::write(d.path().join("current_pane"), "w1:p1\n").unwrap();
+    }
+    d
+}
+
+#[test]
+fn lead_check_ok_inside_a_herdr_pane() {
+    // HERDR points at a binary that does not exist: HERDR_ENV=1 is enough.
+    let o = orch_clean(
+        &["lead", "check"],
+        &[("HERDR_ENV", "1"), ("HERDR_PANE_ID", "w1:p4"), ("HERDR", "/nonexistent/herdr")],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.starts_with("OK inside a Herdr pane"), "{out}");
+    assert!(out.contains("w1:p4"));
+}
+
+#[test]
+fn lead_check_ok_when_herdr_pane_current_succeeds() {
+    let state = fake_state(true);
+    let fake = fake_herdr();
+    let o = orch_clean(
+        &["lead", "check"],
+        &[("HERDR", fake.to_str().unwrap()), ("FAKE_HERDR_DIR", state.path().to_str().unwrap())],
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.starts_with("OK herdr is reachable"), "{out}");
+    assert!(out.contains("orch lead whoami"));
+    let calls = std::fs::read_to_string(state.path().join("calls.jsonl")).unwrap();
+    assert!(calls.contains(r#"["pane","current"]"#), "{calls}");
+}
+
+#[test]
+fn lead_check_fails_with_the_fix_outside_a_herdr_pane() {
+    // The fake has no current pane, as a herdr server with no pane to report.
+    let state = fake_state(false);
+    let fake = fake_herdr();
+    let o = orch_clean(
+        &["lead", "check"],
+        &[("HERDR", fake.to_str().unwrap()), ("FAKE_HERDR_DIR", state.path().to_str().unwrap())],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    assert!(o.stdout.is_empty());
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.starts_with("ERROR: Herdr not detected: HERDR_ENV is not 1"), "{err}");
+    assert!(err.contains("Start this agent from a Herdr pane"));
+    assert!(err.contains("HERDR=/path/to/herdr"));
+    assert!(err.contains("client_env_passthrough: [HERDR_ENV, HERDR_PANE_ID, HERDR_SOCKET_PATH, HERDR_BIN_PATH]"));
+}
+
+#[test]
+fn lead_check_fails_when_herdr_is_missing() {
+    let o = orch_clean(&["lead", "check"], &[("HERDR", "/nonexistent/herdr")]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("Herdr not detected"));
 }
