@@ -3,8 +3,8 @@
 
 use crate::error::EXIT_USAGE;
 use crate::{Error, Result};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{Seek, Write};
@@ -53,9 +53,12 @@ pub struct DriverInfo {
 
 impl DriverInfo {
     /// `orch autopilot (pid 123 on host, started 14:05:09)`, with `?` for missing fields
-    /// (Python's `driver_line`). The start time is UTC.
+    /// (Python's `driver_line`). The start time is local time.
     pub fn holder_line(&self) -> String {
-        let started = self.started.map(hhmmss).unwrap_or_else(|| "?".to_string());
+        let started = self
+            .started
+            .map(hhmmss)
+            .unwrap_or_else(|| "?".to_string());
         format!(
             "orch autopilot (pid {} on {}, started {})",
             self.pid.map_or("?".to_string(), |p| p.to_string()),
@@ -120,9 +123,7 @@ pub fn take_lease(path: &Path) -> Result<DriverLease> {
         })?;
     if let Err(e) = file.try_lock_exclusive() {
         if e.kind() == std::io::ErrorKind::WouldBlock {
-            return Err(Error::from(LeaseError::Held(
-                driver_info(path).holder_line(),
-            )));
+            return Err(Error::from(LeaseError::Held(driver_info(path).holder_line())));
         }
         return Err(Error::from(LeaseError::Io {
             op: "lock".to_string(),
@@ -138,12 +139,7 @@ pub fn take_lease(path: &Path) -> Result<DriverLease> {
         token: Some(token.clone()),
     };
     write_info(&mut file, path, &info)?;
-    Ok(DriverLease {
-        file,
-        path: path.to_path_buf(),
-        token,
-        info,
-    })
+    Ok(DriverLease { file, path: path.to_path_buf(), token, info })
 }
 
 fn write_info(file: &mut File, path: &Path, info: &DriverInfo) -> Result<()> {
@@ -217,15 +213,92 @@ fn hostname() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
-/// UTC time of day of an epoch value, `HH:MM:SS`.
+/// Local time of day of an epoch value, `HH:MM:SS`, like Python's
+/// `time.strftime("%H:%M:%S", time.localtime(started))`.
 fn hhmmss(epoch: i64) -> String {
-    let secs = epoch.rem_euclid(86_400);
-    format!(
-        "{:02}:{:02}:{:02}",
-        secs / 3600,
-        (secs % 3600) / 60,
-        secs % 60
-    )
+    hhmmss_in(epoch, tz_source().as_deref())
+}
+
+/// Time of day of an epoch value in the timezone of a TZif file (UTC when `tz` is None).
+fn hhmmss_in(epoch: i64, tz: Option<&Path>) -> String {
+    let offset = tz.and_then(|p| tz_offset(p, epoch)).unwrap_or(0);
+    let secs = (epoch + offset).rem_euclid(86_400);
+    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+}
+
+/// The TZif file the system's local timezone comes from: `$TZ` (`/usr/share/zoneinfo/<TZ>`,
+/// or the path itself when `$TZ` is absolute), else `/etc/localtime`. None means UTC.
+fn tz_source() -> Option<PathBuf> {
+    match std::env::var_os("TZ") {
+        Some(tz) if !tz.is_empty() => {
+            let name = tz.to_string_lossy().trim_start_matches(':').to_string();
+            if name.starts_with('/') {
+                Some(PathBuf::from(name))
+            } else {
+                Some(PathBuf::from("/usr/share/zoneinfo").join(name))
+            }
+        }
+        _ => Some(PathBuf::from("/etc/localtime")),
+    }
+}
+
+/// The UTC offset in seconds the TZif file gives for `epoch` (Python: `time.localtime`).
+fn tz_offset(path: &Path, epoch: i64) -> Option<i64> {
+    let data = std::fs::read(path).ok()?;
+    let v1 = parse_block(&data, 0, 4)?;
+    let block = if data.get(4).is_some_and(|v| (b'2'..=b'4').contains(v)) {
+        parse_block(&data, v1.end, 8).unwrap_or(v1)
+    } else {
+        v1
+    };
+    let i = block.trans.partition_point(|&tt| tt <= epoch);
+    let type_idx = if i == 0 {
+        block.types.iter().position(|(_, dst)| !dst).unwrap_or(0)
+    } else {
+        usize::from(*block.idx.get(i - 1)?)
+    };
+    block.types.get(type_idx).map(|&(off, _)| off)
+}
+
+/// One TZif data block: the transition times (size `tsz`), their types, and the types
+/// (gmtoff seconds, isdst).
+struct TzBlock {
+    trans: Vec<i64>,
+    idx: Vec<u8>,
+    types: Vec<(i64, bool)>,
+    /// Offset just past the block, where a v2+ file keeps its 64-bit block.
+    end: usize,
+}
+
+fn parse_block(data: &[u8], start: usize, tsz: usize) -> Option<TzBlock> {
+    if data.len() < start + 44 || &data[start..start + 4] != b"TZif" {
+        return None;
+    }
+    let counts = |i: usize| -> Option<usize> {
+        Some(u32::from_be_bytes(
+            data[start + 20 + 4 * i..start + 24 + 4 * i].try_into().ok()?,
+        ) as usize)
+    };
+    let (isutcnt, isstdcnt, leapcnt, timecnt, typecnt, charcnt) =
+        (counts(0)?, counts(1)?, counts(2)?, counts(3)?, counts(4)?, counts(5)?);
+    let mut off = start + 44;
+    let mut trans = Vec::with_capacity(timecnt);
+    for i in 0..timecnt {
+        let raw = data.get(off + i * tsz..off + (i + 1) * tsz)?;
+        let mut be = [0u8; 8];
+        be[8 - tsz..].copy_from_slice(raw);
+        trans.push(i64::from_be_bytes(be));
+    }
+    off += timecnt * tsz;
+    let idx = data.get(off..off + timecnt)?.to_vec();
+    off += timecnt;
+    let mut types = Vec::with_capacity(typecnt);
+    for i in 0..typecnt {
+        let raw = data.get(off + i * 6..off + (i + 1) * 6)?;
+        types.push((i64::from(i32::from_be_bytes(raw[0..4].try_into().ok()?)), raw[4] != 0));
+    }
+    off += typecnt * 6 + charcnt + leapcnt * (tsz + 4) + isstdcnt + isutcnt;
+    Some(TzBlock { trans, idx, types, end: off })
 }
 
 #[cfg(test)]
@@ -257,29 +330,99 @@ mod tests {
         assert_eq!(info.token.as_deref(), Some(lease.token.as_str()));
         assert_eq!(lease.info, info);
         for key in ["pid", "host", "started", "token"] {
-            assert!(
-                text.contains(&format!("\"{key}\"")),
-                "missing {key}: {text}"
-            );
+            assert!(text.contains(&format!("\"{key}\"")), "missing {key}: {text}");
         }
     }
 
+    /// Serializes every test that reads or writes the process-wide `TZ` variable.
+    static TZ_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn holder_line_names_pid_host_and_start_time() {
+        let _g = TZ_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("TZ", "UTC") };
         let info = DriverInfo {
             pid: Some(123),
             host: Some("box".to_string()),
             started: Some(0),
             token: None,
         };
-        assert_eq!(
-            info.holder_line(),
-            "orch autopilot (pid 123 on box, started 00:00:00)"
-        );
-        assert_eq!(
-            DriverInfo::default().holder_line(),
-            "orch autopilot (pid ? on ?, started ?)"
-        );
+        assert_eq!(info.holder_line(), "orch autopilot (pid 123 on box, started 00:00:00)");
+        assert_eq!(DriverInfo::default().holder_line(), "orch autopilot (pid ? on ?, started ?)");
+        unsafe { std::env::remove_var("TZ") };
+        assert_eq!(DriverInfo::default().holder_line(), "orch autopilot (pid ? on ?, started ?)");
+    }
+
+    /// A minimal TZif v1 file: `types` as (gmtoff, isdst), at most one transition at
+    /// `trans_at` picking type 1.
+    fn tzif(types: &[(i64, bool)], trans_at: Option<i64>) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"TZif");
+        data.push(0);
+        data.extend_from_slice(&[0; 15]);
+        let charcnt = 4;
+        let put = |data: &mut Vec<u8>, v: u32| data.extend_from_slice(&v.to_be_bytes());
+        put(&mut data, 0); // isutcnt
+        put(&mut data, 0); // isstdcnt
+        put(&mut data, 0); // leapcnt
+        put(&mut data, if trans_at.is_some() { 1 } else { 0 }); // timecnt
+        put(&mut data, u32::try_from(types.len()).unwrap()); // typecnt
+        put(&mut data, charcnt);
+        if let Some(t) = trans_at {
+            data.extend_from_slice(&i32::try_from(t).unwrap().to_be_bytes());
+            data.push(1);
+        }
+        for (off, dst) in types {
+            data.extend_from_slice(&i32::try_from(*off).unwrap().to_be_bytes());
+            data.push(u8::from(*dst));
+            data.push(0);
+        }
+        data.extend_from_slice("TZZ\0".as_bytes());
+        data
+    }
+
+    #[test]
+    fn local_time_uses_the_tzif_offset() {
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("tz");
+        std::fs::write(&p, tzif(&[(7200, false)], None)).unwrap();
+        assert_eq!(tz_offset(&p, 0), Some(7200));
+        assert_eq!(hhmmss_in(0, Some(&p)), "02:00:00");
+        assert_eq!(hhmmss_in(3601, Some(&p)), "03:00:01");
+        assert_eq!(hhmmss_in(0, None), "00:00:00");
+        assert_eq!(hhmmss_in(43_215, None), "12:00:15");
+    }
+
+    #[test]
+    fn local_time_respects_transitions_and_dst() {
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("tz");
+        std::fs::write(&p, tzif(&[(0, false), (3600, true)], Some(100_000))).unwrap();
+        assert_eq!(tz_offset(&p, 99_999), Some(0));
+        assert_eq!(hhmmss_in(99_999, Some(&p)), "03:46:39");
+        assert_eq!(tz_offset(&p, 100_000), Some(3600));
+        assert_eq!(hhmmss_in(100_000, Some(&p)), "04:46:40");
+    }
+
+    #[test]
+    fn broken_tz_file_falls_back_to_utc() {
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("tz");
+        std::fs::write(&p, "not a tzif file at all").unwrap();
+        assert_eq!(tz_offset(&p, 0), None);
+        assert_eq!(hhmmss_in(0, Some(&p)), "00:00:00");
+    }
+
+    #[test]
+    fn the_system_tz_file_parses_when_present() {
+        let _g = TZ_LOCK.lock().unwrap();
+        let p = tz_source();
+        let Some(p) = p else { return };
+        if !p.exists() {
+            return;
+        }
+        assert!(tz_offset(&p, 0).is_some(), "no offset from {}", p.display());
+        assert_eq!(hhmmss_in(0, Some(&p)), hhmmss(0));
     }
 
     #[test]
