@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/orch", "crates/orch-core", "crates/orch-config"]
+members = ["crates/orch", "crates/orch-core", "crates/orch-config", "crates/orch-herdr"]
 
 [workspace.package]
 version = "5.0.0-dev"
@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 orch-core = { path = "crates/orch-core" }
 orch-config = { path = "crates/orch-config" }
+orch-herdr = { path = "crates/orch-herdr" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
