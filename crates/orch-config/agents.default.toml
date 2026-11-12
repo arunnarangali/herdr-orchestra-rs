@@ -1,0 +1,85 @@
+# herdr-orchestra agent registry — one table per agent kind.
+# Override or add kinds in ~/.config/herdr-orchestra/agents.toml (merged key by key over this file).
+#
+#   binary        executable that must be on PATH for the kind to count as installed
+#   launch        command to start it in a herdr pane, with its auto-approve-edits option
+#   model_flag    the launch option that picks the model (`orch agents launch <kind> --model <id>`); leave it
+#                 out when the tool has none or it is unverified, and choose the model inside the tool
+#   herdr_detect  herdr can tell idle / working / blocked for it (false: orch relies on the done file only)
+#   roles         any of "lead", "coder", "reviewer"
+#   skills_dirs   global SKILL.md folders the installer puts the thin orch-plan / orch-run skills into
+#   commands_dirs slash-command folders the installer puts orch-plan.md / orch-run.md into
+#   commands_from which command flavour to install there: "claude-commands" or "opencode-commands"
+#   invoke        how the developer starts the plan playbook in that agent
+#   verified      true only when the launch option and skills folder were checked against the real tool
+#                 (herdr_detect comes from herdr's own list of agent kinds: `herdr agent` prints it)
+#   notes         what was (or wasn't) verified
+#
+# Every agent can also lead with the universal sentence: Run `orch lead plan` and follow it. Feature: <...>
+
+[claude]
+binary = "claude"
+launch = "claude --permission-mode acceptEdits"
+model_flag = "--model"
+herdr_detect = true
+roles = ["lead", "coder", "reviewer"]
+skills_dirs = ["~/.claude/skills"]
+commands_dirs = ["~/.claude/commands"]
+commands_from = "claude-commands"
+invoke = "/orch-plan <feature>"
+verified = true
+notes = "Claude Code 2.1: --permission-mode acceptEdits in --help; ~/.claude/skills present; herdr kind 'claude'."
+
+[codex]
+binary = "codex"
+launch = "codex --approve-for-me"
+model_flag = "--model"
+herdr_detect = true
+roles = ["lead", "coder", "reviewer"]
+skills_dirs = ["~/.codex/skills"]
+invoke = "$orch-plan <feature>   (or: use the orch-plan skill: <feature>)"
+verified = true
+notes = "codex-cli 0.167: --full-auto is gone; --approve-for-me routes approvals to automatic review in the workspace-write sandbox. Reads ~/.codex/skills and ~/.agents/skills."
+
+[amp]
+binary = "amp"
+launch = "amp"
+herdr_detect = true
+roles = ["lead", "coder", "reviewer"]
+skills_dirs = ["~/.config/agents/skills", "~/.agents/skills"]
+invoke = "use the orch-plan skill: <feature>"
+verified = true
+notes = "No auto-approve CLI flag; set amp.dangerouslyAllowAll or `amp permissions add` rules in its settings. `amp skill list` lists skills."
+
+[opencode]
+binary = "opencode"
+launch = "opencode"
+model_flag = "--model"
+herdr_detect = true
+roles = ["lead", "coder", "reviewer"]
+skills_dirs = []
+commands_dirs = ["~/.config/opencode/commands"]
+commands_from = "opencode-commands"
+invoke = "/orch-plan <feature>"
+verified = true
+notes = "Reads ~/.agents/skills and ~/.claude/skills, so only its slash commands are installed."
+
+[hermes]
+binary = "hermes"
+launch = "hermes"
+herdr_detect = true
+roles = ["lead", "coder", "reviewer"]
+skills_dirs = ["~/.hermes/skills"]
+invoke = "use the orch-plan skill: <feature>"
+verified = false
+notes = "Not installed on the machine this was written on: launch flag and skills folder unverified. herdr 0.9.5 lists 'hermes' as a known kind. Hermes runs tools in its gateway, so the pane's HERDR_* env is missing there unless ~/.hermes/config.yaml sets terminal.client_env_passthrough: [HERDR_ENV, HERDR_PANE_ID, HERDR_SOCKET_PATH, HERDR_BIN_PATH] (see `orch lead check`)."
+
+[agy]
+binary = "agy"
+launch = "agy --mode accept-edits"
+herdr_detect = true
+roles = ["lead", "coder", "reviewer"]
+skills_dirs = ["~/.gemini/config/skills"]
+invoke = "use the orch-plan skill: <feature>"
+verified = true
+notes = "Antigravity CLI 1.5: --mode accept-edits|auto|plan and --dangerously-skip-permissions. The binary documents ~/.gemini/config/skills/<name>/SKILL.md as the global skills folder."

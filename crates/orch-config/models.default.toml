@@ -1,0 +1,164 @@
+# herdr-orchestra model catalog — what the lead reads when it picks a model for a milestone.
+# Override or add models in ~/.config/herdr-orchestra/models.toml (merged key by key over this file).
+#
+# Ratings are 1 (weak) to 5 (strong). They are starting points, not measurements made by this project:
+# `evidence` says where each one comes from. `orch report` shows how each model really did in your runs
+# (first-pass rate, fix rounds); lower or raise a rating in your own models.toml when they disagree.
+#
+#   kinds         agent kinds that can run the model (the id is what follows that kind's model flag)
+#   tier          small | medium | high — what the model is trusted with (see [tiers])
+#   reasoning     multi-step problem solving, debugging without a hint, weighing trade-offs
+#   coding        writing and fixing code that passes its checks
+#   architecture  design across modules, contracts between parts, large refactors
+#   instructions  follows the task file, scope and output format reliably
+#   tools         tool calling and long agentic sessions without getting lost
+#   planning      breaking a goal into steps and keeping to them
+#   speed         5 = fastest and cheapest to run, 1 = slowest and most expensive
+#   context_k     context window in thousands of tokens
+#   open_weights  true when the weights can be downloaded and self-hosted
+#   evidence      where the ratings come from, with a date
+
+[policy]
+# Models nobody in a run may use: the lead, coders and the reviewer. Shell-style patterns, matched against the
+# model id without caring about case. `orch sync` refuses a plan that names one.
+deny = ["*fable*", "best", "*astra*"]
+deny_why = "ultra-premium models are kept out of runs (edit [policy] deny in models.toml to change this)"
+
+[tiers]
+# A model may serve a tier only when its reasoning rating reaches the floor: coding skill alone never
+# makes a model `high`.
+small = { reasoning = 1, use = "classification, renames, docs, config, mechanical edits" }
+medium = { reasoning = 3, use = "normal implementation, tests, debugging inside one module" }
+high = { reasoning = 4, use = "the lead, contracts and architecture, cross-module refactors, auth/payments/schema, escalations" }
+
+# ---------------------------------------------------------------- Claude Code (`claude --model <id>`)
+[models.haiku]
+kinds = ["claude"]
+tier = "small"
+reasoning = 2
+coding = 3
+architecture = 2
+instructions = 4
+tools = 4
+planning = 2
+speed = 5
+context_k = 200
+open_weights = false
+evidence = "Claude Code alias for the current Haiku (code.claude.com/docs/en/model-config, 2026-11). Ratings: maintainer estimate from Anthropic's positioning of Haiku as its fast small model; not benchmarked here."
+
+[models.sonnet]
+kinds = ["claude"]
+tier = "medium"
+reasoning = 4
+coding = 4
+architecture = 3
+instructions = 5
+tools = 5
+planning = 4
+speed = 3
+context_k = 200
+open_weights = false
+evidence = "Claude Code alias for the current Sonnet (code.claude.com/docs/en/model-config, 2026-11). Ratings: maintainer estimate; not benchmarked here."
+
+[models.opus]
+kinds = ["claude"]
+tier = "high"
+reasoning = 5
+coding = 5
+architecture = 5
+instructions = 5
+tools = 5
+planning = 5
+speed = 2
+context_k = 200
+open_weights = false
+evidence = "Claude Code alias for the current Opus (code.claude.com/docs/en/model-config, 2026-11). Ratings: maintainer estimate; not benchmarked here."
+
+# ---------------------------------------------------------------- Codex CLI (`codex --model <id>`)
+[models.gpt-6-luna]
+kinds = ["codex"]
+tier = "small"
+reasoning = 2
+coding = 3
+architecture = 2
+instructions = 4
+tools = 4
+planning = 2
+speed = 5
+context_k = 0
+open_weights = false
+evidence = "Lowest-cost tier in the Codex model picker per a third-party guide (codex.danielvaughan.com, 2026-09-25). Id and ratings unverified here: check `codex` on your machine."
+
+[models.gpt-6-sol]
+kinds = ["codex"]
+tier = "medium"
+reasoning = 4
+coding = 4
+architecture = 3
+instructions = 4
+tools = 4
+planning = 4
+speed = 3
+context_k = 0
+open_weights = false
+evidence = "Baseline tier for standard agentic work per a third-party guide (codex.danielvaughan.com, 2026-09-25). Id and ratings unverified here: check `codex` on your machine."
+
+# ---------------------------------------------------------------- open-weight models (optional)
+# These need somewhere to run: a local server (Ollama, LM Studio, vLLM) or a hosted provider. The id is what
+# your agent expects after its model flag (OpenCode: `provider/model`), so copy an entry into models.toml
+# under the id you really use. Scores are vendor-reported and come from different harnesses.
+[models."qwen3.6-35b-a3b"]
+kinds = ["opencode", "hermes"]
+tier = "small"
+reasoning = 2
+coding = 3
+architecture = 2
+instructions = 3
+tools = 3
+planning = 2
+speed = 5
+context_k = 128
+open_weights = true
+evidence = "Apache-2.0, 35B total / 3B active, fits a 24 GB GPU; SWE-bench Verified 73.4 vendor-reported (morphllm.com/best-open-source-llm, 2026-10)."
+
+[models."qwen3.8-27b"]
+kinds = ["opencode", "hermes"]
+tier = "medium"
+reasoning = 3
+coding = 4
+architecture = 3
+instructions = 3
+tools = 4
+planning = 3
+speed = 4
+context_k = 262
+open_weights = true
+evidence = "Apache-2.0, 27B dense, single GPU; SWE-bench Pro 61.7, Terminal-Bench 2.1 73.0 vendor-reported (morphllm.com/best-open-source-llm, 2026-10)."
+
+[models."deepseek-v4-pro"]
+kinds = ["opencode", "hermes"]
+tier = "high"
+reasoning = 4
+coding = 5
+architecture = 4
+instructions = 4
+tools = 4
+planning = 4
+speed = 2
+context_k = 1000
+open_weights = true
+evidence = "MIT, 1.6T total / 49B active, hosted in practice; SWE-bench Verified 80.6 vendor-reported (morphllm.com/best-open-source-llm, 2026-10)."
+
+[models."glm-5.3"]
+kinds = ["opencode", "hermes"]
+tier = "high"
+reasoning = 4
+coding = 4
+architecture = 4
+instructions = 4
+tools = 4
+planning = 4
+speed = 2
+context_k = 1000
+open_weights = true
+evidence = "GLM-5.3 licence (MIT-like), 753B, hosted in practice; Terminal-Bench 2.1 88.2, DeepSWE v1.1 66.9 vendor-reported (morphllm.com/best-open-source-llm, 2026-10)."

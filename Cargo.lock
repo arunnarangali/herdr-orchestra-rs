@@ -374,6 +374,7 @@ dependencies = [
  "orch-core",
  "serde",
  "tempfile",
+ "thiserror",
  "toml",
 ]
 
