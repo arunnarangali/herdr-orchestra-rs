@@ -72,6 +72,12 @@ where
             }
             orch_core::logging::init();
             tracing::debug!(command = name, "dispatch");
+            if name == "lead" && args.get(1).map(String::as_str) == Some("check") {
+                let herdr = orch_config::tunables::Tunables::from_env()
+                    .map(|t| t.herdr)
+                    .unwrap_or_else(|_| "herdr".to_string());
+                return commands::lead_check(&herdr);
+            }
             eprintln!("orch {name}: not implemented in this build (exit {EXIT_NOT_IMPLEMENTED})");
             EXIT_NOT_IMPLEMENTED
         }
