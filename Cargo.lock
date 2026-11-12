@@ -394,6 +394,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "orch-herdr"
+version = "5.0.0-dev"
+dependencies = [
+ "orch-config",
+ "orch-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

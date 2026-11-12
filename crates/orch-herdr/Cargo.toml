@@ -1,0 +1,22 @@
+[package]
+name = "orch-herdr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+orch-core.workspace = true
+orch-config.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+# The fake `herdr` executable the test suite drives instead of the real binary;
+# it is a placeholder here and gets its behaviour in milestone M2.
+[[bin]]
+name = "fake-herdr"
+path = "src/bin/fake_herdr.rs"
