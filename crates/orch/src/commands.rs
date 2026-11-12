@@ -1,5 +1,9 @@
 //! The command table: every command name, its help line, and the usage text.
 
+use orch_config::tunables::Tunables;
+use orch_herdr::RuntimeAdapter;
+use orch_herdr::cli::CliHerdr;
+
 /// Exit code for a command that exists but is not built yet. Python uses 1, 2, 3, 4, 5, 6, 7
 /// and 99, and `orch poll` waits with 10, so 70 (EX_SOFTWARE) is free.
 pub const EXIT_NOT_IMPLEMENTED: i32 = 70;
@@ -52,52 +56,30 @@ pub const COMMAND_NAMES: &[&str] = &[
 /// The variables a Hermes-style agent shell must pass through to see its pane.
 const HERDR_PANE_ENV: [&str; 4] = ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"];
 
-/// How long `lead check` waits for `herdr pane current`, as Python does.
-const LEAD_CHECK_TIMEOUT_S: u64 = 20;
+/// Run an implemented command and return its exit code, or `None` when the command is
+/// still a stub (the caller then reports "not implemented"). `args` is the command name
+/// followed by its arguments.
+pub fn dispatch(args: &[String]) -> Option<i32> {
+    let sub = args.get(1).map(String::as_str);
+    match (args.first().map(String::as_str)?, sub) {
+        ("lead", Some("check")) => Some(lead_check(&herdr_adapter())),
+        _ => None,
+    }
+}
 
-/// Run `<herdr> pane current` bounded by a timeout: `Ok(detail)` when it succeeds,
-/// `Err(detail)` when it fails, cannot start or hangs (the child is killed).
-fn pane_current(herdr: &str, timeout_s: u64) -> Result<String, String> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new(herdr)
-        .args(["pane", "current"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let mut out = child.stdout.take();
-    let mut err = child.stderr.take();
-    let reader = |p: Option<&mut dyn Read>| {
-        let mut s = String::new();
-        if let Some(p) = p {
-            let _ = p.read_to_string(&mut s);
-        }
-        s
-    };
-    let out_t = std::thread::spawn(move || reader(out.as_mut().map(|p| p as &mut dyn Read)));
-    let err_t = std::thread::spawn(move || reader(err.as_mut().map(|p| p as &mut dyn Read)));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_s);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) if std::time::Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("timed out after {timeout_s}s"));
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(5)),
-            Err(e) => return Err(e.to_string()),
-        }
-    };
-    let text = format!("{}{}", out_t.join().unwrap_or_default(), err_t.join().unwrap_or_default());
-    if status.success() { Ok(text.trim().to_string()) } else { Err(text.trim().to_string()) }
+/// The herdr backend every command reaches the runtime through: the CLI adapter, with
+/// the `HERDR` binary and the `ORCH_HERDR_TIMEOUT_S` timeout from the tunables.
+fn herdr_adapter() -> CliHerdr {
+    match Tunables::from_env() {
+        Ok(t) => CliHerdr::from_tunables(&t),
+        Err(_) => CliHerdr::new("herdr", 30),
+    }
 }
 
 /// `orch lead check`: preflight, is this agent driving Herdr? `HERDR_ENV=1` is the fast
-/// path; otherwise ask herdr. Returns the exit code (0 ok, 2 not detected, as Python's `die`).
-pub fn lead_check(herdr: &str) -> i32 {
+/// path; otherwise ask herdr (`pane current`) through the adapter. Returns the exit code
+/// (0 ok, 2 not detected, as Python's `die`).
+pub fn lead_check(runtime: &dyn RuntimeAdapter) -> i32 {
     let fix = format!(
         "If the agent is Hermes, its tools run in the Hermes gateway, which does not see the pane's env. \
 Add this to ~/.hermes/config.yaml, then restart Hermes:\n    terminal:\n      client_env_passthrough: [{}]",
@@ -108,7 +90,7 @@ Add this to ~/.hermes/config.yaml, then restart Hermes:\n    terminal:\n      cl
         println!("OK inside a Herdr pane (HERDR_ENV=1, pane {})", pane.as_deref().unwrap_or("?"));
         return 0;
     }
-    match pane_current(herdr, LEAD_CHECK_TIMEOUT_S) {
+    match runtime.current_pane() {
         Ok(_) => {
             println!(
                 "OK herdr is reachable, but this shell has no HERDR_ENV, so herdr cannot tell which pane is yours.\n  \
@@ -116,10 +98,9 @@ Carry on; `orch lead whoami` will show the focused pane — confirm it is yours.
             );
             0
         }
-        Err(detail) => {
-            let last = detail.lines().last().map(|l| format!(" ({l})")).unwrap_or_default();
+        Err(e) => {
             eprintln!(
-                "ERROR: Herdr not detected: HERDR_ENV is not 1 and `herdr pane current` failed{last}.\n  \
+                "ERROR: Herdr not detected: HERDR_ENV is not 1 and `herdr pane current` failed ({e}).\n  \
 Start this agent from a Herdr pane, and make sure `herdr` is on PATH (or set HERDR=/path/to/herdr).\n  {fix}"
             );
             2

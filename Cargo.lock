@@ -362,6 +362,7 @@ dependencies = [
  "clap",
  "orch-config",
  "orch-core",
+ "orch-herdr",
  "tempfile",
  "tracing",
 ]

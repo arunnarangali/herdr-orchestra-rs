@@ -174,7 +174,7 @@ fn lead_check_ok_when_herdr_pane_current_succeeds() {
     assert!(out.starts_with("OK herdr is reachable"), "{out}");
     assert!(out.contains("orch lead whoami"));
     let calls = std::fs::read_to_string(state.path().join("calls.jsonl")).unwrap();
-    assert!(calls.contains(r#"["pane","current"]"#), "{calls}");
+    assert!(calls.contains(r#"["pane","current","--current"]"#), "{calls}");
 }
 
 #[test]
@@ -200,4 +200,23 @@ fn lead_check_fails_when_herdr_is_missing() {
     let o = orch_clean(&["lead", "check"], &[("HERDR", "/nonexistent/herdr")]);
     assert_eq!(o.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&o.stderr).contains("Herdr not detected"));
+}
+
+#[test]
+fn lead_check_honours_the_herdr_timeout_tunable() {
+    let state = fake_state(true);
+    std::fs::write(state.path().join("sim.json"), r#"{"slow_ms": 20000}"#).unwrap();
+    let fake = fake_herdr();
+    let started = std::time::Instant::now();
+    let o = orch_clean(
+        &["lead", "check"],
+        &[
+            ("HERDR", fake.to_str().unwrap()),
+            ("FAKE_HERDR_DIR", state.path().to_str().unwrap()),
+            ("ORCH_HERDR_TIMEOUT_S", "1"),
+        ],
+    );
+    assert!(started.elapsed().as_secs() < 10, "must stop at ORCH_HERDR_TIMEOUT_S, not the old fixed 20s");
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("timed out after 1s"));
 }
