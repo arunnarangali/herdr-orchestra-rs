@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The shipped registry, embedded in the binary (v4.10.1, unchanged).
-pub const DEFAULT_TOML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/agents.default.toml"));
+pub const DEFAULT_TOML: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/agents.default.toml"));
 
 /// Roles an agent kind can serve.
 pub const ROLES: [&str; 3] = ["lead", "coder", "reviewer"];
@@ -78,7 +79,10 @@ impl Registry {
 pub fn user_agents_file() -> PathBuf {
     match std::env::var_os("ORCH_AGENTS_FILE") {
         Some(v) if !v.is_empty() => PathBuf::from(v),
-        _ => home_dir().join(".config").join("herdr-orchestra").join("agents.toml"),
+        _ => home_dir()
+            .join(".config")
+            .join("herdr-orchestra")
+            .join("agents.toml"),
     }
 }
 
@@ -97,13 +101,19 @@ pub fn load(user_file: Option<&Path>) -> Result<Registry> {
 
 /// Merge a default registry text with one user override file and validate the result.
 /// Each kind's keys are merged key by key, the user winning (Python's `dict.update`).
-pub fn registry(default_toml: &str, user_file: &Path) -> std::result::Result<Registry, AgentsError> {
+pub fn registry(
+    default_toml: &str,
+    user_file: &Path,
+) -> std::result::Result<Registry, AgentsError> {
     let mut table = parse(default_toml, "agents.default.toml")?;
     if user_file.exists() {
         let text = read(user_file)?;
         for (kind, vals) in parse(&text, &file_name(user_file))? {
             if let Some(vals) = vals.as_table() {
-                let mut merged = table.get(&kind).and_then(|v| v.as_table().cloned()).unwrap_or_default();
+                let mut merged = table
+                    .get(&kind)
+                    .and_then(|v| v.as_table().cloned())
+                    .unwrap_or_default();
                 for (k, v) in vals {
                     merged.insert(k.clone(), v.clone());
                 }
@@ -135,7 +145,10 @@ pub fn registry(default_toml: &str, user_file: &Path) -> std::result::Result<Reg
 fn validate(ak: &AgentKind) -> std::result::Result<(), String> {
     for role in &ak.roles {
         if !ROLES.contains(&role.as_str()) {
-            return Err(format!("unknown role {role:?} (allowed: {})", ROLES.join(", ")));
+            return Err(format!(
+                "unknown role {role:?} (allowed: {})",
+                ROLES.join(", ")
+            ));
         }
     }
     Ok(())
@@ -143,7 +156,10 @@ fn validate(ak: &AgentKind) -> std::result::Result<(), String> {
 
 fn parse(text: &str, file: &str) -> std::result::Result<toml::Table, AgentsError> {
     text.parse::<toml::Table>()
-        .map_err(|e: toml::de::Error| AgentsError { file: file.to_string(), problem: e.to_string() })
+        .map_err(|e: toml::de::Error| AgentsError {
+            file: file.to_string(),
+            problem: e.to_string(),
+        })
 }
 
 fn read(path: &Path) -> std::result::Result<String, AgentsError> {
@@ -238,7 +254,10 @@ mod tests {
         let p = user(&t, "[claude\nlaunch = \"x\"\n");
         let e = registry(DEFAULT_TOML, &p).unwrap_err();
         assert_eq!(e.file, "agents.toml");
-        assert!(e.to_string().contains("agent registry: agents.toml:"), "{e}");
+        assert!(
+            e.to_string().contains("agent registry: agents.toml:"),
+            "{e}"
+        );
     }
 
     #[test]
@@ -253,7 +272,10 @@ mod tests {
     #[test]
     fn unknown_role_is_a_validation_error() {
         let t = tempfile::tempdir().unwrap();
-        let p = user(&t, "[acme]\nbinary = \"a\"\nlaunch = \"a\"\nroles = [\"tester\"]\n");
+        let p = user(
+            &t,
+            "[acme]\nbinary = \"a\"\nlaunch = \"a\"\nroles = [\"tester\"]\n",
+        );
         let e = registry(DEFAULT_TOML, &p).unwrap_err();
         assert!(e.problem.contains("unknown role \"tester\""), "{e}");
     }
@@ -290,7 +312,10 @@ mod tests {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _g = LOCK.lock().unwrap();
         unsafe { std::env::set_var("ORCH_AGENTS_FILE", "/tmp/from-env/agents.toml") };
-        assert_eq!(user_agents_file(), PathBuf::from("/tmp/from-env/agents.toml"));
+        assert_eq!(
+            user_agents_file(),
+            PathBuf::from("/tmp/from-env/agents.toml")
+        );
         unsafe { std::env::remove_var("ORCH_AGENTS_FILE") };
         assert!(user_agents_file().ends_with("herdr-orchestra/agents.toml"));
         unsafe { std::env::set_var("ORCH_AGENTS_FILE", "") };

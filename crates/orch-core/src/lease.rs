@@ -3,8 +3,8 @@
 
 use crate::error::EXIT_USAGE;
 use crate::{Error, Result};
-use serde::{Deserialize, Serialize};
 use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{Seek, Write};
@@ -55,10 +55,7 @@ impl DriverInfo {
     /// `orch autopilot (pid 123 on host, started 14:05:09)`, with `?` for missing fields
     /// (Python's `driver_line`). The start time is UTC.
     pub fn holder_line(&self) -> String {
-        let started = self
-            .started
-            .map(hhmmss)
-            .unwrap_or_else(|| "?".to_string());
+        let started = self.started.map(hhmmss).unwrap_or_else(|| "?".to_string());
         format!(
             "orch autopilot (pid {} on {}, started {})",
             self.pid.map_or("?".to_string(), |p| p.to_string()),
@@ -123,7 +120,9 @@ pub fn take_lease(path: &Path) -> Result<DriverLease> {
         })?;
     if let Err(e) = file.try_lock_exclusive() {
         if e.kind() == std::io::ErrorKind::WouldBlock {
-            return Err(Error::from(LeaseError::Held(driver_info(path).holder_line())));
+            return Err(Error::from(LeaseError::Held(
+                driver_info(path).holder_line(),
+            )));
         }
         return Err(Error::from(LeaseError::Io {
             op: "lock".to_string(),
@@ -139,7 +138,12 @@ pub fn take_lease(path: &Path) -> Result<DriverLease> {
         token: Some(token.clone()),
     };
     write_info(&mut file, path, &info)?;
-    Ok(DriverLease { file, path: path.to_path_buf(), token, info })
+    Ok(DriverLease {
+        file,
+        path: path.to_path_buf(),
+        token,
+        info,
+    })
 }
 
 fn write_info(file: &mut File, path: &Path, info: &DriverInfo) -> Result<()> {
@@ -216,7 +220,12 @@ fn hostname() -> String {
 /// UTC time of day of an epoch value, `HH:MM:SS`.
 fn hhmmss(epoch: i64) -> String {
     let secs = epoch.rem_euclid(86_400);
-    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 #[cfg(test)]
@@ -248,7 +257,10 @@ mod tests {
         assert_eq!(info.token.as_deref(), Some(lease.token.as_str()));
         assert_eq!(lease.info, info);
         for key in ["pid", "host", "started", "token"] {
-            assert!(text.contains(&format!("\"{key}\"")), "missing {key}: {text}");
+            assert!(
+                text.contains(&format!("\"{key}\"")),
+                "missing {key}: {text}"
+            );
         }
     }
 
@@ -260,8 +272,14 @@ mod tests {
             started: Some(0),
             token: None,
         };
-        assert_eq!(info.holder_line(), "orch autopilot (pid 123 on box, started 00:00:00)");
-        assert_eq!(DriverInfo::default().holder_line(), "orch autopilot (pid ? on ?, started ?)");
+        assert_eq!(
+            info.holder_line(),
+            "orch autopilot (pid 123 on box, started 00:00:00)"
+        );
+        assert_eq!(
+            DriverInfo::default().holder_line(),
+            "orch autopilot (pid ? on ?, started ?)"
+        );
     }
 
     #[test]

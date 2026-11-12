@@ -19,7 +19,10 @@ fn second_taker_is_refused_and_names_the_holder() {
             .contains(&format!("pid {}", lease.info.pid.unwrap())),
         "{e}"
     );
-    assert!(e.to_string().contains(lease.info.host.as_deref().unwrap()), "{e}");
+    assert!(
+        e.to_string().contains(lease.info.host.as_deref().unwrap()),
+        "{e}"
+    );
     assert!(!e.to_string().contains("started ?"), "{e}");
     assert!(e.to_string().contains("started "), "{e}");
     assert!(driver_alive(&p));
@@ -39,7 +42,8 @@ fn lease_is_free_again_after_the_holder_drops_it() {
     assert_ne!(lease2.token, "");
     let e = take_lease(&p).unwrap_err();
     assert!(
-        e.to_string().contains(&format!("pid {}", lease2.info.pid.unwrap())),
+        e.to_string()
+            .contains(&format!("pid {}", lease2.info.pid.unwrap())),
         "{e}"
     );
 }

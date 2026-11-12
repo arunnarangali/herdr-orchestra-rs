@@ -68,7 +68,9 @@ impl Tunables {
 
     /// Read tunables from any variable lookup, so tests (and callers with their own
     /// precedence rules) can pass values in.
-    pub fn from_lookup(mut get: impl FnMut(&str) -> Option<String>) -> std::result::Result<Self, TunablesError> {
+    pub fn from_lookup(
+        mut get: impl FnMut(&str) -> Option<String>,
+    ) -> std::result::Result<Self, TunablesError> {
         let check_timeout_min = int(&mut get, "ORCH_CHECK_TIMEOUT_MIN", 30)?;
         let lead_wait_min = int(&mut get, "ORCH_LEAD_WAIT_MIN", 15)?;
         let lead_idle_max_min = int(&mut get, "ORCH_LEAD_IDLE_MAX_MIN", 720)?;
@@ -109,8 +111,14 @@ impl Tunables {
 
 /// `ORCH_MAX_TASKS` is the only tunable that treats an empty value as its default
 /// (Python: `int(os.environ.get("ORCH_MAX_TASKS", "0") or 0)`).
-fn int(get: &mut impl FnMut(&str) -> Option<String>, name: &str, default: i64) -> std::result::Result<i64, TunablesError> {
-    let Some(raw) = get(name) else { return Ok(default) };
+fn int(
+    get: &mut impl FnMut(&str) -> Option<String>,
+    name: &str,
+    default: i64,
+) -> std::result::Result<i64, TunablesError> {
+    let Some(raw) = get(name) else {
+        return Ok(default);
+    };
     let raw = raw.trim();
     if raw.is_empty() && name == "ORCH_MAX_TASKS" {
         return Ok(0);
@@ -121,8 +129,14 @@ fn int(get: &mut impl FnMut(&str) -> Option<String>, name: &str, default: i64) -
     })
 }
 
-fn float(get: &mut impl FnMut(&str) -> Option<String>, name: &str, default: f64) -> std::result::Result<f64, TunablesError> {
-    let Some(raw) = get(name) else { return Ok(default) };
+fn float(
+    get: &mut impl FnMut(&str) -> Option<String>,
+    name: &str,
+    default: f64,
+) -> std::result::Result<f64, TunablesError> {
+    let Some(raw) = get(name) else {
+        return Ok(default);
+    };
     let raw = raw.trim();
     raw.parse().map_err(|_| TunablesError {
         name: name.to_string(),
@@ -141,8 +155,10 @@ mod tests {
     use std::sync::Mutex;
 
     fn from_map(map: &[(&str, &str)]) -> std::result::Result<Tunables, TunablesError> {
-        let m: HashMap<String, String> =
-            map.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let m: HashMap<String, String> = map
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         Tunables::from_lookup(|name| m.get(name).cloned())
     }
 
@@ -260,8 +276,16 @@ mod tests {
 
     #[test]
     fn other_no_autostart_values_are_off() {
-        assert!(!from_map(&[("ORCH_NO_AUTOSTART", "yes")]).unwrap().no_autostart);
-        assert!(!from_map(&[("ORCH_NO_AUTOSTART", "0")]).unwrap().no_autostart);
+        assert!(
+            !from_map(&[("ORCH_NO_AUTOSTART", "yes")])
+                .unwrap()
+                .no_autostart
+        );
+        assert!(
+            !from_map(&[("ORCH_NO_AUTOSTART", "0")])
+                .unwrap()
+                .no_autostart
+        );
     }
 
     #[test]

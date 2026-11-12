@@ -10,12 +10,21 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The shipped catalog, embedded in the binary (v4.10.1, unchanged).
-pub const DEFAULT_TOML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/models.default.toml"));
+pub const DEFAULT_TOML: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/models.default.toml"));
 
 /// Tier names, weakest first.
 pub const TIERS: [&str; 3] = ["small", "medium", "high"];
 /// The seven 1–5 ratings a model carries.
-pub const RATINGS: [&str; 7] = ["reasoning", "coding", "architecture", "instructions", "tools", "planning", "speed"];
+pub const RATINGS: [&str; 7] = [
+    "reasoning",
+    "coding",
+    "architecture",
+    "instructions",
+    "tools",
+    "planning",
+    "speed",
+];
 
 #[derive(Debug, thiserror::Error)]
 #[error("model catalog: {file}: {problem}")]
@@ -120,7 +129,10 @@ pub struct Model {
 
 impl From<toml::de::Error> for ModelsError {
     fn from(e: toml::de::Error) -> Self {
-        ModelsError { file: "models.default.toml".to_string(), problem: e.to_string() }
+        ModelsError {
+            file: "models.default.toml".to_string(),
+            problem: e.to_string(),
+        }
     }
 }
 
@@ -138,7 +150,10 @@ pub struct Catalog {
 pub fn user_models_file() -> PathBuf {
     match std::env::var_os("ORCH_MODELS_FILE") {
         Some(v) if !v.is_empty() => PathBuf::from(v),
-        _ => home_dir().join(".config").join("herdr-orchestra").join("models.toml"),
+        _ => home_dir()
+            .join(".config")
+            .join("herdr-orchestra")
+            .join("models.toml"),
     }
 }
 
@@ -168,7 +183,9 @@ pub fn catalog(default_toml: &str, user_file: &Path) -> std::result::Result<Cata
                     .get(sec)
                     .and_then(|v| v.as_table().cloned())
                     .unwrap_or_default();
-                let dst = root.entry(sec.to_string()).or_insert(toml::Value::Table(dst));
+                let dst = root
+                    .entry(sec.to_string())
+                    .or_insert(toml::Value::Table(dst));
                 if let Some(t) = dst.as_table_mut() {
                     for (k, v) in vals {
                         t.insert(k.clone(), v.clone());
@@ -181,12 +198,17 @@ pub fn catalog(default_toml: &str, user_file: &Path) -> std::result::Result<Cata
                 .get("models")
                 .and_then(|v| v.as_table().cloned())
                 .unwrap_or_default();
-            let dst = root.entry("models".to_string()).or_insert(toml::Value::Table(dst));
+            let dst = root
+                .entry("models".to_string())
+                .or_insert(toml::Value::Table(dst));
             if let Some(t) = dst.as_table_mut() {
                 for (mid, vals) in models {
                     if let Some(vals) = vals.as_table() {
                         let id = mid.to_lowercase();
-                        let mut merged = t.get(&id).and_then(|v| v.as_table().cloned()).unwrap_or_default();
+                        let mut merged = t
+                            .get(&id)
+                            .and_then(|v| v.as_table().cloned())
+                            .unwrap_or_default();
                         for (k, v) in vals {
                             merged.insert(k.clone(), v.clone());
                         }
@@ -196,8 +218,12 @@ pub fn catalog(default_toml: &str, user_file: &Path) -> std::result::Result<Cata
             }
         }
     }
-    let policy: Policy = take_table(&mut root, "policy").transpose()?.unwrap_or_default();
-    let tiers: Tiers = take_table(&mut root, "tiers").transpose()?.unwrap_or_default();
+    let policy: Policy = take_table(&mut root, "policy")
+        .transpose()?
+        .unwrap_or_default();
+    let tiers: Tiers = take_table(&mut root, "tiers")
+        .transpose()?
+        .unwrap_or_default();
     let mut models = BTreeMap::new();
     if let Some(table) = root.get("models").and_then(|v| v.as_table()) {
         for (mid, vals) in table {
@@ -220,7 +246,12 @@ pub fn catalog(default_toml: &str, user_file: &Path) -> std::result::Result<Cata
         file: file_name(user_file),
         problem: format!("deny patterns: {e}"),
     })?;
-    Ok(Catalog { policy, tiers, models, deny_set })
+    Ok(Catalog {
+        policy,
+        tiers,
+        models,
+        deny_set,
+    })
 }
 
 fn take_table<T: serde::de::DeserializeOwned>(
@@ -276,7 +307,9 @@ impl Catalog {
                 let Some(tier) = m.tier.as_deref().map(str::to_lowercase) else {
                     return false;
                 };
-                let Some(t) = self.tiers.get(&tier) else { return false };
+                let Some(t) = self.tiers.get(&tier) else {
+                    return false;
+                };
                 m.reasoning.is_some_and(|r| r < t.reasoning)
             })
             .map(|(id, _)| id.clone())
@@ -285,12 +318,18 @@ impl Catalog {
 }
 
 fn tier_str(tier: &str) -> &'static str {
-    TIERS.iter().find(|t| **t == tier).expect("tier was validated")
+    TIERS
+        .iter()
+        .find(|t| **t == tier)
+        .expect("tier was validated")
 }
 
 fn parse(text: &str, file: &str) -> std::result::Result<toml::Table, ModelsError> {
     text.parse::<toml::Table>()
-        .map_err(|e: toml::de::Error| ModelsError { file: file.to_string(), problem: e.to_string() })
+        .map_err(|e: toml::de::Error| ModelsError {
+            file: file.to_string(),
+            problem: e.to_string(),
+        })
 }
 
 fn read(path: &Path) -> std::result::Result<String, ModelsError> {
@@ -355,7 +394,10 @@ mod tests {
         assert_eq!(m.context_k, Some(200));
         assert_eq!(m.open_weights, Some(false));
         assert!(m.evidence.as_deref().unwrap().contains("2026-11"));
-        assert_eq!(cat.models.get("qwen3.6-35b-a3b").unwrap().open_weights, Some(true));
+        assert_eq!(
+            cat.models.get("qwen3.6-35b-a3b").unwrap().open_weights,
+            Some(true)
+        );
     }
 
     #[test]
@@ -371,9 +413,15 @@ mod tests {
     #[test]
     fn deny_patterns_match_case_insensitive_globs() {
         let cat = catalog(DEFAULT_TOML, &none()).unwrap();
-        assert_eq!(cat.denied("claude-fable-5-2").map(String::as_str), Some("*fable*"));
+        assert_eq!(
+            cat.denied("claude-fable-5-2").map(String::as_str),
+            Some("*fable*")
+        );
         assert_eq!(cat.denied("BEST").map(String::as_str), Some("best"));
-        assert_eq!(cat.denied("gemini-astra-9").map(String::as_str), Some("*astra*"));
+        assert_eq!(
+            cat.denied("gemini-astra-9").map(String::as_str),
+            Some("*astra*")
+        );
         assert_eq!(cat.denied("sonnet"), None);
         assert_eq!(cat.denied("opus"), None);
         assert_eq!(cat.denied(""), None);
@@ -401,7 +449,12 @@ mod tests {
         let cat = catalog(DEFAULT_TOML, &p).unwrap();
         assert_eq!(cat.invalid_models(), ["wannabe-high"]);
         assert_eq!(cat.model_tier("wannabe-high"), Some("medium"));
-        assert!(catalog(DEFAULT_TOML, &none()).unwrap().invalid_models().is_empty());
+        assert!(
+            catalog(DEFAULT_TOML, &none())
+                .unwrap()
+                .invalid_models()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -424,7 +477,10 @@ mod tests {
             "[models.my-model]\nkinds = [\"acme\"]\ntier = \"small\"\nreasoning = 2\n",
         );
         let cat = catalog(DEFAULT_TOML, &p).unwrap();
-        assert_eq!(cat.models.get("my-model").unwrap().tier.as_deref(), Some("small"));
+        assert_eq!(
+            cat.models.get("my-model").unwrap().tier.as_deref(),
+            Some("small")
+        );
         assert_eq!(cat.models.len(), 10);
     }
 
@@ -438,7 +494,10 @@ mod tests {
         let cat = catalog(DEFAULT_TOML, &p).unwrap();
         assert_eq!(cat.policy.deny, ["*secret*"]);
         assert_eq!(cat.denied("claude-fable-5-2"), None);
-        assert_eq!(cat.denied("my-secret-thing").map(String::as_str), Some("*secret*"));
+        assert_eq!(
+            cat.denied("my-secret-thing").map(String::as_str),
+            Some("*secret*")
+        );
         assert_eq!(cat.policy.deny_why.as_deref(), Some("our own rule"));
     }
 
@@ -491,7 +550,10 @@ mod tests {
     fn load_uses_the_embedded_defaults() {
         let cat = load(Some(&none())).unwrap();
         assert_eq!(cat.model_tier("sonnet"), Some("medium"));
-        assert_eq!(cat.denied("claude-fable-5-2").map(String::as_str), Some("*fable*"));
+        assert_eq!(
+            cat.denied("claude-fable-5-2").map(String::as_str),
+            Some("*fable*")
+        );
     }
 
     #[test]
@@ -499,7 +561,10 @@ mod tests {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _g = LOCK.lock().unwrap();
         unsafe { std::env::set_var("ORCH_MODELS_FILE", "/tmp/from-env/models.toml") };
-        assert_eq!(user_models_file(), PathBuf::from("/tmp/from-env/models.toml"));
+        assert_eq!(
+            user_models_file(),
+            PathBuf::from("/tmp/from-env/models.toml")
+        );
         unsafe { std::env::remove_var("ORCH_MODELS_FILE") };
         assert!(user_models_file().ends_with("herdr-orchestra/models.toml"));
         unsafe { std::env::set_var("ORCH_MODELS_FILE", "") };
