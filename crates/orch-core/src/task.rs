@@ -103,8 +103,8 @@ impl State {
             Committed => &[Merged, Conflict, NeedsFix, Held, Pending, Paused, Failed],
             Held => &[Committed, Pending, Paused, Failed],
             Conflict => &[Coding, Pending, Paused, Failed],
-            Paused => &[Coding, Skipped, Pending, Failed],
-            Failed => &[Skipped, Pending, Paused],
+            Paused => &[Coding, Skipped, Pending, Paused, Failed],
+            Failed => &[Skipped, Pending, Paused, Failed],
             Merged => &[],
         }
     }
@@ -269,8 +269,8 @@ mod tests {
         ),
         ("held", "committed pending paused failed"),
         ("conflict", "coding pending paused failed"),
-        ("paused", "coding skipped pending failed"),
-        ("failed", "skipped pending paused"),
+        ("paused", "coding skipped pending paused failed"),
+        ("failed", "skipped pending paused failed"),
         ("merged", ""),
     ];
 
