@@ -974,6 +974,81 @@ mod tests {
         assert_eq!(s.delivery(id).unwrap().task, "M1");
     }
 
+    // §16: an existing run's rows (task, transition history, event) survive the upgrade unchanged,
+    // and the new delivery tables are usable against them.
+    #[test]
+    fn schema1_database_with_run_data_keeps_its_rows_on_upgrade() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        let dump = |conn: &Connection| -> Vec<String> {
+            let mut out = Vec::new();
+            for sql in [
+                "SELECT id||'|'||title||'|'||status||'|'||reason||'|'||ifnull(worker,'-')||'|'||ifnull(last_worker,'-')||'|'||ifnull(model,'-')||'|'||attempt||'|'||fix_rounds||'|'||review_rounds||'|'||conflict_rounds||'|'||lost||'|'||escalated FROM tasks ORDER BY id",
+                "SELECT task_id||'|'||dep_id FROM task_deps ORDER BY task_id, dep_id",
+                "SELECT id||'|'||task_id||'|'||ts||'|'||from_state||'|'||to_state||'|'||why||'|'||ifnull(worker,'-')||'|'||ifnull(model,'-')||'|'||attempt||'|'||forced FROM history ORDER BY id",
+                "SELECT id||'|'||ts||'|'||task_id||'|'||from_state||'|'||to_state||'|'||why||'|'||ifnull(agent,'-')||'|'||ifnull(model,'-')||'|'||attempt||'|'||forced||'|'||lead_blocking FROM events ORDER BY id",
+            ] {
+                let mut stmt = conn.prepare(sql).unwrap();
+                out.extend(
+                    stmt.query_map([], |r| r.get::<_, String>(0))
+                        .unwrap()
+                        .map(Result::unwrap),
+                );
+                out.push("--".into());
+            }
+            out
+        };
+        let before = {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0].1).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute_batch(
+                "INSERT INTO tasks (id, title, status, reason, worker, last_worker, model, attempt, fix_rounds, review_rounds, conflict_rounds, lost, escalated)
+                   VALUES ('M1', 'first', 'merged', '', NULL, 'claude-1', 'opus', 2, 1, 1, 0, 1, 1),
+                          ('M2', 'second', 'coding', 'working', 'codex-2', 'codex-2', 'sonnet', 1, 0, 0, 0, 0, 0);
+                 INSERT INTO task_deps (task_id, dep_id) VALUES ('M2', 'M1');
+                 INSERT INTO history (task_id, ts, from_state, to_state, why, worker, model, attempt, forced)
+                   VALUES ('M1', 1000, 'pending', 'coding', 'dispatched', 'claude-1', 'opus', 1, 0),
+                          ('M1', 1100, 'coding', 'merged', 'accepted', 'claude-1', 'opus', 2, 1),
+                          ('M2', 1200, 'pending', 'coding', 'dispatched', 'codex-2', 'sonnet', 1, 0);
+                 INSERT INTO events (ts, task_id, from_state, to_state, why, agent, model, attempt, forced, lead_blocking)
+                   VALUES (1100, 'M1', 'coding', 'merged', 'accepted', 'claude-1', 'opus', 2, 1, 1);",
+            )
+            .unwrap();
+            let d = dump(&conn);
+            assert!(d.len() > 8, "fixture should hold rows: {d:?}");
+            d
+        };
+
+        let mut s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        assert_eq!(dump(&s.conn), before, "upgrade changed existing rows");
+
+        // The same rows read back through the store API.
+        let m1 = s.get_task("M1").unwrap();
+        assert_eq!((m1.status, m1.attempt, m1.escalated), (Merged, 2, true));
+        assert_eq!(s.get_task("M2").unwrap().deps, ["M1"]);
+        let h = s.history("M1").unwrap();
+        assert_eq!(h.len(), 2);
+        assert_eq!((h[0].from, h[0].to, h[1].to), (Pending, Coding, Merged));
+        let ev = s.events_after(0).unwrap();
+        assert_eq!(ev.len(), 1);
+        assert_eq!(
+            (ev[0].task.as_str(), ev[0].to, ev[0].lead_blocking),
+            ("M1", Merged, true)
+        );
+
+        // The new delivery tables work against the pre-existing task.
+        let id = s
+            .record_delivery("codex-2", "M2", 1, DeliveryKind::Coder, "go")
+            .unwrap();
+        assert_eq!(s.delivery(id).unwrap().task, "M2");
+        assert_eq!(s.unconfirmed_deliveries().unwrap().len(), 1);
+        s.confirm_delivery(id).unwrap();
+        assert!(s.unconfirmed_deliveries().unwrap().is_empty());
+        assert_eq!(s.delivery_fails("codex-2").unwrap(), 0);
+    }
+
     #[test]
     fn delivery_roundtrip_keeps_every_field() {
         let (_d, mut s) = store();
