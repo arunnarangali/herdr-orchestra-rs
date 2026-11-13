@@ -123,15 +123,24 @@ pub struct TaskContract {
     pub result_format: ResultFormat,
 }
 
-/// What [`build`] needs: the milestone from the parsed plan, the run values the state
-/// carries (scope, check command, counters, dependencies) and the field values Python
-/// derives from the plan.
+/// What [`build`] needs: the milestone's plan section (Python reads it back out of
+/// `plan.md`) plus the values the synced run stored (Python reads them from `state.json`).
 pub struct ContractInput<'a> {
     pub task_id: &'a str,
-    /// The milestone from the plan (Python reads it back out of `plan.md`).
+    /// The milestone from the plan: goal, why, acceptance criteria, interfaces,
+    /// constraints, out of scope.
     pub milestone: &'a Milestone,
+    /// The title the synced run stored (Python `st["tasks"][tid]["title"]`).
+    pub title: &'a str,
+    /// The Likely files the synced run stored, already Python's list (sorted, backticks
+    /// stripped; Python `t.get("files")`, used as-is).
+    pub files_allowed: Vec<String>,
     /// The run scope (plan header `Scope:`, default `warn`).
     pub scope: &'a str,
+    /// The tier the synced run stored (Python `t.get("tier")`).
+    pub tier: Option<String>,
+    /// The needs the synced run stored (Python `t.get("needs") or []`).
+    pub needs: Vec<String>,
     /// The check command (plan header `Check command:`).
     pub check: &'a str,
     /// The task's started attempts so far (the store's `tasks` table); the contract names
@@ -259,20 +268,15 @@ pub fn build(input: ContractInput<'_>) -> TaskContract {
     TaskContract {
         schema: 1,
         task_id: input.task_id.to_string(),
-        title: m.title.clone(),
+        title: input.title.to_string(),
         kind: "task",
         goal: field_text(&m.goal),
         why: field_text(&m.why),
         acceptance_criteria: acceptance_criteria(m),
-        files_allowed: {
-            let mut files = m.likely_file_list();
-            files.sort();
-            files.dedup();
-            files
-        },
+        files_allowed: input.files_allowed,
         scope: input.scope.to_string(),
-        tier: tier(m.tier.as_deref()),
-        needs: needs(m.needs.as_deref()),
+        tier: input.tier,
+        needs: input.needs,
         interfaces: items(m.interfaces.lines.iter().map(String::as_str)),
         constraints: items(m.constraints.lines.iter().map(String::as_str)),
         out_of_scope: items(m.out_of_scope.lines.iter().map(String::as_str)),
@@ -295,25 +299,6 @@ pub fn build(input: ContractInput<'_>) -> TaskContract {
             }),
         result_format: result_format(),
     }
-}
-
-/// The run's `tier` value for a milestone (Python's sync normalisation): the first word,
-/// lower-cased; `any` or nothing is no tier.
-fn tier(raw: Option<&str>) -> Option<String> {
-    let first = raw?
-        .split_whitespace()
-        .next()?
-        .to_lowercase();
-    (first != "any").then_some(first)
-}
-
-/// The run's `needs` for a milestone: lower-cased, split on commas and spaces.
-fn needs(raw: Option<&str>) -> Vec<String> {
-    let raw = raw.unwrap_or_default().to_lowercase();
-    raw.split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|n| !n.is_empty())
-        .map(String::from)
-        .collect()
 }
 
 #[cfg(test)]
@@ -400,7 +385,13 @@ Notes from user:
         let c = build(ContractInput {
             task_id: "M1",
             milestone: &m,
+            title: "Foundation",
+            // The run stored Python's list: `f.strip().strip("`")` keeps `src/b/`'s slash
+            // (the production archive shows trailing slashes).
+            files_allowed: vec!["src/a.rs".into(), "src/b/".into()],
             scope: "warn",
+            tier: Some("small".into()),
+            needs: vec!["coding".into()],
             check: "cargo test",
             attempt: 1,
             lost_attempts: 0,
@@ -419,8 +410,6 @@ Notes from user:
                 Criterion { id: "AC3".into(), text: "the second thing is covered".into() },
             ]
         );
-        // `src/b/` keeps its slash: Python's sync stores `f.strip().strip("`")`, and the
-        // production archive shows trailing slashes (`crates/orch-herdr/src/bin/`).
         assert_eq!(c.files_allowed, ["src/a.rs", "src/b/"]);
         assert_eq!(c.scope, "warn");
         assert_eq!(c.tier.as_deref(), Some("small"));
@@ -477,7 +466,11 @@ Notes from user:
         let c = build(ContractInput {
             task_id: "M1",
             milestone: &p.milestones[0],
+            title: "Bare",
+            files_allowed: vec![],
             scope: "warn",
+            tier: None,
+            needs: vec![],
             check: "",
             attempt: 0,
             lost_attempts: 0,
@@ -494,34 +487,28 @@ Notes from user:
     }
 
     #[test]
-    fn tier_and_needs_are_normalised_like_sync() {
-        let mut m = m1();
-        m.tier = Some("MEDIUM".into());
-        m.needs = Some("Coding,  tool-use".into());
+    fn the_run_stored_title_files_tier_and_needs_are_used_as_is() {
+        let m = m1();
         let c = build(ContractInput {
             task_id: "M1",
             milestone: &m,
+            title: "Renamed",
+            files_allowed: vec!["z.rs".into(), "a.rs".into()],
             scope: "warn",
-            check: "",
+            tier: Some("MEDIUM".into()),
+            needs: vec!["coding".into(), "tool-use".into()],
+            check: "cargo test",
             attempt: 0,
             lost_attempts: 0,
             previous_work: None,
             deps: vec![],
         });
-        assert_eq!(c.tier.as_deref(), Some("medium"));
+        // Python's contract uses the stored values verbatim: the title, the stored
+        // file order (sync sorted it) and the stored tier/needs (sync normalised them).
+        assert_eq!(c.title, "Renamed");
+        assert_eq!(c.files_allowed, ["z.rs", "a.rs"]);
+        assert_eq!(c.tier.as_deref(), Some("MEDIUM"));
         assert_eq!(c.needs, ["coding", "tool-use"]);
-        m.tier = Some("any".into());
-        let c = build(ContractInput {
-            task_id: "M1",
-            milestone: &m,
-            scope: "warn",
-            check: "",
-            attempt: 0,
-            lost_attempts: 0,
-            previous_work: None,
-            deps: vec![],
-        });
-        assert_eq!(c.tier, None);
     }
 
     #[test]
@@ -530,7 +517,11 @@ Notes from user:
         let c = build(ContractInput {
             task_id: "M2",
             milestone: &m,
+            title: "Second",
+            files_allowed: vec!["src/c.rs".into()],
             scope: "warn",
+            tier: Some("medium".into()),
+            needs: vec!["coding".into(), "tool-use".into()],
             check: "cargo test",
             attempt: 2,
             lost_attempts: 1,
@@ -555,7 +546,11 @@ Notes from user:
         let c = build(ContractInput {
             task_id: "M1",
             milestone: &m,
+            title: "Foundation",
+            files_allowed: vec![],
             scope: "warn",
+            tier: None,
+            needs: vec![],
             check: "cargo test",
             attempt: 0,
             lost_attempts: 0,

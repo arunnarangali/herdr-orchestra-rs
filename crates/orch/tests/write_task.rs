@@ -1,10 +1,14 @@
 //! `orch write-task`: the coder contract, compared byte-for-byte with the output of real
 //! Python v4.10.1 (`expected_*_task.{md,json}` in `write_task_fixtures/`, generated with
-//! `/tmp/opencode/golden/gen.py`). The store rows mirror what Python's `state.json` held
-//! when the goldens were made.
+//! `/tmp/opencode/golden/gen.py`). The store mirrors what Python's `state.json` held when
+//! the goldens were made: a synced run (M2's run storage) with hand-set counters, like the
+//! generator's state.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+use orch_core::run_store::{PlanTask, RunAgent, RunSettings, SyncInput};
+use orch_core::store::Store;
 
 /// The fixture text (plan.md, report-1.md, the expected files).
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/write_task_fixtures");
@@ -37,6 +41,21 @@ fn orch_in(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+/// The orch binary with an isolated HOME and herdr, as `orch sync` tests run it.
+fn orch_sandboxed(repo: &Path, home: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_orch"))
+        .args(args)
+        .current_dir(repo)
+        .env("HOME", home)
+        .env("HERDR", home.join("no-herdr"))
+        .env_remove("ORCH_AGENTS_FILE")
+        .env_remove("ORCH_MODELS_FILE")
+        .env_remove("ORCH_MAX_TASKS")
+        .env_remove("ORCH_LOG")
+        .output()
+        .unwrap()
+}
+
 fn err_of(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).to_string()
 }
@@ -45,14 +64,15 @@ fn out_of(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).to_string()
 }
 
-/// A repo like the golden generator's: plan.md, M1's report, the state rows.
-/// Returns the repo (kept alive by the caller) and its root path.
+/// A repo like the golden generator's: plan.md, M1's report, and a synced run whose task
+/// rows mirror the generator's `state.json` (hand-set files, tier, needs, counters).
 struct Repo {
     _dir: tempfile::TempDir,
     root: PathBuf,
 }
 
-fn repo(store_rows: bool) -> Repo {
+/// Store the run the way `orch sync` does, with the generator's values.
+fn repo() -> Repo {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
     std::fs::create_dir_all(root.join(".orchestrate")).unwrap();
@@ -61,54 +81,90 @@ fn repo(store_rows: bool) -> Repo {
     std::fs::write(root.join(".orch-task/M1/report-1.md"), fixture("report-1.md")).unwrap();
     git(&root, &["init", "-q"]);
     git(&root, &["commit", "-q", "--allow-empty", "-m", "init"]);
-    if store_rows {
-        let mut store = orch_core::store::Store::open(&root.join(".orchestrate/state.db")).unwrap();
-        store
-            .add_task(&orch_core::store::NewTask {
-                id: "M1".into(),
-                title: "Foundation".into(),
-                deps: vec![],
-            })
-            .unwrap();
-        store
-            .add_task(&orch_core::store::NewTask {
-                id: "M2".into(),
-                title: "Second".into(),
-                deps: vec!["M1".into()],
-            })
-            .unwrap();
-        // Python's state: M1 attempt 1, M2 attempt 2 + lost 1, both last coded by claude-1.
-        store.bump("M1", orch_core::store::Counter::Attempt).unwrap();
-        store.bump("M2", orch_core::store::Counter::Attempt).unwrap();
-        store.bump("M2", orch_core::store::Counter::Attempt).unwrap();
-        store.bump("M2", orch_core::store::Counter::Lost).unwrap();
-        store.assign_worker("M1", Some("claude-1"), None).unwrap();
-        store.assign_worker("M2", Some("claude-1"), None).unwrap();
-    }
+    sync_repo(&root);
     Repo { _dir: dir, root }
 }
 
-// AC8: the JSON for a sample plan is Python's, byte for byte.
+/// Apply a sync like Python's golden state held: two milestones, preset files.
+fn sync_repo(root: &Path) {
+    let mut store = Store::open(&root.join(".orchestrate/state.db")).unwrap();
+    store
+        .apply_sync(&SyncInput {
+            settings: RunSettings {
+                branch: "feature/sample".into(),
+                base: None,
+                title: "Sample Feature".into(),
+                commits: String::new(),
+                isolation: "shared".into(),
+                max_parallel: 1,
+                setup_inputs: vec![],
+                scope: "warn".into(),
+                risk_hold: false,
+                budget_s: None,
+                check_command: "cargo test".into(),
+                setup_command: String::new(),
+                lead_mode: String::new(),
+                reviewer: None,
+            },
+            agents: Vec::<RunAgent>::new(),
+            tasks: vec![
+                PlanTask {
+                    id: "M1".into(),
+                    title: "Foundation".into(),
+                    deps: vec![],
+                    enabled: true,
+                    open_questions: false,
+                    tier: Some("small".into()),
+                    needs: vec!["coding".into()],
+                    model_why: "mechanical work on a known pattern".into(),
+                    prefer: "any".into(),
+                    review: false,
+                    // The generator's hand-set state: "src/b" without the slash.
+                    files: vec!["src/a.rs".into(), "src/b".into()],
+                    parallel: false,
+                },
+                PlanTask {
+                    id: "M2".into(),
+                    title: "Second".into(),
+                    deps: vec!["M1".into()],
+                    enabled: true,
+                    open_questions: false,
+                    tier: Some("medium".into()),
+                    needs: vec!["coding".into(), "tool-use".into()],
+                    model_why: "normal coding with tool use".into(),
+                    prefer: "any".into(),
+                    review: true,
+                    files: vec!["src/c.rs".into()],
+                    parallel: false,
+                },
+            ],
+        })
+        .unwrap();
+    // Python's state: M1 attempt 1, M2 attempt 2 + lost 1, both last coded by claude-1.
+    store.bump("M1", orch_core::store::Counter::Attempt).unwrap();
+    store.bump("M2", orch_core::store::Counter::Attempt).unwrap();
+    store.bump("M2", orch_core::store::Counter::Attempt).unwrap();
+    store.bump("M2", orch_core::store::Counter::Lost).unwrap();
+    store.assign_worker("M1", Some("claude-1"), None).unwrap();
+    store.assign_worker("M2", Some("claude-1"), None).unwrap();
+}
+
+// AC1/AC8: the JSON for a sample plan is Python's, byte for byte.
 #[test]
 fn the_task_json_is_pythons_byte_for_byte() {
-    let r = repo(true);
+    let r = repo();
     let o = orch_in(&r.root, &["write-task", "M1"]);
     assert_eq!(o.status.code(), Some(0), "{}", err_of(&o));
 
     let ours = std::fs::read_to_string(r.root.join(".orch-task/M1/task.json")).unwrap();
     let theirs = fixture("expected_M1_task.json");
-    // One documented difference: Python's `files_allowed` comes from its state's tasks
-    // table, which `orch sync` fills from the same plan text — keeping `src/b/`'s slash
-    // (the production archive shows trailing slashes). The golden's state was preset by
-    // hand ("src/b"), which no live parse of this plan can produce, so the compare
-    // normalizes the slash away; everything else must be byte-exact.
-    assert_eq!(ours.replace("src/b/", "src/b"), theirs, "{ours}");
+    assert_eq!(ours, theirs, "{ours}");
 }
 
 // AC9: the task.md sections, byte for byte.
 #[test]
 fn the_task_md_is_pythons_byte_for_byte() {
-    let r = repo(true);
+    let r = repo();
     let o = orch_in(&r.root, &["write-task", "M1"]);
     assert_eq!(o.status.code(), Some(0), "{}", err_of(&o));
 
@@ -119,7 +175,7 @@ fn the_task_md_is_pythons_byte_for_byte() {
 // AC9: `WROTE <path>` for both files, task.md first.
 #[test]
 fn wrote_lines_name_both_files() {
-    let r = repo(true);
+    let r = repo();
     let o = orch_in(&r.root, &["write-task", "M1"]);
     assert_eq!(o.status.code(), Some(0), "{}", err_of(&o));
     assert_eq!(
@@ -135,7 +191,7 @@ fn wrote_lines_name_both_files() {
 // The full M2 shape: global instructions, the dependency's report, AC ids, earlier work.
 #[test]
 fn a_milestone_with_a_dependency_and_parked_work_matches_python() {
-    let r = repo(true);
+    let r = repo();
     // Python's golden repo had Mn's parked work on its hidden ref, no merged dep commit.
     git(&r.root, &["update-ref", "refs/orch/feature-sample/M2", "HEAD"]);
     let o = orch_in(&r.root, &["write-task", "M2"]);
@@ -152,7 +208,7 @@ fn a_milestone_with_a_dependency_and_parked_work_matches_python() {
 // AC5's landed-dependency commit: `git log --grep="^Milestone: M1$" <branch>`.
 #[test]
 fn a_merged_dependency_commit_lands_in_depends_on() {
-    let r = repo(true);
+    let r = repo();
     git(&r.root, &["update-ref", "refs/orch/feature-sample/M2", "HEAD"]);
     git(&r.root, &["checkout", "-q", "-b", "feature/sample"]);
     git(&r.root, &["commit", "-q", "--allow-empty", "-m", "feat: m1 lands", "-m", "Milestone: M1"]);
@@ -173,7 +229,7 @@ fn a_merged_dependency_commit_lands_in_depends_on() {
 // The stored attempt (+1), lost attempts and the last worker reach the contract.
 #[test]
 fn the_store_counters_reach_the_contract() {
-    let r = repo(true);
+    let r = repo();
     git(&r.root, &["update-ref", "refs/orch/feature-sample/M2", "HEAD"]);
     let o = orch_in(&r.root, &["write-task", "M2"]);
     assert_eq!(o.status.code(), Some(0), "{}", err_of(&o));
@@ -183,10 +239,80 @@ fn the_store_counters_reach_the_contract() {
     assert!(ours.contains(r#""by": "claude-1""#), "{ours}");
 }
 
+// AC1: Python's `load()` first — without a synced run there is no contract, with the same
+// message and exit code as `orch status` / `orch set`.
+#[test]
+fn write_task_without_a_synced_run_fails_like_status_and_set() {
+    // No state.db at all: sync never ran (or failed before storing anything).
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join(".orchestrate")).unwrap();
+    std::fs::write(root.join(".orchestrate/plan.md"), fixture("plan.md")).unwrap();
+    git(&root, &["init", "-q"]);
+    git(&root, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    let o = orch_in(&root, &["write-task", "M1"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(o.stdout.is_empty());
+    assert!(!root.join(".orch-task/M1").exists());
+    assert_eq!(
+        err_of(&o),
+        "ERROR: no run in .orchestrate/state.db — run `orch sync` after writing plan.md\n"
+    );
+
+    // A state.db without a run row: a sync that died before storing anything.
+    drop(Store::open(&root.join(".orchestrate/state.db")).unwrap());
+    let o = orch_in(&root, &["write-task", "M1"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(
+        err_of(&o),
+        "ERROR: no run in .orchestrate/state.db — run `orch sync` after writing plan.md\n"
+    );
+}
+
+// AC1: after a failed sync of a plan with a dependency cycle, write-task still refuses.
+#[test]
+fn after_a_failed_sync_of_a_cyclic_plan_write_task_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    let (root, home) = (base.join("repo"), base.join("home"));
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    git(&root, &["init", "-q"]);
+    git(&root, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    std::fs::create_dir_all(root.join(".orchestrate")).unwrap();
+    let cyclic = fixture("plan.md").replace(
+        "Depends on: none\nWhy separate: the base others build on",
+        "Depends on: M2 (loop)\nWhy separate: the base others build on",
+    );
+    std::fs::write(root.join(".orchestrate/plan.md"), cyclic).unwrap();
+
+    let o = orch_sandboxed(&root, &home, &["sync"]);
+    assert_eq!(o.status.code(), Some(2), "{}{}", out_of(&o), err_of(&o));
+    // `orch sync` reports its validation errors on stdout.
+    assert!(
+        out_of(&o).contains("ERROR: dependency cycle: M1 -> M2 -> M1"),
+        "{}{}",
+        out_of(&o),
+        err_of(&o)
+    );
+    // `orch sync` creates the state.db before it validates, so a failed sync leaves a db
+    // with no run in it — the state write-task must refuse.
+    assert!(root.join(".orchestrate/state.db").exists());
+
+    let o = orch_sandboxed(&root, &home, &["write-task", "M1"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(o.stdout.is_empty());
+    assert!(!root.join(".orch-task/M1").exists());
+    assert_eq!(
+        err_of(&o),
+        "ERROR: no run in .orchestrate/state.db — run `orch sync` after writing plan.md\n"
+    );
+}
+
 // AC10: Python's message and exit code for an id the state does not know.
 #[test]
 fn an_unknown_milestone_fails_like_python() {
-    let r = repo(true);
+    let r = repo();
     let o = orch_in(&r.root, &["write-task", "M9"]);
     assert_eq!(o.status.code(), Some(2));
     assert!(o.stdout.is_empty());
@@ -196,7 +322,7 @@ fn an_unknown_milestone_fails_like_python() {
 // A task the state knows but the plan lost reads Python's other message.
 #[test]
 fn a_state_task_missing_from_the_plan_fails_like_python() {
-    let r = repo(true);
+    let r = repo();
     let mut store = orch_core::store::Store::open(&r.root.join(".orchestrate/state.db")).unwrap();
     store
         .add_task(&orch_core::store::NewTask {
@@ -210,27 +336,17 @@ fn a_state_task_missing_from_the_plan_fails_like_python() {
     assert_eq!(err_of(&o), "ERROR: M9 not found in plan.md\n");
 }
 
-// Without a store, Python's known list is what the plan has.
-#[test]
-fn without_a_store_the_plan_lists_the_known_tasks() {
-    let r = repo(false);
-    let o = orch_in(&r.root, &["write-task", "M7"]);
-    assert_eq!(o.status.code(), Some(2));
-    assert_eq!(err_of(&o), "ERROR: unknown task 'M7' — known: M1, M2\n");
-}
-
-// AC10: no arguments, or a repo without a plan.
+// AC10: no arguments, or a repo whose plan vanished after the sync.
 #[test]
 fn usage_and_missing_plan_fail_like_python() {
-    let r = repo(true);
+    let r = repo();
     let o = orch_in(&r.root, &["write-task"]);
     assert_eq!(o.status.code(), Some(2));
     assert_eq!(err_of(&o), "ERROR: usage: orch write-task <Mn>\n");
 
-    let empty = tempfile::tempdir().unwrap();
-    git(empty.path(), &["init", "-q"]);
-    let o = orch_in(empty.path(), &["write-task", "M1"]);
-    // Python would traceback here (its load() reads state.json first); this build says why.
+    std::fs::remove_file(r.root.join(".orchestrate/plan.md")).unwrap();
+    let o = orch_in(&r.root, &["write-task", "M1"]);
+    // Python would traceback here (plan_sections reads the plan); this build says why.
     assert_eq!(o.status.code(), Some(2));
     assert_eq!(err_of(&o), "ERROR: missing .orchestrate/plan.md\n");
 }

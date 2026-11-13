@@ -52,6 +52,10 @@ pub fn run(args: &[String]) -> i32 {
     }
 }
 
+/// Python's "no state.json" — the words `orch status` / `orch set` use for a missing run
+/// (sync_status.rs's `NO_RUN`).
+const NO_RUN: &str = "no run in .orchestrate/state.db — run `orch sync` after writing plan.md";
+
 /// A plain failure message with Python's `die` exit code.
 #[derive(Debug)]
 struct Msg(String);
@@ -65,10 +69,27 @@ impl std::fmt::Display for Msg {
 impl std::error::Error for Msg {}
 
 /// The paths written, in Python's print order (task.md then task.json).
+///
+/// Python serves the contract out of `state.json` (its `load()` dies without one); this
+/// build serves it out of the synced run (M2's run storage): the stored title, Likely
+/// files, tier and needs, the run scope/check/branch, the dependencies' titles. Only the
+/// plan-only fields (goal, why, acceptance criteria, interfaces, constraints, out of
+/// scope) and the task.md section texts come from `plan.md`.
 fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
     let start = std::env::current_dir().map_err(|e| Error::io("reading the current folder", e))?;
     let root = paths::main_root(&start)?;
     let orch = paths::orchestrate_dir(&start)?;
+
+    // Python's `load()` fires before anything else: without a synced run there is nothing
+    // to serve — also nothing a plan with a dependency cycle or an unknown dependency
+    // would have passed.
+    let store = open_store(&orch)?;
+    let Some(store) = store else {
+        return Err(Error::wrap(Msg(NO_RUN.into()), EXIT_USAGE));
+    };
+    let Some(run) = store.load_run().map_err(Error::from)? else {
+        return Err(Error::wrap(Msg(NO_RUN.into()), EXIT_USAGE));
+    };
 
     let plan_path = orch.join("plan.md");
     if !plan_path.exists() {
@@ -81,21 +102,12 @@ fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
 
     // Python's `task(st, tid)` fires before the plan check, so a task the state knows but
     // the plan lost reads "not found in plan.md", anything else is "unknown task".
-    let store = open_store(&orch)?;
-    let store_ids: Vec<String> = match &store {
-        Some(s) => s
-            .list_tasks()
-            .map_err(Error::from)?
-            .into_iter()
-            .map(|t| t.id)
-            .collect(),
-        None => Vec::new(),
-    };
-    let known: Vec<String> = if store_ids.is_empty() {
-        plan.milestones.iter().map(|m| m.id.clone()).collect()
-    } else {
-        store_ids
-    };
+    let known: Vec<String> = store
+        .list_tasks()
+        .map_err(Error::from)?
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
     if !known.iter().any(|id| id == tid) {
         // Python's `{tid!r}`: single quotes around the id.
         return Err(Error::wrap(
@@ -107,27 +119,39 @@ fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
         return Err(Error::wrap(Msg(format!("{tid} not found in plan.md")), EXIT_USAGE));
     }
 
-    // Python reads the task's fields from the plan (`ptasks`): the first milestone with the id.
+    // The milestone's plan-only fields (Python's `pt = next(x for x in ptasks ...)`).
     let milestone = first(&plan, tid).expect("checked above");
-    let row = store.as_ref().and_then(|s| s.get_task(tid).ok());
+    let row = store.get_task(tid).ok();
     let attempt = row.as_ref().map_or(0, |t| t.attempt);
     let lost = row.as_ref().map_or(0, |t| t.lost);
     let last_worker = row.as_ref().and_then(|t| t.last_worker.clone());
+    let title = row
+        .as_ref()
+        .map(|t| t.title.clone())
+        .unwrap_or_else(|| tid.to_string());
+    let planned = run.plan.iter().find(|p| p.id == tid);
 
-    let branch = branch(&plan);
+    let branch = &run.settings.branch;
     let mut deps = Vec::new();
     for dep in &milestone.depends_on {
-        let title = first(&plan, &dep.id).map_or_else(|| dep.id.clone(), |m| m.title.clone());
-        let commit = dependency_commit(&root, &branch, &dep.id);
-        deps.push((dep.id.clone(), title, commit));
+        let dep_row = store.get_task(&dep.id).ok();
+        let dep_title = dep_row
+            .as_ref()
+            .map_or_else(|| dep.id.clone(), |t| t.title.clone());
+        let commit = dependency_commit(&root, branch, &dep.id);
+        deps.push((dep.id.clone(), dep_title, commit));
     }
-    let has_parked_work = work_ref(&root, &branch, tid);
+    let has_parked_work = work_ref(&root, branch, tid);
 
     let contract = task_contract::build(ContractInput {
         task_id: tid,
         milestone,
-        scope: &scope(&plan),
-        check: plan.header.check_command.as_deref().unwrap_or_default(),
+        title: &title,
+        files_allowed: planned.map_or_else(Vec::new, |p| p.files.clone()),
+        scope: &run.settings.scope,
+        tier: planned.and_then(|p| p.tier.clone()),
+        needs: planned.map_or_else(Vec::new, |p| p.needs.clone()),
+        check: &run.settings.check_command,
         attempt,
         lost_attempts: lost,
         previous_work: has_parked_work.then_some(last_worker.as_deref()).flatten(),
@@ -135,7 +159,7 @@ fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
     });
 
     let mut parts = vec![
-        format!("# Task {tid}: {}", milestone.title),
+        format!("# Task {tid}: {title}"),
         String::new(),
         secs.get(tid)
             .map(|s| s.replacen(&format!("## [x] {tid}:"), "Title:", 1))
@@ -152,7 +176,9 @@ fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
     }
     let mut ctx = Vec::new();
     for dep in &milestone.depends_on {
-        let title = first(&plan, &dep.id).map_or_else(|| dep.id.clone(), |m| m.title.clone());
+        let dep_row = store.get_task(&dep.id).ok();
+        let title =
+            dep_row.map_or_else(|| dep.id.clone(), |t| t.title);
         if let Some(report) = dependency_report(&root, &start, &dep.id) {
             ctx.push(format!("### {}: {} (already merged into your branch)", dep.id, title));
             ctx.push(report);
@@ -200,17 +226,6 @@ fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
 /// The first milestone with this id, as Python's `next(x for x in ptasks ...)` reads the plan.
 fn first<'a>(plan: &'a Plan, id: &str) -> Option<&'a Milestone> {
     plan.milestones.iter().find(|m| m.id == id)
-}
-
-/// The plan header's branch (the parser guarantees one).
-fn branch(plan: &Plan) -> String {
-    plan.header.branch.clone().unwrap_or_default()
-}
-
-/// The run scope: the header's first word, lower-cased, `warn` by default.
-fn scope(plan: &Plan) -> String {
-    let raw = plan.header.scope.as_deref().unwrap_or("warn");
-    raw.split_whitespace().next().unwrap_or("warn").to_lowercase()
 }
 
 /// The store behind `.orchestrate/state.db`, when the run has one.
