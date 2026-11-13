@@ -866,6 +866,11 @@ When an event occurs:
 - The lead is woken **only when it is idle**, and **once per batch** (several events, one prompt).
 - An unread batch is sent again after `ORCH_LEAD_REWAKE_S` (300 s), up to `ORCH_LEAD_MAX_WAKES` (3) times; then the developer is told (desktop notification).
 - Reading `orch events` is the acknowledgement; `--peek` looks without acknowledging.
+- **Wake-up delivery (new in Rust, §15A item 5).** A wake-up is not done until the lead acknowledges it:
+  1. **Confirm delivery.** After waking the lead, watch for the acknowledgement (`orch events` read). If none arrives within a short confirm window (a tunable, much shorter than `ORCH_LEAD_REWAKE_S`) while the lead pane is `idle`, wake it again, up to a limit.
+  2. **Don't type into a busy or focused pane.** Hold the wake-up while the lead pane is `working`, or focused with input in progress, and send it once the pane is idle.
+  3. **Escalate when the wake-up is never acknowledged.** Send a desktop notification ("the lead has N unread events since HH:MM"), the "lead that never reads its events" case in §15 and the notifications list.
+  4. **Log it accurately.** Log `wake sent`, then `wake acknowledged` or `wake unacknowledged after Ns`, so the log tells the two apart.
 - Blocking events (question, failed, held) stay open until their milestone moves on.
 - While the event manager waits for the lead or for the developer it stays up, and that waiting time does not count against `Budget:`. It gives up after `ORCH_LEAD_IDLE_MAX_MIN` (720).
 
@@ -1172,6 +1177,7 @@ Support (with today's behaviour as the baseline):
 | Orchestra error in one task | that task paused with the error; the others keep running |
 | Final check fails on the branch | stop; the next run re-checks and carries on once it passes |
 | Permission prompt | desktop alert; other tasks keep running (see §15A) |
+| Lead wake-up not acknowledged | re-woken after a short confirm window while its pane is idle, never typed into a busy or focused pane; desktop notification when it stays unread (see §9 *Wake-up delivery*, §15A item 5) |
 | Run budget used up | stop (`Budget: 3h`) |
 | Invalid or duplicated events | rejected by validation and idempotency keys |
 
@@ -1205,12 +1211,13 @@ Never claim that an incomplete task is completed.
 
 # 15A. Known gaps to fix by design in the Rust edition
 
-Found in the real run of 2026-11-12 and not yet fixed in Python. The Rust edition should solve them, not copy them:
+Found in the real runs of 2026-11-12 and 2026-11-13 and not yet fixed in Python. The Rust edition should solve them, not copy them:
 
 1. **Permission prompts stall unattended runs.** Claude Code launched with `--permission-mode acceptEdits` stops at every shell command. The event manager only alerts, so the run waits for a human. Rust: detect the prompt through Herdr, surface it in the GUI and notifications with the agent and command, and ship launch profiles per tool that allow the project's check and build commands without prompting (configurable, never a blanket "skip all permissions" by default).
 2. **An answer typed by the developer is invisible to the lead.** `orch answer` run from the developer's own terminal leaves no event, so the lead is not told the question was settled. Rust: every answer, from anyone, emits `AnswerProvided` into the lead's queue.
 3. Tokens and cost show as unknown unless an agent reports `usage`. Keep it optional; read usage from agents that expose it.
 4. The opt-in live test (`tests/live/run.sh`) has rarely been run, and Codex / OpenCode have not yet been used as coders in a real run. Make a recorded live run per supported agent part of the release gate (Phase 11).
+5. **A wake-up can be sent but never reach the lead.** In the Phase 4 run (2026-11-13, M4), the log showed `woke the lead (lead): 1 event(s) — merged M4` at 23:34:23 and `ALL_DONE` at 23:34:27. The lead never got that prompt as a turn, though, and stayed idle with 2 unread events until the developer asked "status?" by hand. "Woke the lead" only means the prompt was typed into the pane, not that the lead received it. The likely cause is that it landed while the developer was typing in the lead's pane, but this is not confirmed. The 300 s re-wake (§9) would eventually have caught it, but the run sat silent until then, and the log could not tell "sent" from "received". Rust: implement the wake-up delivery rules in §9 (*The lead's event queue*): confirm delivery, hold the wake-up while the lead pane is busy or being typed in, escalate an unacknowledged wake-up, and log sent, acknowledged and unacknowledged separately. A related case from Phase 2: a renamed-away reviewer made review prompts fail with `agent_not_found`, and they were retried silently every 120 s without telling the lead. A prompt that cannot reach its agent must surface to the lead or the developer, never only retry quietly.
 
 ---
 
@@ -1678,7 +1685,7 @@ Build in verified phases. Each phase lands as its own PR with a `VERSION` bump a
 
 - Implement event processing.
 - Implement event persistence.
-- Implement the lead's event queue and wake-ups.
+- Implement the lead's event queue and wake-ups, including confirmed wake-up delivery (§9 *Wake-up delivery*, §15A item 5): ack-confirmed re-wake, no typing into a busy or focused lead pane, a desktop notification for unacknowledged wake-ups, and `wake sent` / `wake acknowledged` / `wake unacknowledged` in the log.
 - Implement idempotency.
 - Implement atomic task claiming.
 - Implement tier-aware worker allocation and escalation.
