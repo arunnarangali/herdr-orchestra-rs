@@ -275,6 +275,18 @@ impl RuntimeAdapter for CliHerdr {
         Ok(raw.into_iter().map(AgentInfo::from).collect())
     }
 
+    fn agent_kinds(&self) -> Result<Vec<String>> {
+        // Plain `herdr agent` prints its usage, ending in a `kinds: a|b|c` line
+        // (herdr 0.9.5 prints it on stderr and exits 2), so look at both streams
+        // and ignore the exit code.
+        let f = self.run(&["agent"])?;
+        let text = format!("{}\n{}", f.stdout, f.stderr);
+        text.lines()
+            .find_map(|l| l.trim().strip_prefix("kinds:"))
+            .map(|k| k.split('|').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .ok_or_else(|| HerdrError::other("herdr agent: no `kinds:` line in its usage text"))
+    }
+
     fn agent(&self, target: &str) -> Result<AgentInfo> {
         let raw: RawAgent = self.field(&["agent", "get", target], target, "agent")?;
         Ok(raw.into())

@@ -146,6 +146,14 @@ pub struct AgentKind {
     /// Command that prints the tool's help (default `<binary> --help`).
     #[serde(default)]
     pub help_cmd: Option<String>,
+    /// Command whose exit status tells whether the account is logged in (0 = yes);
+    /// its output is never read. Must be a non-destructive status command of the tool.
+    #[serde(default)]
+    pub auth_cmd: Option<String>,
+    /// A file or folder whose presence means "logged in" (its content is never read).
+    /// Used when `auth_cmd` is not set.
+    #[serde(default)]
+    pub auth_file: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -177,6 +185,8 @@ const KEY_TYPES: &[(&str, KeyType)] = &[
     ("instructions", KeyType::Str),
     ("version_cmd", KeyType::Str),
     ("help_cmd", KeyType::Str),
+    ("auth_cmd", KeyType::Str),
+    ("auth_file", KeyType::Str),
 ];
 
 #[derive(Clone, Copy)]

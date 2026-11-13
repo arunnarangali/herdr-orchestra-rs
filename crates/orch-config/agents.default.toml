@@ -14,6 +14,15 @@
 #   verified      true only when the launch option and skills folder were checked against the real tool
 #                 (herdr_detect comes from herdr's own list of agent kinds: `herdr agent` prints it)
 #   notes         what was (or wasn't) verified
+#   auth_cmd      (optional) a non-destructive status command of the tool: exit 0 = logged in, non-zero = not
+#                 logged in; its output is never read or shown. `orch doctor` runs it. Without auth_cmd or
+#                 auth_file the status is "unknown" (not counted as broken)
+#   auth_file     (optional) a file or folder whose presence means "logged in" (never read); used when there is
+#                 no auth_cmd
+#                 Shipped: claude (`claude auth status`) and codex (`codex login status`), both checked against
+#                 their --help; opencode, amp, hermes and agy have no documented exit-code login check, so unknown
+#   Also optional: display_name, extra_args, env, workdir, capabilities, max_sessions, timeout_s, cooldown_min,
+#   instructions, version_cmd, help_cmd
 #
 # Every agent can also lead with the universal sentence: Run `orch lead plan` and follow it. Feature: <...>
 
@@ -27,6 +36,7 @@ skills_dirs = ["~/.claude/skills"]
 commands_dirs = ["~/.claude/commands"]
 commands_from = "claude-commands"
 invoke = "/orch-plan <feature>"
+auth_cmd = "claude auth status"
 verified = true
 notes = "Claude Code 2.1: --permission-mode acceptEdits in --help; ~/.claude/skills present; herdr kind 'claude'."
 
@@ -37,6 +47,7 @@ model_flag = "--model"
 herdr_detect = true
 roles = ["lead", "coder", "reviewer"]
 skills_dirs = ["~/.codex/skills"]
+auth_cmd = "codex login status"
 invoke = "$orch-plan <feature>   (or: use the orch-plan skill: <feature>)"
 verified = true
 notes = "codex-cli 0.167: --full-auto is gone; --approve-for-me routes approvals to automatic review in the workspace-write sandbox. Reads ~/.codex/skills and ~/.agents/skills."

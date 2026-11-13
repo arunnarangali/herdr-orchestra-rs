@@ -13,6 +13,7 @@
 //! - `sim.json`: simulations, all optional: `slow_ms` (sleep before answering),
 //!   `fail_exit` (exit non-zero with `fail_message` on stderr, no JSON),
 //!   `fail_cmd` (limit both to commands starting with this text, e.g. `"agent prompt"`);
+//! - `kinds.txt`: the `kinds:` line of plain `herdr agent` (default `pi|claude|codex|gemini|agy|opencode|amp|hermes`);
 //! - written by the fake: `calls.jsonl` (every invocation's arguments),
 //!   `sent.jsonl` (every prompt, text, key press and command received),
 //!   `pids.log` (its process id on every start).
@@ -51,6 +52,15 @@ fn main() {
             eprintln!("{msg}");
             std::process::exit(code as i32);
         }
+    }
+
+    if args == ["agent"] {
+        // Like herdr 0.9.5: usage on stderr, exit 2, ending in the kinds line.
+        let kinds = fs::read_to_string(dir.join("kinds.txt")).unwrap_or_default();
+        let kinds = kinds.trim();
+        let kinds = if kinds.is_empty() { "pi|claude|codex|gemini|agy|opencode|amp|hermes" } else { kinds };
+        eprintln!("usage:\n  herdr agent list\n  herdr agent get <target>\n  kinds: {kinds}");
+        std::process::exit(2);
     }
 
     let id = format!("cli:{}", args.iter().take(2).cloned().collect::<Vec<_>>().join(":"));
