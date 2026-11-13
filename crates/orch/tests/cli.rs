@@ -84,11 +84,13 @@ fn version_forms() {
 fn every_command_is_accepted_and_not_implemented() {
     // `agents`, `models`, `team <kind>` and `doctor` are real now (see the listing
     // tests, tests/team.rs and the agents_discovery tests); `team up` waits for the
-    // plan parsing of Phase 5.
-    for n in NAMES
-        .iter()
-        .filter(|n| !["agents", "models", "team", "doctor"].contains(n))
-    {
+    // plan parsing of Phase 5. `sync`, `status` and `set` are real too (tests/sync_cmd.rs).
+    for n in NAMES.iter().filter(|n| {
+        ![
+            "agents", "models", "team", "doctor", "sync", "status", "set",
+        ]
+        .contains(n)
+    }) {
         let o = orch(&[n]);
         assert_eq!(o.status.code(), Some(70), "{n}");
         assert!(String::from_utf8_lossy(&o.stderr).contains("not implemented in this build"));
@@ -105,11 +107,11 @@ fn every_command_is_accepted_and_not_implemented() {
 
 #[test]
 fn logging_quiet_by_default_and_on_stderr() {
-    let o = orch(&["sync"]);
+    let o = orch(&["start"]);
     assert_eq!(String::from_utf8_lossy(&o.stderr).lines().count(), 1);
     let o = Command::new(env!("CARGO_BIN_EXE_orch"))
         .env("ORCH_LOG", "debug")
-        .arg("sync")
+        .arg("start")
         .output()
         .unwrap();
     assert!(String::from_utf8_lossy(&o.stderr).contains("dispatch"));

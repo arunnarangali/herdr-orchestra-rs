@@ -20,6 +20,7 @@ pub const DB_FILE: &str = "state.db";
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../migrations/0001_init.sql")),
     (2, include_str!("../migrations/0002_deliveries.sql")),
+    (3, include_str!("../migrations/0003_run.sql")),
 ];
 
 /// The schema version this build writes.
@@ -61,7 +62,7 @@ impl From<StoreError> for Error {
     }
 }
 
-type Res<T> = std::result::Result<T, StoreError>;
+pub(crate) type Res<T> = std::result::Result<T, StoreError>;
 
 /// Who a prompt was delivered for: a coder working a task, or the reviewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,11 +195,11 @@ pub struct Event {
 }
 
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
     path: PathBuf,
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -555,7 +556,7 @@ fn migrate(conn: &mut Connection, path: &Path) -> Res<()> {
     Ok(())
 }
 
-fn load_task(conn: &Connection, id: &str) -> Res<Option<Task>> {
+pub(crate) fn load_task(conn: &Connection, id: &str) -> Res<Option<Task>> {
     let row = conn
         .query_row(
             "SELECT id, title, status, reason, worker, last_worker, model, attempt,
@@ -590,7 +591,11 @@ fn load_task(conn: &Connection, id: &str) -> Res<Option<Task>> {
     Ok(Some(t))
 }
 
-fn apply_transition(tx: &Transaction<'_>, id: &str, req: &TransitionRequest) -> Res<Outcome> {
+pub(crate) fn apply_transition(
+    tx: &Transaction<'_>,
+    id: &str,
+    req: &TransitionRequest,
+) -> Res<Outcome> {
     let t = load_task(tx, id)?.ok_or_else(|| StoreError::NoSuchTask(id.to_string()))?;
     let (from, to) = (t.status, req.to);
     check_transition(id, from, to, req.mode)?;
@@ -959,12 +964,67 @@ mod tests {
         }
         let mut s = Store::open(&path).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 2);
+        assert_eq!(SCHEMA_VERSION, 3);
         add(&mut s, "M1", &[]);
         let id = s
             .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")
             .unwrap();
         assert_eq!(s.delivery(id).unwrap().task, "M1");
+    }
+
+    // The run tables (migration 3): a schema-2 database (with tasks, history and a delivery)
+    // upgrades in place, keeps every row, and the new tables are empty and usable.
+    #[test]
+    fn schema2_database_upgrades_in_place_and_keeps_its_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        let dump = |conn: &Connection| -> Vec<String> {
+            let mut out = Vec::new();
+            for sql in [
+                "SELECT id||'|'||title||'|'||status||'|'||reason||'|'||attempt FROM tasks ORDER BY id",
+                "SELECT task_id||'|'||dep_id FROM task_deps ORDER BY task_id, dep_id",
+                "SELECT id||'|'||task_id||'|'||from_state||'|'||to_state||'|'||why FROM history ORDER BY id",
+                "SELECT id||'|'||agent||'|'||task_id||'|'||kind||'|'||prompt||'|'||confirmed FROM deliveries ORDER BY id",
+                "SELECT agent||'|'||fails FROM delivery_fails ORDER BY agent",
+            ] {
+                let mut stmt = conn.prepare(sql).unwrap();
+                out.extend(
+                    stmt.query_map([], |r| r.get::<_, String>(0))
+                        .unwrap()
+                        .map(Result::unwrap),
+                );
+                out.push("--".into());
+            }
+            out
+        };
+        let before = {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0].1).unwrap();
+            conn.execute_batch(MIGRATIONS[1].1).unwrap();
+            conn.pragma_update(None, "user_version", 2).unwrap();
+            conn.execute_batch(
+                "INSERT INTO tasks (id, title, status, attempt) VALUES ('M1','one','merged',2),('M2','two','coding',1);
+                 INSERT INTO task_deps VALUES ('M2','M1');
+                 INSERT INTO history (task_id, ts, from_state, to_state, why) VALUES ('M2', 5, 'pending', 'coding', 'go');
+                 INSERT INTO deliveries (agent, task_id, attempt, kind, prompt, recorded_at) VALUES ('claude-1','M2',1,'coder','do it',9);
+                 INSERT INTO delivery_fails VALUES ('claude-1', 2);",
+            )
+            .unwrap();
+            dump(&conn)
+        };
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), 3);
+        assert_eq!(dump(&s.conn), before, "upgrade changed existing rows");
+        assert!(s.load_run().unwrap().is_none());
+        for table in ["run", "run_agents", "task_plan"] {
+            let n: i64 = s
+                .conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0, "{table}");
+        }
+        assert_eq!(s.get_task("M2").unwrap().deps, ["M1"]);
+        assert_eq!(s.delivery_fails("claude-1").unwrap(), 2);
     }
 
     // §16: an existing run's rows (task, transition history, event) survive the upgrade unchanged,
