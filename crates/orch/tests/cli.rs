@@ -80,8 +80,13 @@ fn version_forms() {
 
 #[test]
 fn every_command_is_accepted_and_not_implemented() {
-    // `agents`, `models` and `doctor` are real now (see the listing and agents_discovery tests).
-    for n in NAMES.iter().filter(|n| !["agents", "models", "doctor"].contains(n)) {
+    // `agents`, `models`, `team <kind>` and `doctor` are real now (see the listing
+    // tests, tests/team.rs and the agents_discovery tests); `team up` waits for the
+    // plan parsing of Phase 5.
+    for n in NAMES
+        .iter()
+        .filter(|n| !["agents", "models", "team", "doctor"].contains(n))
+    {
         let o = orch(&[n]);
         assert_eq!(o.status.code(), Some(70), "{n}");
         assert!(String::from_utf8_lossy(&o.stderr).contains("not implemented in this build"));
@@ -90,7 +95,6 @@ fn every_command_is_accepted_and_not_implemented() {
         &["lead", "plan"][..],
         &["lead", "run"],
         &["lead", "whoami"],
-        &["team", "claude"],
         &["team", "up", "--dry-run"],
     ] {
         assert_eq!(orch(args).status.code(), Some(70), "{args:?}");
