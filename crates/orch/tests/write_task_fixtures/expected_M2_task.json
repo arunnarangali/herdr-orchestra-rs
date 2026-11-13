@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "task_id": "M2",
+  "title": "Second",
+  "kind": "task",
+  "goal": "- Do the second thing.",
+  "why": "it completes the feature.",
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "text": "the second thing works"
+    }
+  ],
+  "files_allowed": [
+    "src/c.rs"
+  ],
+  "scope": "warn",
+  "tier": "medium",
+  "needs": [
+    "coding",
+    "tool-use"
+  ],
+  "interfaces": [
+    "Uses M1's types unchanged."
+  ],
+  "constraints": [
+    "stay in src/"
+  ],
+  "out_of_scope": [
+    "nothing"
+  ],
+  "depends_on": [
+    {
+      "task": "M1",
+      "title": "Foundation",
+      "commit": null
+    }
+  ],
+  "check": "cargo test",
+  "attempt": 3,
+  "lost_attempts": 1,
+  "previous_work": {
+    "by": "claude-1"
+  },
+  "result_format": {
+    "status": "done | question | blocked",
+    "commit": "feat(api): add the categories endpoint",
+    "files_changed": [
+      "src/routes/categories.ts",
+      "test/categories.test.ts"
+    ],
+    "check": {
+      "ran": true,
+      "passed": true,
+      "summary": "lint ok, 42 tests pass"
+    },
+    "criteria": [
+      {
+        "id": "AC1",
+        "met": true,
+        "evidence": "test 'rejects a missing amount column' passes"
+      }
+    ],
+    "questions": [
+      "only when status is question: what you need decided, with 2-3 options"
+    ],
+    "usage": {
+      "input_tokens": null,
+      "output_tokens": null,
+      "cost_usd": null
+    }
+  }
+}

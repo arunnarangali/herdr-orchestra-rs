@@ -85,9 +85,11 @@ fn every_command_is_accepted_and_not_implemented() {
     // `agents`, `models`, `team <kind>` and `doctor` are real now (see the listing
     // tests, tests/team.rs and the agents_discovery tests); `team up` waits for the
     // plan parsing of Phase 5. `sync`, `status` and `set` are real too (tests/sync_cmd.rs).
+    // `write-task` and the lead subcommands became real in
+    // the task-contract milestone (see tests/write_task.rs and tests/lead.rs).
     for n in NAMES.iter().filter(|n| {
         ![
-            "agents", "models", "team", "doctor", "sync", "status", "set",
+            "agents", "models", "team", "doctor", "sync", "status", "set", "write-task",
         ]
         .contains(n)
     }) {
@@ -95,14 +97,8 @@ fn every_command_is_accepted_and_not_implemented() {
         assert_eq!(o.status.code(), Some(70), "{n}");
         assert!(String::from_utf8_lossy(&o.stderr).contains("not implemented in this build"));
     }
-    for args in [
-        &["lead", "plan"][..],
-        &["lead", "run"],
-        &["lead", "whoami"],
-        &["team", "up", "--dry-run"],
-    ] {
-        assert_eq!(orch(args).status.code(), Some(70), "{args:?}");
-    }
+    let args = ["team", "up", "--dry-run"];
+    assert_eq!(orch(&args).status.code(), Some(70), "{args:?}");
 }
 
 #[test]
