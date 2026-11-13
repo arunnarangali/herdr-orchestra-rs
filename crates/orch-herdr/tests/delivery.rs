@@ -6,8 +6,8 @@
 use orch_config::tunables::Tunables;
 use orch_core::store::{DeliveryKind, NewTask, Store};
 use orch_herdr::delivery::{
-    Deliverer, NewDelivery, Recovery, SendOutcome, DEFAULT_CONFIRM_GRACE_S,
-    MAX_CONSECUTIVE_FAILURES, confirm_grace,
+    DEFAULT_CONFIRM_GRACE_S, Deliverer, MAX_CONSECUTIVE_FAILURES, NewDelivery, Recovery,
+    SendOutcome, confirm_grace,
 };
 use orch_herdr::model::{AgentInfo, PaneInfo};
 use orch_herdr::status::AgentStatus;
@@ -75,8 +75,7 @@ fn send_records_then_confirms_on_success() {
     agent(&rt, "claude-1", "w1:p1", AgentStatus::Idle);
     let watch = |a: &str| watchable(a);
     let mut d = Deliverer::new(&mut store, &rt, &watch);
-    let SendOutcome::Sent { delivery } = d.send(req("claude-1", "M1")).unwrap()
-    else {
+    let SendOutcome::Sent { delivery } = d.send(req("claude-1", "M1")).unwrap() else {
         panic!()
     };
     assert_eq!(delivery.agent, "claude-1");
@@ -106,8 +105,7 @@ fn a_failed_send_leaves_the_record_and_keeps_the_error() {
     );
     let watch = |a: &str| watchable(a);
     let mut d = Deliverer::new(&mut store, &rt, &watch);
-    let SendOutcome::Failed { delivery, error } = d.send(req("claude-1", "M1")).unwrap()
-    else {
+    let SendOutcome::Failed { delivery, error } = d.send(req("claude-1", "M1")).unwrap() else {
         panic!()
     };
     assert!(!delivery.confirmed);
@@ -135,7 +133,9 @@ fn a_failed_send_leaves_the_record_and_keeps_the_error() {
     assert!(matches!(d.resend(id).unwrap(), SendOutcome::Failed { .. }));
     assert_eq!(d.failure_streak("claude-1").unwrap(), 3);
     // A confirmed send resets the count.
-    let SendOutcome::Sent { delivery } = d.resend(id).unwrap() else { panic!() };
+    let SendOutcome::Sent { delivery } = d.resend(id).unwrap() else {
+        panic!()
+    };
     assert!(delivery.confirmed && delivery.error_kind.is_none());
     assert_eq!(d.failure_streak("claude-1").unwrap(), 0);
     assert_eq!(rt.sent().len(), 1);
@@ -182,13 +182,17 @@ fn crash_after_record_before_send_is_recovered_and_resent() {
     // Inside the grace window nothing is decided yet.
     assert!(d.recover(recorded_at, GRACE).unwrap().is_empty());
     let out = d.recover(recorded_at + GRACE + 1, GRACE).unwrap();
-    let Recovery::Unconfirmed { delivery } = &out[0] else { panic!("{out:?}") };
+    let Recovery::Unconfirmed { delivery } = &out[0] else {
+        panic!("{out:?}")
+    };
     assert_eq!(delivery.id, id);
     assert_eq!(delivery.agent, "claude-1");
     assert_eq!(delivery.prompt, "do it");
     assert!(!delivery.confirmed);
     assert!(rt.sent().is_empty());
-    let SendOutcome::Sent { delivery } = d.resend(id).unwrap() else { panic!() };
+    let SendOutcome::Sent { delivery } = d.resend(id).unwrap() else {
+        panic!()
+    };
     assert!(delivery.confirmed);
     assert_eq!(rt.sent(), one_prompt("claude-1", "do it"));
 }
@@ -215,7 +219,9 @@ fn crash_after_send_before_confirm_is_confirmed_without_resending() {
         let watch = |a: &str| watchable(a);
         let mut d = Deliverer::new(&mut store, &rt, &watch);
         let out = d.recover(recorded_at + GRACE + 1, GRACE).unwrap();
-        let Recovery::Confirmed { delivery } = &out[0] else { panic!("{out:?}") };
+        let Recovery::Confirmed { delivery } = &out[0] else {
+            panic!("{out:?}")
+        };
         assert!(delivery.confirmed);
         assert_eq!(rt.sent().len(), 1, "recovery must not re-send");
         // Running recovery again confirms nothing twice.
@@ -242,7 +248,9 @@ fn recovery_reports_a_gone_agent_without_resending() {
     let watch = |a: &str| watchable(a);
     let mut d = Deliverer::new(&mut store, &rt, &watch);
     let out = d.recover(recorded_at + GRACE + 1, GRACE).unwrap();
-    let Recovery::Gone { delivery } = &out[0] else { panic!("{out:?}") };
+    let Recovery::Gone { delivery } = &out[0] else {
+        panic!("{out:?}")
+    };
     assert_eq!(delivery.id, id);
     assert!(!delivery.confirmed);
     assert!(rt.sent().is_empty());
@@ -312,11 +320,15 @@ fn unwatchable_agents_are_never_judged_or_resent_automatically() {
     {
         let mut d = Deliverer::new(&mut store, &rt, &watch);
         let out = d.send(req("hermes-1", "M1")).unwrap();
-        let SendOutcome::Sent { delivery } = out else { panic!("{out:?}") };
+        let SendOutcome::Sent { delivery } = out else {
+            panic!("{out:?}")
+        };
         assert!(delivery.confirmed);
         let out = d.recover(recorded_at + GRACE + 1, GRACE).unwrap();
         assert!(matches!(&out[0], Recovery::Unconfirmed { .. }), "{out:?}");
-        let SendOutcome::Sent { delivery } = d.resend(id).unwrap() else { panic!() };
+        let SendOutcome::Sent { delivery } = d.resend(id).unwrap() else {
+            panic!()
+        };
         assert!(delivery.confirmed);
     }
     // The only sends were the two explicit ones; nothing automatic.
@@ -348,12 +360,21 @@ fn a_refused_prompt_is_not_confirmed_by_a_blocked_status() {
     rt.fail_next(
         CallKind::AgentPrompt,
         1,
-        HerdrError::AgentBlocked { agent: "claude-1".into(), message: "approval dialog".into() },
+        HerdrError::AgentBlocked {
+            agent: "claude-1".into(),
+            message: "approval dialog".into(),
+        },
     );
     let watch = |a: &str| watchable(a);
     let mut d = Deliverer::new(&mut store, &rt, &watch);
-    assert!(matches!(d.send(req("claude-1", "M1")).unwrap(), SendOutcome::Failed { .. }));
+    assert!(matches!(
+        d.send(req("claude-1", "M1")).unwrap(),
+        SendOutcome::Failed { .. }
+    ));
     let r = d.recover(i64::MAX / 2, 30).unwrap();
-    assert!(matches!(r.as_slice(), [Recovery::Unconfirmed { .. }]), "{r:?}");
+    assert!(
+        matches!(r.as_slice(), [Recovery::Unconfirmed { .. }]),
+        "{r:?}"
+    );
     assert!(rt.sent().is_empty());
 }

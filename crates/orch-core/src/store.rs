@@ -454,12 +454,7 @@ impl Store {
 
     /// Keep why a send failed: the delivery stays unconfirmed, with the error
     /// kind and message preserved for the report.
-    pub fn record_delivery_error(
-        &mut self,
-        id: i64,
-        error_kind: &str,
-        message: &str,
-    ) -> Res<()> {
+    pub fn record_delivery_error(&mut self, id: i64, error_kind: &str, message: &str) -> Res<()> {
         let n = self.conn.execute(
             "UPDATE deliveries SET error_kind=?2, error_message=?3 WHERE id=?1 AND confirmed=0",
             params![id, error_kind, message],
@@ -473,11 +468,9 @@ impl Store {
     fn delivery_state_error(&self, id: i64) -> StoreError {
         let confirmed: Option<bool> = self
             .conn
-            .query_row(
-                "SELECT confirmed FROM deliveries WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )
+            .query_row("SELECT confirmed FROM deliveries WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
             .optional()
             .unwrap_or(None);
         match confirmed {
@@ -1089,7 +1082,11 @@ mod tests {
         assert!(d.confirmed && d.confirmed_at.is_some());
         assert!(d.error_kind.is_none());
         assert_eq!(
-            s.unconfirmed_deliveries().unwrap().iter().map(|d| d.id).collect::<Vec<_>>(),
+            s.unconfirmed_deliveries()
+                .unwrap()
+                .iter()
+                .map(|d| d.id)
+                .collect::<Vec<_>>(),
             [bad]
         );
         s.record_delivery_error(bad, "timed_out", "herdr call timed out after 30s")
@@ -1129,9 +1126,10 @@ mod tests {
     #[test]
     fn a_delivery_needs_an_existing_task() {
         let (_d, mut s) = store();
-        assert!(s
-            .record_delivery("claude-1", "nope", 1, DeliveryKind::Coder, "go")
-            .is_err());
+        assert!(
+            s.record_delivery("claude-1", "nope", 1, DeliveryKind::Coder, "go")
+                .is_err()
+        );
     }
 
     #[test]

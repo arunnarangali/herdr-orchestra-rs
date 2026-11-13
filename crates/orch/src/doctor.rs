@@ -44,7 +44,10 @@ pub struct Check {
 }
 
 fn check(ok: bool, message: impl Into<String>) -> Check {
-    Check { ok, message: message.into() }
+    Check {
+        ok,
+        message: message.into(),
+    }
 }
 
 /// What herdr says about detectable kinds, asked at most once per run.
@@ -71,7 +74,12 @@ impl HerdrKinds {
 
 /// The checks for one installed kind, in Python's order: version, launch flags, skills
 /// (then authentication), herdr detection.
-fn doctor_kind(kind: &str, ak: &AgentKind, runtime: &dyn RuntimeAdapter, herdr_kinds: &mut HerdrKinds) -> Vec<Check> {
+fn doctor_kind(
+    kind: &str,
+    ak: &AgentKind,
+    runtime: &dyn RuntimeAdapter,
+    herdr_kinds: &mut HerdrKinds,
+) -> Vec<Check> {
     let home = home();
     let timeout = discovery::probe_timeout();
     let mut out = Vec::new();
@@ -98,7 +106,10 @@ fn doctor_kind(kind: &str, ak: &AgentKind, runtime: &dyn RuntimeAdapter, herdr_k
         let what = format!("skill {}", short(&a.path, &home));
         out.push(match a.state {
             AssetState::Current => check(true, what),
-            AssetState::Outdated => check(true, format!("{what} is not the current text — run `orch agents sync`")),
+            AssetState::Outdated => check(
+                true,
+                format!("{what} is not the current text — run `orch agents sync`"),
+            ),
             AssetState::Missing => check(false, format!("{what} missing — run `orch agents sync`")),
         });
     }
@@ -108,7 +119,10 @@ fn doctor_kind(kind: &str, ak: &AgentKind, runtime: &dyn RuntimeAdapter, herdr_k
         AuthState::Unknown => check(true, format!("auth: unknown ({})", auth.reason)),
         AuthState::NotAuthenticated => check(
             false,
-            format!("auth: not authenticated ({}) — log in with the tool itself", auth.reason),
+            format!(
+                "auth: not authenticated ({}) — log in with the tool itself",
+                auth.reason
+            ),
         ),
     });
     if ak.herdr_detect {
@@ -161,7 +175,11 @@ pub fn run_doctor(args: &[String], runtime: &dyn RuntimeAdapter) -> i32 {
         println!(
             "{:<7} {k}{}",
             if bad { "BROKEN" } else { "ok" },
-            if ak.verified { "" } else { "  (registry entry unverified)" }
+            if ak.verified {
+                ""
+            } else {
+                "  (registry entry unverified)"
+            }
         );
         for c in res {
             println!("    {} {}", if c.ok { "ok " } else { "BAD" }, c.message);
@@ -223,7 +241,8 @@ fn run_agents_sync(args: &[String]) -> i32 {
         Err(c) => return c,
     };
     let home = home();
-    let want: Option<Vec<String>> = (!args.is_empty()).then(|| args.iter().map(|a| a.to_lowercase()).collect());
+    let want: Option<Vec<String>> =
+        (!args.is_empty()).then(|| args.iter().map(|a| a.to_lowercase()).collect());
     if let Some(w) = &want {
         let unknown: Vec<String> = {
             let mut u: Vec<String> = w.iter().filter(|k| reg.get(k).is_none()).cloned().collect();
@@ -240,8 +259,16 @@ fn run_agents_sync(args: &[String]) -> i32 {
         label: "base".into(),
         items: vec![
             ("skills", home.join(".agents/skills"), None),
-            ("commands", home.join(".config/opencode/commands"), Some(opencode.clone())),
-            ("commands", home.join(".config/opencode/command"), Some(opencode)),
+            (
+                "commands",
+                home.join(".config/opencode/commands"),
+                Some(opencode.clone()),
+            ),
+            (
+                "commands",
+                home.join(".config/opencode/command"),
+                Some(opencode),
+            ),
         ],
         invoke: String::new(),
     }];
@@ -255,13 +282,27 @@ fn run_agents_sync(args: &[String]) -> i32 {
             }
             continue;
         }
-        let flavor = ak.commands_from.clone().unwrap_or_else(|| skills::DEFAULT_FLAVOR.to_string());
-        let mut items: Vec<_> = ak.skills_dirs.iter().map(|d| ("skills", skills::expand(d, &home), None)).collect();
-        items.extend(ak.commands_dirs.iter().map(|d| ("commands", skills::expand(d, &home), Some(flavor.clone()))));
+        let flavor = ak
+            .commands_from
+            .clone()
+            .unwrap_or_else(|| skills::DEFAULT_FLAVOR.to_string());
+        let mut items: Vec<_> = ak
+            .skills_dirs
+            .iter()
+            .map(|d| ("skills", skills::expand(d, &home), None))
+            .collect();
+        items.extend(
+            ak.commands_dirs
+                .iter()
+                .map(|d| ("commands", skills::expand(d, &home), Some(flavor.clone()))),
+        );
         rows.push(Row {
             label: k.clone(),
             items,
-            invoke: ak.invoke.clone().unwrap_or_else(|| DEFAULT_INVOKE.to_string()),
+            invoke: ak
+                .invoke
+                .clone()
+                .unwrap_or_else(|| DEFAULT_INVOKE.to_string()),
         });
     }
     let (mut new, mut same) = (0, 0);
@@ -282,12 +323,24 @@ fn run_agents_sync(args: &[String]) -> i32 {
             whats.push(format!("{what}: {}", short(d, &home)));
         }
         if let Err(e) = skills::manifest_record(&home, &recs) {
-            return die(format!("cannot write {}: {e}", skills::manifest_path(&home).display()));
+            return die(format!(
+                "cannot write {}: {e}",
+                skills::manifest_path(&home).display()
+            ));
         }
         new += usize::from(changed);
         same += usize::from(!changed);
-        let invoke = if row.invoke.is_empty() { String::new() } else { format!("  {}", row.invoke) };
-        println!("  {} {:<8} {}{invoke}", if changed { "NEW" } else { "ok  " }, row.label, whats.join("  "));
+        let invoke = if row.invoke.is_empty() {
+            String::new()
+        } else {
+            format!("  {}", row.invoke)
+        };
+        println!(
+            "  {} {:<8} {}{invoke}",
+            if changed { "NEW" } else { "ok  " },
+            row.label,
+            whats.join("  ")
+        );
     }
     println!(
         "synced {} row(s): {new} new, {same} unchanged — restart running agents so they pick up the skills",
@@ -302,7 +355,12 @@ pub fn kinds_missing_skills(reg: &Registry) -> Vec<String> {
     let home = home();
     reg.0
         .iter()
-        .filter(|(_, ak)| ak.is_installed() && skills::agent_assets(ak, &home).iter().any(|a| a.state == AssetState::Missing))
+        .filter(|(_, ak)| {
+            ak.is_installed()
+                && skills::agent_assets(ak, &home)
+                    .iter()
+                    .any(|a| a.state == AssetState::Missing)
+        })
         .map(|(k, _)| k.clone())
         .collect()
 }

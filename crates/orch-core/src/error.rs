@@ -87,7 +87,10 @@ mod tests {
     #[test]
     fn codes() {
         assert_eq!(Error::NotInGitRepo("/x".into()).exit_code(), EXIT_USAGE);
-        assert_eq!(Error::io("x", std::io::Error::other("e")).exit_code(), EXIT_ERROR);
+        assert_eq!(
+            Error::io("x", std::io::Error::other("e")).exit_code(),
+            EXIT_ERROR
+        );
         let e = Error::wrap(std::fmt::Error, 3);
         assert_eq!(e.exit_code(), 3);
         assert!(!e.to_string().is_empty());

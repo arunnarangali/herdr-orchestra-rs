@@ -61,12 +61,17 @@ pub enum HerdrError {
 impl HerdrError {
     /// A [`HerdrError::Other`] with a plain message.
     pub fn other(message: impl Into<String>) -> Self {
-        HerdrError::Other { message: message.into() }
+        HerdrError::Other {
+            message: message.into(),
+        }
     }
 
     /// A [`HerdrError::TimedOut`] for one call.
     pub fn timed_out(timeout_s: u64, message: impl Into<String>) -> Self {
-        HerdrError::TimedOut { timeout_s, message: message.into() }
+        HerdrError::TimedOut {
+            timeout_s,
+            message: message.into(),
+        }
     }
 }
 
@@ -77,21 +82,30 @@ mod tests {
     // §4/AC24: callers must be able to match on every kind of failure.
     #[test]
     fn agent_not_found_matches() {
-        let e = HerdrError::AgentNotFound { agent: "claude-1".into(), message: "agent target claude-1 not found".into() };
+        let e = HerdrError::AgentNotFound {
+            agent: "claude-1".into(),
+            message: "agent target claude-1 not found".into(),
+        };
         assert!(matches!(e, HerdrError::AgentNotFound { ref agent, .. } if agent == "claude-1"));
         assert!(e.to_string().contains("claude-1"));
     }
 
     #[test]
     fn stale_pane_matches() {
-        let e = HerdrError::StalePane { pane: "w1:p3".into(), message: "STALE pane w1:p3".into() };
+        let e = HerdrError::StalePane {
+            pane: "w1:p3".into(),
+            message: "STALE pane w1:p3".into(),
+        };
         assert!(matches!(e, HerdrError::StalePane { ref pane, .. } if pane == "w1:p3"));
         assert!(e.to_string().contains("stale or unknown pane"));
     }
 
     #[test]
     fn agent_blocked_matches() {
-        let e = HerdrError::AgentBlocked { agent: "codex-2".into(), message: "waiting for approval".into() };
+        let e = HerdrError::AgentBlocked {
+            agent: "codex-2".into(),
+            message: "waiting for approval".into(),
+        };
         assert!(matches!(e, HerdrError::AgentBlocked { ref agent, .. } if agent == "codex-2"));
         assert!(e.to_string().contains("prompt refused"));
     }
@@ -105,7 +119,9 @@ mod tests {
 
     #[test]
     fn unavailable_matches() {
-        let e = HerdrError::Unavailable { message: "herdr: command not found".into() };
+        let e = HerdrError::Unavailable {
+            message: "herdr: command not found".into(),
+        };
         assert!(matches!(e, HerdrError::Unavailable { .. }));
         assert!(e.to_string().contains("not installed or not reachable"));
     }
@@ -113,7 +129,9 @@ mod tests {
     #[test]
     fn other_matches_and_keeps_the_message() {
         let e = HerdrError::other("herdr socket said: protocol mismatch");
-        assert!(matches!(e, HerdrError::Other { ref message } if message.contains("protocol mismatch")));
+        assert!(
+            matches!(e, HerdrError::Other { ref message } if message.contains("protocol mismatch"))
+        );
         assert!(e.to_string().contains("protocol mismatch"));
     }
 

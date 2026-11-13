@@ -1,3 +1,5 @@
+mod common;
+
 use std::process::{Command, Output};
 
 fn orch(args: &[&str]) -> Output {
@@ -273,12 +275,10 @@ fn orch_cfg(
 
 /// A temp HOME and a PATH dir with an executable `claude` (never run) in it.
 fn sandbox() -> (tempfile::TempDir, tempfile::TempDir) {
-    use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let f = bin.path().join("claude");
-    std::fs::write(&f, "#!/bin/sh\nexit 99\n").unwrap();
-    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    common::write_executable(&f, "exit 99");
     (home, bin)
 }
 

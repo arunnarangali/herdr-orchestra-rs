@@ -102,9 +102,11 @@ impl FakeHerdr {
                 current_pane: None,
                 panes: BTreeMap::new(),
                 agents: BTreeMap::new(),
-                agent_kinds: ["pi", "claude", "codex", "gemini", "agy", "opencode", "amp", "hermes"]
-                    .map(String::from)
-                    .to_vec(),
+                agent_kinds: [
+                    "pi", "claude", "codex", "gemini", "agy", "opencode", "amp", "hermes",
+                ]
+                .map(String::from)
+                .to_vec(),
                 workspaces: BTreeMap::from([("w1".to_string(), w)]),
                 outputs: BTreeMap::new(),
                 sent: Vec::new(),
@@ -280,10 +282,13 @@ impl RuntimeAdapter for FakeHerdr {
                 pane: "(current)".into(),
                 message: "not inside a herdr pane".into(),
             })?;
-        st.panes.get(&id).cloned().ok_or_else(|| HerdrError::StalePane {
-            pane: id,
-            message: "current pane is gone".into(),
-        })
+        st.panes
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| HerdrError::StalePane {
+                pane: id,
+                message: "current pane is gone".into(),
+            })
     }
 
     fn agents(&self) -> Result<Vec<AgentInfo>> {
@@ -301,19 +306,25 @@ impl RuntimeAdapter for FakeHerdr {
     fn agent(&self, target: &str) -> Result<AgentInfo> {
         let mut st = self.state.lock().unwrap();
         self.failing(&mut st, CallKind::AgentGet)?;
-        st.agents.get(target).cloned().ok_or_else(|| HerdrError::AgentNotFound {
-            agent: target.to_string(),
-            message: format!("agent target {target} not found"),
-        })
+        st.agents
+            .get(target)
+            .cloned()
+            .ok_or_else(|| HerdrError::AgentNotFound {
+                agent: target.to_string(),
+                message: format!("agent target {target} not found"),
+            })
     }
 
     fn send_prompt(&self, agent: &str, text: &str) -> Result<()> {
         let mut st = self.state.lock().unwrap();
         self.failing(&mut st, CallKind::AgentPrompt)?;
-        let a = st.agents.get(agent).ok_or_else(|| HerdrError::AgentNotFound {
-            agent: agent.to_string(),
-            message: format!("agent target {agent} not found"),
-        })?;
+        let a = st
+            .agents
+            .get(agent)
+            .ok_or_else(|| HerdrError::AgentNotFound {
+                agent: agent.to_string(),
+                message: format!("agent target {agent} not found"),
+            })?;
         if a.status == AgentStatus::Blocked {
             return Err(HerdrError::AgentBlocked {
                 agent: agent.to_string(),
@@ -354,14 +365,14 @@ impl RuntimeAdapter for FakeHerdr {
     fn rename_agent(&self, target: &str, new_name: &str) -> Result<()> {
         let mut st = self.state.lock().unwrap();
         self.failing(&mut st, CallKind::AgentRename)?;
-        let a =
-            st.agents
-                .get(target)
-                .cloned()
-                .ok_or_else(|| HerdrError::AgentNotFound {
-                    agent: target.to_string(),
-                    message: format!("agent target {target} not found"),
-                })?;
+        let a = st
+            .agents
+            .get(target)
+            .cloned()
+            .ok_or_else(|| HerdrError::AgentNotFound {
+                agent: target.to_string(),
+                message: format!("agent target {target} not found"),
+            })?;
         if st.agents.contains_key(new_name) && new_name != target {
             return Err(HerdrError::other(format!(
                 "agent name {new_name:?} is already in use"
@@ -395,10 +406,13 @@ impl RuntimeAdapter for FakeHerdr {
     fn pane(&self, pane: &str) -> Result<PaneInfo> {
         let mut st = self.state.lock().unwrap();
         self.failing(&mut st, CallKind::PaneGet)?;
-        st.panes.get(pane).cloned().ok_or_else(|| HerdrError::StalePane {
-            pane: pane.to_string(),
-            message: format!("STALE pane {pane}"),
-        })
+        st.panes
+            .get(pane)
+            .cloned()
+            .ok_or_else(|| HerdrError::StalePane {
+                pane: pane.to_string(),
+                message: format!("STALE pane {pane}"),
+            })
     }
 
     fn panes(&self, workspace: Option<&str>) -> Result<Vec<PaneInfo>> {
@@ -440,11 +454,7 @@ impl RuntimeAdapter for FakeHerdr {
         let (workspace, tab, cwd) = source
             .as_ref()
             .map_or(("w1".to_string(), "w1:t1".to_string(), None), |p| {
-                (
-                    p.workspace_id.clone(),
-                    p.tab_id.clone(),
-                    p.cwd.clone(),
-                )
+                (p.workspace_id.clone(), p.tab_id.clone(), p.cwd.clone())
             });
         let n = st.next_pane;
         st.next_pane = n + 1;
@@ -455,11 +465,7 @@ impl RuntimeAdapter for FakeHerdr {
             pane_id = format!("{workspace}:p{:x}", st.next_pane);
         }
         let mut pane = PaneInfo::new(&pane_id, &workspace, &tab);
-        pane.cwd = req
-            .cwd
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .or(cwd);
+        pane.cwd = req.cwd.as_ref().map(|p| p.display().to_string()).or(cwd);
         if req.focus {
             pane.focused = true;
             if let Some(p) = source.as_ref().and_then(|s| st.panes.get_mut(&s.pane_id)) {
@@ -534,19 +540,13 @@ mod tests {
         let f = FakeHerdr::new();
         f.add_pane(PaneInfo::new("w1:p1", "w1", "w1:t1"));
         f.add_agent(agent("claude-1", "w1:p1", AgentStatus::Idle));
-        assert_eq!(
-            f.agent("claude-1").unwrap().pane_id,
-            "w1:p1"
-        );
+        assert_eq!(f.agent("claude-1").unwrap().pane_id, "w1:p1");
         assert_eq!(f.pane("w1:p1").unwrap().agent.as_deref(), Some("claude-1"));
         f.remove_agent("claude-1");
         assert_eq!(f.agent_status("claude-1").unwrap(), AgentStatus::Gone);
         assert_eq!(f.pane("w1:p1").unwrap().agent, None);
         f.remove_pane("w1:p1");
-        assert!(matches!(
-            f.pane("w1:p1"),
-            Err(HerdrError::StalePane { .. })
-        ));
+        assert!(matches!(f.pane("w1:p1"), Err(HerdrError::StalePane { .. })));
     }
 
     #[test]
@@ -559,7 +559,10 @@ mod tests {
         assert_eq!(f.pane("w1:p1").unwrap().status, AgentStatus::Working);
         // An unwatchable agent stays unwatchable, never gone/blocked/idle (§4).
         f.set_status("claude-1", AgentStatus::Unwatchable);
-        assert_eq!(f.agent_status("claude-1").unwrap(), AgentStatus::Unwatchable);
+        assert_eq!(
+            f.agent_status("claude-1").unwrap(),
+            AgentStatus::Unwatchable
+        );
     }
 
     #[test]
@@ -567,11 +570,23 @@ mod tests {
         let f = FakeHerdr::new();
         f.fail_next(CallKind::AgentGet, 2, HerdrError::timed_out(30, "hung"));
         for _ in 0..2 {
-            assert!(matches!(f.agent("x"), Err(HerdrError::TimedOut { timeout_s: 30, .. })));
+            assert!(matches!(
+                f.agent("x"),
+                Err(HerdrError::TimedOut { timeout_s: 30, .. })
+            ));
         }
-        assert!(matches!(f.agent("x"), Err(HerdrError::AgentNotFound { .. })));
+        assert!(matches!(
+            f.agent("x"),
+            Err(HerdrError::AgentNotFound { .. })
+        ));
         // A fresh script replaces the old one.
-        f.fail_next(CallKind::AgentGet, 1, HerdrError::Unavailable { message: "down".into() });
+        f.fail_next(
+            CallKind::AgentGet,
+            1,
+            HerdrError::Unavailable {
+                message: "down".into(),
+            },
+        );
         assert!(matches!(f.agent("x"), Err(HerdrError::Unavailable { .. })));
     }
 
@@ -588,10 +603,22 @@ mod tests {
         assert_eq!(
             f.sent(),
             vec![
-                Sent::Prompt { agent: "claude-1".into(), text: "first".into() },
-                Sent::Text { pane: "w1:p2".into(), text: "@pane task".into() },
-                Sent::Keys { pane: "w1:p2".into(), keys: vec!["enter".into()] },
-                Sent::Run { pane: "w1:p2".into(), command: "true".into() },
+                Sent::Prompt {
+                    agent: "claude-1".into(),
+                    text: "first".into()
+                },
+                Sent::Text {
+                    pane: "w1:p2".into(),
+                    text: "@pane task".into()
+                },
+                Sent::Keys {
+                    pane: "w1:p2".into(),
+                    keys: vec!["enter".into()]
+                },
+                Sent::Run {
+                    pane: "w1:p2".into(),
+                    command: "true".into()
+                },
             ]
         );
     }
@@ -622,27 +649,39 @@ mod tests {
         let f = FakeHerdr::new();
         assert_eq!(
             f.availability().unwrap(),
-            Availability { in_pane: true, reachable: true }
+            Availability {
+                in_pane: true,
+                reachable: true
+            }
         );
         f.set_in_pane(false);
         f.set_reachable(false);
         assert_eq!(
             f.availability().unwrap(),
-            Availability { in_pane: false, reachable: false }
+            Availability {
+                in_pane: false,
+                reachable: false
+            }
         );
     }
 
     #[test]
     fn current_pane_reports_the_focused_or_set_pane() {
         let f = FakeHerdr::new();
-        assert!(matches!(f.current_pane(), Err(HerdrError::StalePane { .. })));
+        assert!(matches!(
+            f.current_pane(),
+            Err(HerdrError::StalePane { .. })
+        ));
         let mut p = PaneInfo::new("w1:p1", "w1", "w1:t1");
         p.focused = true;
         f.add_pane(p);
         assert_eq!(f.current_pane().unwrap().pane_id, "w1:p1");
         f.set_current_pane(Some("w1:p1"));
         f.remove_pane("w1:p1");
-        assert!(matches!(f.current_pane(), Err(HerdrError::StalePane { .. })));
+        assert!(matches!(
+            f.current_pane(),
+            Err(HerdrError::StalePane { .. })
+        ));
     }
 
     #[test]

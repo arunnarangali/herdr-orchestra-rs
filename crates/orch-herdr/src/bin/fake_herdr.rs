@@ -38,17 +38,27 @@ fn main() {
     let dir = PathBuf::from(dir);
     let _ = fs::create_dir_all(&dir);
     append(&dir, "pids.log", &format!("{}\n", std::process::id()));
-    append(&dir, "calls.jsonl", &format!("{}\n", json!({ "args": args })));
+    append(
+        &dir,
+        "calls.jsonl",
+        &format!("{}\n", json!({ "args": args })),
+    );
 
     let sim: Value = read_json(&dir.join("sim.json")).unwrap_or(Value::Null);
     let line = args.join(" ");
-    let applies = sim.get("fail_cmd").and_then(Value::as_str).is_none_or(|p| line.starts_with(p));
+    let applies = sim
+        .get("fail_cmd")
+        .and_then(Value::as_str)
+        .is_none_or(|p| line.starts_with(p));
     if applies {
         if let Some(ms) = sim.get("slow_ms").and_then(Value::as_u64) {
             std::thread::sleep(std::time::Duration::from_millis(ms));
         }
         if let Some(code) = sim.get("fail_exit").and_then(Value::as_i64) {
-            let msg = sim.get("fail_message").and_then(Value::as_str).unwrap_or("fake herdr failure");
+            let msg = sim
+                .get("fail_message")
+                .and_then(Value::as_str)
+                .unwrap_or("fake herdr failure");
             eprintln!("{msg}");
             std::process::exit(code as i32);
         }
@@ -58,17 +68,27 @@ fn main() {
         // Like herdr 0.9.5: usage on stderr, exit 2, ending in the kinds line.
         let kinds = fs::read_to_string(dir.join("kinds.txt")).unwrap_or_default();
         let kinds = kinds.trim();
-        let kinds = if kinds.is_empty() { "pi|claude|codex|gemini|agy|opencode|amp|hermes" } else { kinds };
+        let kinds = if kinds.is_empty() {
+            "pi|claude|codex|gemini|agy|opencode|amp|hermes"
+        } else {
+            kinds
+        };
         eprintln!("usage:\n  herdr agent list\n  herdr agent get <target>\n  kinds: {kinds}");
         std::process::exit(2);
     }
 
-    let id = format!("cli:{}", args.iter().take(2).cloned().collect::<Vec<_>>().join(":"));
+    let id = format!(
+        "cli:{}",
+        args.iter().take(2).cloned().collect::<Vec<_>>().join(":")
+    );
     match dispatch(&dir, &args) {
         Ok(Value::String(raw)) => print!("{raw}"),
         Ok(result) => println!("{}", json!({ "id": id, "result": result })),
         Err((code, message)) => {
-            println!("{}", json!({ "id": id, "error": { "code": code, "message": message } }));
+            println!(
+                "{}",
+                json!({ "id": id, "error": { "code": code, "message": message } })
+            );
             std::process::exit(1);
         }
     }
@@ -87,19 +107,27 @@ fn dispatch(dir: &Path, args: &[String]) -> Reply {
         ["agent", "prompt", t, text] => {
             let (_, agent) = find_agent(dir, t)?;
             if str_of(&agent, "agent_status") == "blocked" {
-                return Err(("agent_blocked".into(), format!("agent {t} is blocked at an approval prompt")));
+                return Err((
+                    "agent_blocked".into(),
+                    format!("agent {t} is blocked at an approval prompt"),
+                ));
             }
             record(dir, json!({ "kind": "prompt", "target": t, "text": text }));
             Ok(json!({ "type": "ok" }))
         }
         ["agent", "read", t, rest @ ..] => {
             let (_, agent) = find_agent(dir, t)?;
-            let lines = flag(rest, "--lines").and_then(|n| n.parse::<usize>().ok()).unwrap_or(usize::MAX);
+            let lines = flag(rest, "--lines")
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or(usize::MAX);
             let name = str_of(&agent, "name");
-            let text = fs::read_to_string(dir.join("read").join(format!("{name}.txt"))).unwrap_or_default();
+            let text = fs::read_to_string(dir.join("read").join(format!("{name}.txt")))
+                .unwrap_or_default();
             let all: Vec<&str> = text.lines().collect();
             let tail = &all[all.len().saturating_sub(lines)..];
-            Ok(Value::String(tail.iter().map(|l| format!("{l}\n")).collect()))
+            Ok(Value::String(
+                tail.iter().map(|l| format!("{l}\n")).collect(),
+            ))
         }
         ["agent", "rename", t, name] => {
             let (path, mut agent) = find_agent(dir, t)?;
@@ -134,7 +162,10 @@ fn dispatch(dir: &Path, args: &[String]) -> Reply {
         ["pane", "split", rest @ ..] => split(dir, rest),
         ["pane", "run", id, command @ ..] => {
             find_pane(dir, id)?;
-            record(dir, json!({ "kind": "run", "target": id, "text": command.join(" ") }));
+            record(
+                dir,
+                json!({ "kind": "run", "target": id, "text": command.join(" ") }),
+            );
             Ok(json!({ "type": "ok" }))
         }
         ["pane", "send-text", id, text] => {
@@ -151,19 +182,31 @@ fn dispatch(dir: &Path, args: &[String]) -> Reply {
             let ws = read_json(&dir.join("workspaces.json")).unwrap_or_else(|| json!([]));
             Ok(json!({ "type": "workspace_list", "workspaces": ws }))
         }
-        _ => Err(("invalid_request".into(), format!("fake-herdr: unsupported command: {}", args.join(" ")))),
+        _ => Err((
+            "invalid_request".into(),
+            format!("fake-herdr: unsupported command: {}", args.join(" ")),
+        )),
     }
 }
 
 fn split(dir: &Path, rest: &[&str]) -> Reply {
-    let source = rest.first().filter(|s| !s.starts_with("--")).map(|s| s.to_string());
+    let source = rest
+        .first()
+        .filter(|s| !s.starts_with("--"))
+        .map(|s| s.to_string());
     let source = match source {
         Some(s) => s,
-        None => fs::read_to_string(dir.join("current_pane")).unwrap_or_default().trim().to_string(),
+        None => fs::read_to_string(dir.join("current_pane"))
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
     };
     let (_, parent) = find_pane(dir, &source)?;
     let counter = dir.join("next_pane");
-    let n: u64 = fs::read_to_string(&counter).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(100);
+    let n: u64 = fs::read_to_string(&counter)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(100);
     let _ = fs::write(&counter, (n + 1).to_string());
     let ws = str_of(&parent, "workspace_id");
     let id = format!("{ws}:p{n}");
@@ -173,19 +216,31 @@ fn split(dir: &Path, rest: &[&str]) -> Reply {
     pane.insert("tab_id".into(), parent["tab_id"].clone());
     pane.insert("agent_status".into(), json!("unknown"));
     pane.insert("focused".into(), json!(rest.contains(&"--focus")));
-    pane.insert("cwd".into(), flag(rest, "--cwd").map_or(parent["cwd"].clone(), |c| json!(c)));
+    pane.insert(
+        "cwd".into(),
+        flag(rest, "--cwd").map_or(parent["cwd"].clone(), |c| json!(c)),
+    );
     let pane = Value::Object(pane);
     write_json(&dir.join("panes").join(format!("{id}.json")), &pane);
-    record(dir, json!({ "kind": "split", "target": source, "direction": flag(rest, "--direction"), "cwd": flag(rest, "--cwd") }));
+    record(
+        dir,
+        json!({ "kind": "split", "target": source, "direction": flag(rest, "--direction"), "cwd": flag(rest, "--cwd") }),
+    );
     Ok(json!({ "type": "pane_info", "pane": pane }))
 }
 
 fn flag<'a>(args: &[&'a str], name: &str) -> Option<&'a str> {
-    args.iter().position(|a| *a == name).and_then(|i| args.get(i + 1)).copied()
+    args.iter()
+        .position(|a| *a == name)
+        .and_then(|i| args.get(i + 1))
+        .copied()
 }
 
 fn str_of(v: &Value, key: &str) -> String {
-    v.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+    v.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// An agent by name or pane id: its file and its JSON.
@@ -196,16 +251,28 @@ fn find_agent(dir: &Path, target: &str) -> Result<(PathBuf, Value), (String, Str
         .flatten()
         .filter_map(|e| read_json(&e.path()).map(|v| (e.path(), v)))
         .find(|(_, v)| str_of(v, "name") == target || str_of(v, "pane_id") == target);
-    found.ok_or_else(|| ("agent_not_found".into(), format!("agent target {target} not found")))
+    found.ok_or_else(|| {
+        (
+            "agent_not_found".into(),
+            format!("agent target {target} not found"),
+        )
+    })
 }
 
 fn find_pane(dir: &Path, id: &str) -> Result<(PathBuf, Value), (String, String)> {
     let path = dir.join("panes").join(format!("{id}.json"));
-    read_json(&path).map(|v| (path, v)).ok_or_else(|| ("pane_not_found".into(), format!("pane {id} not found")))
+    read_json(&path)
+        .map(|v| (path, v))
+        .ok_or_else(|| ("pane_not_found".into(), format!("pane {id} not found")))
 }
 
 fn load_dir(d: &Path) -> Vec<Value> {
-    fs::read_dir(d).into_iter().flatten().flatten().filter_map(|e| read_json(&e.path())).collect()
+    fs::read_dir(d)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| read_json(&e.path()))
+        .collect()
 }
 
 fn read_json(p: &Path) -> Option<Value> {
@@ -224,7 +291,11 @@ fn record(dir: &Path, entry: Value) {
 }
 
 fn append(dir: &Path, file: &str, text: &str) {
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(dir.join(file)) {
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(file))
+    {
         let _ = f.write_all(text.as_bytes());
     }
 }

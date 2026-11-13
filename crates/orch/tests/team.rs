@@ -3,6 +3,8 @@
 //! v4.10.1's `cmd_team` output. The `team up` engine is tested against the fake herdr
 //! backend in the `team` module of the binary itself.
 
+mod common;
+
 use std::process::{Command, Output};
 
 /// `orch` with a temporary HOME, no user config files and a PATH holding only `bins`.
@@ -28,12 +30,10 @@ fn orch_cfg(
 /// A temp HOME, a PATH dir with an executable `codex` (never run) in it, and the user
 /// config files pointing at `home`. Returns (home, bin).
 fn sandbox() -> (tempfile::TempDir, tempfile::TempDir) {
-    use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let f = bin.path().join("codex");
-    std::fs::write(&f, "#!/bin/sh\nexit 99\n").unwrap();
-    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    common::write_executable(&f, "exit 99");
     (home, bin)
 }
 

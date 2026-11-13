@@ -17,7 +17,11 @@ struct State(PathBuf);
 impl State {
     fn new() -> Self {
         static N: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!("fake-herdr-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let dir = std::env::temp_dir().join(format!(
+            "fake-herdr-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
         fs::create_dir_all(&dir).unwrap();
         State(dir)
     }
@@ -107,8 +111,14 @@ fn agent_get_reads_only_the_status_field() {
         .to_string(),
     );
     let h = s.herdr();
-    assert_eq!(h.agent("working-blocked").unwrap().status, AgentStatus::Idle);
-    assert_eq!(h.agent_status("working-blocked").unwrap(), AgentStatus::Idle);
+    assert_eq!(
+        h.agent("working-blocked").unwrap().status,
+        AgentStatus::Idle
+    );
+    assert_eq!(
+        h.agent_status("working-blocked").unwrap(),
+        AgentStatus::Idle
+    );
     // Addressing by pane id works too.
     assert_eq!(h.agent("w1:p1").unwrap().name, "working-blocked");
 }
@@ -135,17 +145,31 @@ fn a_missing_agent_is_agent_not_found_and_status_gone() {
         other => panic!("{other:?}"),
     }
     assert_eq!(h.agent_status("nobody").unwrap(), AgentStatus::Gone);
-    assert!(matches!(h.read_output("nobody", 5), Err(HerdrError::AgentNotFound { .. })));
-    assert!(matches!(h.send_prompt("nobody", "hi"), Err(HerdrError::AgentNotFound { .. })));
+    assert!(matches!(
+        h.read_output("nobody", 5),
+        Err(HerdrError::AgentNotFound { .. })
+    ));
+    assert!(matches!(
+        h.send_prompt("nobody", "hi"),
+        Err(HerdrError::AgentNotFound { .. })
+    ));
 }
 
 #[test]
 fn send_prompt_delivers_and_is_recorded() {
     let s = State::new();
     s.agent("claude-1", "idle", "w1:p2");
-    s.herdr().send_prompt("claude-1", "do the thing --now").unwrap();
-    assert_eq!(s.sent(), vec![json!({"kind": "prompt", "target": "claude-1", "text": "do the thing --now"})]);
-    assert_eq!(s.lines("calls.jsonl")[0]["args"], json!(["agent", "prompt", "claude-1", "do the thing --now"]));
+    s.herdr()
+        .send_prompt("claude-1", "do the thing --now")
+        .unwrap();
+    assert_eq!(
+        s.sent(),
+        vec![json!({"kind": "prompt", "target": "claude-1", "text": "do the thing --now"})]
+    );
+    assert_eq!(
+        s.lines("calls.jsonl")[0]["args"],
+        json!(["agent", "prompt", "claude-1", "do the thing --now"])
+    );
 }
 
 #[test]
@@ -156,7 +180,10 @@ fn a_blocked_agent_refuses_the_prompt() {
         Err(HerdrError::AgentBlocked { agent, .. }) => assert_eq!(agent, "claude-1"),
         other => panic!("{other:?}"),
     }
-    assert!(s.sent().is_empty(), "a refused prompt must not be recorded as delivered");
+    assert!(
+        s.sent().is_empty(),
+        "a refused prompt must not be recorded as delivered"
+    );
 }
 
 #[test]
@@ -168,7 +195,15 @@ fn read_output_asks_for_recent_unwrapped_lines() {
     assert_eq!(out, "three\nfour\n");
     assert_eq!(
         s.lines("calls.jsonl")[0]["args"],
-        json!(["agent", "read", "claude-1", "--source", "recent-unwrapped", "--lines", "2"])
+        json!([
+            "agent",
+            "read",
+            "claude-1",
+            "--source",
+            "recent-unwrapped",
+            "--lines",
+            "2"
+        ])
     );
 }
 
@@ -179,10 +214,16 @@ fn rename_agent_and_pane() {
     let h = s.herdr();
     h.rename_agent("w1:p2", "coder").unwrap();
     assert_eq!(h.agent("coder").unwrap().pane_id, "w1:p2");
-    assert!(matches!(h.agent("claude-1"), Err(HerdrError::AgentNotFound { .. })));
+    assert!(matches!(
+        h.agent("claude-1"),
+        Err(HerdrError::AgentNotFound { .. })
+    ));
     h.rename_pane("w1:p2", "the coder").unwrap();
     assert_eq!(h.pane("w1:p2").unwrap().label.as_deref(), Some("the coder"));
-    assert!(matches!(h.rename_agent("ghost", "x"), Err(HerdrError::AgentNotFound { .. })));
+    assert!(matches!(
+        h.rename_agent("ghost", "x"),
+        Err(HerdrError::AgentNotFound { .. })
+    ));
 }
 
 #[test]
@@ -210,12 +251,18 @@ fn an_unknown_pane_id_is_a_stale_pane_for_every_pane_call() {
         Err(HerdrError::StalePane { pane, .. }) => assert_eq!(pane, "w9:p99"),
         other => panic!("{other:?}"),
     };
-    assert!(matches!(h.pane("w9:p99"), Err(HerdrError::StalePane { .. })));
+    assert!(matches!(
+        h.pane("w9:p99"),
+        Err(HerdrError::StalePane { .. })
+    ));
     stale(h.rename_pane("w9:p99", "x"));
     stale(h.run_command("w9:p99", "ls"));
     stale(h.send_text("w9:p99", "x"));
     stale(h.send_keys("w9:p99", &["enter"]));
-    stale(h.split_pane(&SplitPane::right("w9:p99", Path::new("/repo"))).map(|_| ()));
+    stale(
+        h.split_pane(&SplitPane::right("w9:p99", Path::new("/repo")))
+            .map(|_| ()),
+    );
 }
 
 #[test]
@@ -233,22 +280,40 @@ fn current_pane_and_workspaces() {
     let ws = h.workspaces().unwrap();
     assert_eq!(ws[0].label, "orchestra");
     assert_eq!(ws[0].pane_count, 1);
-    assert_eq!(s.lines("calls.jsonl")[0]["args"], json!(["pane", "current", "--current"]));
+    assert_eq!(
+        s.lines("calls.jsonl")[0]["args"],
+        json!(["pane", "current", "--current"])
+    );
 
     fs::remove_file(s.0.join("current_pane")).unwrap();
-    assert!(matches!(h.current_pane(), Err(HerdrError::StalePane { .. })));
+    assert!(matches!(
+        h.current_pane(),
+        Err(HerdrError::StalePane { .. })
+    ));
 }
 
 #[test]
 fn split_pane_passes_cwd_and_returns_the_new_pane() {
     let s = State::new();
     s.pane("w1:p1");
-    let p = s.herdr().split_pane(&SplitPane::right("w1:p1", Path::new("/work/tree"))).unwrap();
+    let p = s
+        .herdr()
+        .split_pane(&SplitPane::right("w1:p1", Path::new("/work/tree")))
+        .unwrap();
     assert_eq!(p.pane_id, "w1:p100");
     assert_eq!(p.cwd.as_deref(), Some("/work/tree"));
     assert_eq!(
         s.lines("calls.jsonl")[0]["args"],
-        json!(["pane", "split", "w1:p1", "--direction", "right", "--cwd", "/work/tree", "--no-focus"])
+        json!([
+            "pane",
+            "split",
+            "w1:p1",
+            "--direction",
+            "right",
+            "--cwd",
+            "/work/tree",
+            "--no-focus"
+        ])
     );
     assert_eq!(s.herdr().pane("w1:p100").unwrap().workspace_id, "w1");
 }
@@ -283,7 +348,12 @@ fn an_at_pane_agent_gets_the_text_then_enter() {
             json!({"kind": "keys", "target": "w1:p7", "keys": ["enter"]}),
         ]
     );
-    assert!(s.lines("calls.jsonl").iter().all(|c| c["args"][0] != "agent"), "no `agent prompt` for a bare pane");
+    assert!(
+        s.lines("calls.jsonl")
+            .iter()
+            .all(|c| c["args"][0] != "agent"),
+        "no `agent prompt` for a bare pane"
+    );
 }
 
 #[test]
@@ -317,11 +387,17 @@ fn availability_reflects_herdr_env_and_reachability() {
 fn a_missing_binary_is_unavailable() {
     let h = CliHerdr::new("/nonexistent/herdr-binary", 5);
     assert!(matches!(h.agents(), Err(HerdrError::Unavailable { .. })));
-    assert!(matches!(h.send_prompt("a", "b"), Err(HerdrError::Unavailable { .. })));
+    assert!(matches!(
+        h.send_prompt("a", "b"),
+        Err(HerdrError::Unavailable { .. })
+    ));
     let a = h.availability().unwrap();
     assert!(!a.reachable);
     // A missing herdr is not a stale pane, even for an @pane delivery.
-    assert!(matches!(h.send_prompt("@pane:w1:p1", "b"), Err(HerdrError::Unavailable { .. })));
+    assert!(matches!(
+        h.send_prompt("@pane:w1:p1", "b"),
+        Err(HerdrError::Unavailable { .. })
+    ));
 }
 
 #[test]
@@ -344,14 +420,19 @@ fn a_failure_can_be_limited_to_one_command() {
     s.sim(json!({"fail_exit": 1, "fail_cmd": "agent prompt", "fail_message": "nope"}));
     let h = s.herdr();
     assert!(h.agent("claude-1").is_ok());
-    assert!(matches!(h.send_prompt("claude-1", "x"), Err(HerdrError::Other { .. })));
+    assert!(matches!(
+        h.send_prompt("claude-1", "x"),
+        Err(HerdrError::Other { .. })
+    ));
 }
 
 #[test]
 fn a_slow_herdr_is_a_timeout_and_leaves_no_child_behind() {
     let s = State::new();
     s.sim(json!({"slow_ms": 20000}));
-    let h = CliHerdr::new(FAKE, 1).without_inherited_herdr_env().with_env("FAKE_HERDR_DIR", s.0.to_str().unwrap());
+    let h = CliHerdr::new(FAKE, 1)
+        .without_inherited_herdr_env()
+        .with_env("FAKE_HERDR_DIR", s.0.to_str().unwrap());
     let started = std::time::Instant::now();
     match h.agents() {
         Err(HerdrError::TimedOut { timeout_s, message }) => {
@@ -360,10 +441,20 @@ fn a_slow_herdr_is_a_timeout_and_leaves_no_child_behind() {
         }
         other => panic!("{other:?}"),
     }
-    assert!(started.elapsed().as_secs() < 10, "the call must stop at the timeout");
-    let pids: Vec<u32> = fs::read_to_string(s.0.join("pids.log")).unwrap().lines().map(|l| l.parse().unwrap()).collect();
+    assert!(
+        started.elapsed().as_secs() < 10,
+        "the call must stop at the timeout"
+    );
+    let pids: Vec<u32> = fs::read_to_string(s.0.join("pids.log"))
+        .unwrap()
+        .lines()
+        .map(|l| l.parse().unwrap())
+        .collect();
     assert_eq!(pids.len(), 1);
-    assert!(!pid_alive(pids[0]), "the timed-out herdr process must be gone");
+    assert!(
+        !pid_alive(pids[0]),
+        "the timed-out herdr process must be gone"
+    );
 }
 
 #[test]
@@ -375,17 +466,28 @@ fn the_backend_comes_from_the_tunables() {
     })
     .unwrap();
     let s = State::new();
-    let h = CliHerdr::from_tunables(&t).without_inherited_herdr_env().with_env("FAKE_HERDR_DIR", s.0.to_str().unwrap());
+    let h = CliHerdr::from_tunables(&t)
+        .without_inherited_herdr_env()
+        .with_env("FAKE_HERDR_DIR", s.0.to_str().unwrap());
     assert_eq!(h.timeout_s(), 7);
     assert!(h.agents().unwrap().is_empty());
-    assert_eq!(s.lines("calls.jsonl").len(), 1, "the HERDR binary was the one run");
+    assert_eq!(
+        s.lines("calls.jsonl").len(),
+        1,
+        "the HERDR binary was the one run"
+    );
 }
 
 #[test]
 fn agent_kinds_reads_the_kinds_line_of_plain_herdr_agent() {
     let st = State::new();
     let h = st.herdr();
-    assert_eq!(h.agent_kinds().unwrap(), ["pi", "claude", "codex", "gemini", "agy", "opencode", "amp", "hermes"]);
+    assert_eq!(
+        h.agent_kinds().unwrap(),
+        [
+            "pi", "claude", "codex", "gemini", "agy", "opencode", "amp", "hermes"
+        ]
+    );
     st.put("kinds.txt", "alpha|beta\n");
     assert_eq!(st.herdr().agent_kinds().unwrap(), ["alpha", "beta"]);
 }

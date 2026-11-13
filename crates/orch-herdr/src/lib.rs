@@ -14,7 +14,7 @@ pub mod fake;
 pub mod model;
 pub mod status;
 
-pub use adapter::{RuntimeAdapter, SplitPane, SplitDirection, Availability};
+pub use adapter::{Availability, RuntimeAdapter, SplitDirection, SplitPane};
 pub use error::HerdrError;
 pub use fake::{CallKind, FakeHerdr, Sent};
 pub use model::{AgentInfo, PaneInfo, WorkspaceInfo};

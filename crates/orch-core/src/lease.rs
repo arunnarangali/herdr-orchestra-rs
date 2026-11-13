@@ -3,8 +3,8 @@
 
 use crate::error::EXIT_USAGE;
 use crate::{Error, Result};
-use serde::{Deserialize, Serialize};
 use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{Seek, Write};
@@ -55,10 +55,7 @@ impl DriverInfo {
     /// `orch autopilot (pid 123 on host, started 14:05:09)`, with `?` for missing fields
     /// (Python's `driver_line`). The start time is local time.
     pub fn holder_line(&self) -> String {
-        let started = self
-            .started
-            .map(hhmmss)
-            .unwrap_or_else(|| "?".to_string());
+        let started = self.started.map(hhmmss).unwrap_or_else(|| "?".to_string());
         format!(
             "orch autopilot (pid {} on {}, started {})",
             self.pid.map_or("?".to_string(), |p| p.to_string()),
@@ -123,7 +120,9 @@ pub fn take_lease(path: &Path) -> Result<DriverLease> {
         })?;
     if let Err(e) = file.try_lock_exclusive() {
         if e.kind() == std::io::ErrorKind::WouldBlock {
-            return Err(Error::from(LeaseError::Held(driver_info(path).holder_line())));
+            return Err(Error::from(LeaseError::Held(
+                driver_info(path).holder_line(),
+            )));
         }
         return Err(Error::from(LeaseError::Io {
             op: "lock".to_string(),
@@ -139,7 +138,12 @@ pub fn take_lease(path: &Path) -> Result<DriverLease> {
         token: Some(token.clone()),
     };
     write_info(&mut file, path, &info)?;
-    Ok(DriverLease { file, path: path.to_path_buf(), token, info })
+    Ok(DriverLease {
+        file,
+        path: path.to_path_buf(),
+        token,
+        info,
+    })
 }
 
 fn write_info(file: &mut File, path: &Path, info: &DriverInfo) -> Result<()> {
@@ -223,7 +227,12 @@ fn hhmmss(epoch: i64) -> String {
 fn hhmmss_in(epoch: i64, tz: Option<&Path>) -> String {
     let offset = tz.and_then(|p| tz_offset(p, epoch)).unwrap_or(0);
     let secs = (epoch + offset).rem_euclid(86_400);
-    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 /// The TZif file the system's local timezone comes from: `$TZ` (`/usr/share/zoneinfo/<TZ>`,
@@ -276,11 +285,19 @@ fn parse_block(data: &[u8], start: usize, tsz: usize) -> Option<TzBlock> {
     }
     let counts = |i: usize| -> Option<usize> {
         Some(u32::from_be_bytes(
-            data[start + 20 + 4 * i..start + 24 + 4 * i].try_into().ok()?,
+            data[start + 20 + 4 * i..start + 24 + 4 * i]
+                .try_into()
+                .ok()?,
         ) as usize)
     };
-    let (isutcnt, isstdcnt, leapcnt, timecnt, typecnt, charcnt) =
-        (counts(0)?, counts(1)?, counts(2)?, counts(3)?, counts(4)?, counts(5)?);
+    let (isutcnt, isstdcnt, leapcnt, timecnt, typecnt, charcnt) = (
+        counts(0)?,
+        counts(1)?,
+        counts(2)?,
+        counts(3)?,
+        counts(4)?,
+        counts(5)?,
+    );
     let mut off = start + 44;
     let mut trans = Vec::with_capacity(timecnt);
     for i in 0..timecnt {
@@ -295,10 +312,18 @@ fn parse_block(data: &[u8], start: usize, tsz: usize) -> Option<TzBlock> {
     let mut types = Vec::with_capacity(typecnt);
     for i in 0..typecnt {
         let raw = data.get(off + i * 6..off + (i + 1) * 6)?;
-        types.push((i64::from(i32::from_be_bytes(raw[0..4].try_into().ok()?)), raw[4] != 0));
+        types.push((
+            i64::from(i32::from_be_bytes(raw[0..4].try_into().ok()?)),
+            raw[4] != 0,
+        ));
     }
     off += typecnt * 6 + charcnt + leapcnt * (tsz + 4) + isstdcnt + isutcnt;
-    Some(TzBlock { trans, idx, types, end: off })
+    Some(TzBlock {
+        trans,
+        idx,
+        types,
+        end: off,
+    })
 }
 
 #[cfg(test)]
@@ -330,7 +355,10 @@ mod tests {
         assert_eq!(info.token.as_deref(), Some(lease.token.as_str()));
         assert_eq!(lease.info, info);
         for key in ["pid", "host", "started", "token"] {
-            assert!(text.contains(&format!("\"{key}\"")), "missing {key}: {text}");
+            assert!(
+                text.contains(&format!("\"{key}\"")),
+                "missing {key}: {text}"
+            );
         }
     }
 
@@ -347,10 +375,19 @@ mod tests {
             started: Some(0),
             token: None,
         };
-        assert_eq!(info.holder_line(), "orch autopilot (pid 123 on box, started 00:00:00)");
-        assert_eq!(DriverInfo::default().holder_line(), "orch autopilot (pid ? on ?, started ?)");
+        assert_eq!(
+            info.holder_line(),
+            "orch autopilot (pid 123 on box, started 00:00:00)"
+        );
+        assert_eq!(
+            DriverInfo::default().holder_line(),
+            "orch autopilot (pid ? on ?, started ?)"
+        );
         unsafe { std::env::remove_var("TZ") };
-        assert_eq!(DriverInfo::default().holder_line(), "orch autopilot (pid ? on ?, started ?)");
+        assert_eq!(
+            DriverInfo::default().holder_line(),
+            "orch autopilot (pid ? on ?, started ?)"
+        );
     }
 
     /// A minimal TZif v1 file: `types` as (gmtoff, isdst), at most one transition at
