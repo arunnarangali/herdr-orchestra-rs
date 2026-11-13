@@ -49,7 +49,11 @@ impl CliHerdr {
     /// A backend running `bin` (a name on `PATH` or a path), every call bounded
     /// by `timeout_s` seconds (at least 1).
     pub fn new(bin: impl Into<String>, timeout_s: u64) -> Self {
-        CliHerdr { bin: bin.into(), timeout_s: timeout_s.max(1), env: Vec::new() }
+        CliHerdr {
+            bin: bin.into(),
+            timeout_s: timeout_s.max(1),
+            env: Vec::new(),
+        }
     }
 
     /// A backend from the tunables: the `HERDR` binary and `ORCH_HERDR_TIMEOUT_S`.
@@ -92,9 +96,15 @@ impl CliHerdr {
 
     /// Run `herdr <args>` to completion or to the timeout.
     fn run(&self, args: &[&str]) -> Result<Finished> {
-        let label = format!("herdr {}", args.iter().take(2).copied().collect::<Vec<_>>().join(" "));
+        let label = format!(
+            "herdr {}",
+            args.iter().take(2).copied().collect::<Vec<_>>().join(" ")
+        );
         let mut cmd = Command::new(&self.bin);
-        cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         for (k, v) in &self.env {
             match v {
                 Some(v) => cmd.env(k, v),
@@ -115,7 +125,10 @@ impl CliHerdr {
                     let _ = child.wait();
                     let _ = out.join();
                     let _ = err.join();
-                    return Err(HerdrError::timed_out(self.timeout_s, format!("{label} timed out")));
+                    return Err(HerdrError::timed_out(
+                        self.timeout_s,
+                        format!("{label} timed out"),
+                    ));
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(5)),
                 Err(e) => {
@@ -136,7 +149,10 @@ impl CliHerdr {
     /// reply to the matching [`HerdrError`]. `target` is the agent or pane the
     /// call was about, kept in the error.
     fn call(&self, args: &[&str], target: &str) -> Result<String> {
-        let label = format!("herdr {}", args.iter().take(2).copied().collect::<Vec<_>>().join(" "));
+        let label = format!(
+            "herdr {}",
+            args.iter().take(2).copied().collect::<Vec<_>>().join(" ")
+        );
         let f = self.run(args)?;
         if f.code != Some(0) {
             return Err(failure(&label, &f, target));
@@ -151,7 +167,11 @@ impl CliHerdr {
     fn call_json(&self, args: &[&str], target: &str) -> Result<Value> {
         let stdout = self.call(args, target)?;
         let mut v: Value = serde_json::from_str(stdout.trim()).map_err(|e| {
-            HerdrError::other(format!("herdr {}: reply is not JSON ({e}): {}", args.join(" "), stdout.trim()))
+            HerdrError::other(format!(
+                "herdr {}: reply is not JSON ({e}): {}",
+                args.join(" "),
+                stdout.trim()
+            ))
         })?;
         Ok(v.get_mut("result").map(Value::take).unwrap_or(Value::Null))
     }
@@ -160,10 +180,14 @@ impl CliHerdr {
     fn field<T: DeserializeOwned>(&self, args: &[&str], target: &str, key: &str) -> Result<T> {
         let mut result = self.call_json(args, target)?;
         let v = result.get_mut(key).map(Value::take).ok_or_else(|| {
-            HerdrError::other(format!("herdr {}: reply has no result.{key}", args.join(" ")))
+            HerdrError::other(format!(
+                "herdr {}: reply has no result.{key}",
+                args.join(" ")
+            ))
         })?;
-        serde_json::from_value(v)
-            .map_err(|e| HerdrError::other(format!("herdr {}: bad result.{key}: {e}", args.join(" "))))
+        serde_json::from_value(v).map_err(|e| {
+            HerdrError::other(format!("herdr {}: bad result.{key}: {e}", args.join(" ")))
+        })
     }
 }
 
@@ -189,9 +213,18 @@ struct ErrorReply {
 impl ErrorReply {
     fn into_error(self, target: &str) -> HerdrError {
         match self.code.as_str() {
-            "agent_not_found" => HerdrError::AgentNotFound { agent: target.to_string(), message: self.message },
-            "agent_blocked" => HerdrError::AgentBlocked { agent: target.to_string(), message: self.message },
-            "pane_not_found" => HerdrError::StalePane { pane: target.to_string(), message: self.message },
+            "agent_not_found" => HerdrError::AgentNotFound {
+                agent: target.to_string(),
+                message: self.message,
+            },
+            "agent_blocked" => HerdrError::AgentBlocked {
+                agent: target.to_string(),
+                message: self.message,
+            },
+            "pane_not_found" => HerdrError::StalePane {
+                pane: target.to_string(),
+                message: self.message,
+            },
             _ => HerdrError::other(format!("{}: {}", self.code, self.message)),
         }
     }
@@ -201,8 +234,16 @@ fn error_reply(text: &str) -> Option<ErrorReply> {
     let v: Value = serde_json::from_str(text.trim()).ok()?;
     let e = v.get("error")?;
     Some(ErrorReply {
-        code: e.get("code").and_then(Value::as_str).unwrap_or("error").to_string(),
-        message: e.get("message").and_then(Value::as_str).unwrap_or("").to_string(),
+        code: e
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or("error")
+            .to_string(),
+        message: e
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
     })
 }
 
@@ -214,8 +255,14 @@ fn failure(label: &str, f: &Finished, target: &str) -> HerdrError {
     }
     let text = format!("{}{}", f.stdout, f.stderr);
     let text = text.trim();
-    let code = f.code.map_or("a signal".to_string(), |c| format!("exit {c}"));
-    HerdrError::other(if text.is_empty() { format!("{label} failed ({code})") } else { format!("{label} failed ({code}): {text}") })
+    let code = f
+        .code
+        .map_or("a signal".to_string(), |c| format!("exit {c}"));
+    HerdrError::other(if text.is_empty() {
+        format!("{label} failed ({code})")
+    } else {
+        format!("{label} failed ({code}): {text}")
+    })
 }
 
 /// An agent as herdr reports it; `name` is absent for an unnamed agent, which
@@ -264,10 +311,14 @@ impl RuntimeAdapter for CliHerdr {
     }
 
     fn current_pane(&self) -> Result<PaneInfo> {
-        self.field(&["pane", "current", "--current"], "(current pane)", "pane").map_err(|e| match e {
-            HerdrError::Other { message } => HerdrError::StalePane { pane: "(current pane)".into(), message },
-            e => e,
-        })
+        self.field(&["pane", "current", "--current"], "(current pane)", "pane")
+            .map_err(|e| match e {
+                HerdrError::Other { message } => HerdrError::StalePane {
+                    pane: "(current pane)".into(),
+                    message,
+                },
+                e => e,
+            })
     }
 
     fn agents(&self) -> Result<Vec<AgentInfo>> {
@@ -283,7 +334,12 @@ impl RuntimeAdapter for CliHerdr {
         let text = format!("{}\n{}", f.stdout, f.stderr);
         text.lines()
             .find_map(|l| l.trim().strip_prefix("kinds:"))
-            .map(|k| k.split('|').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .map(|k| {
+                k.split('|')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .ok_or_else(|| HerdrError::other("herdr agent: no `kinds:` line in its usage text"))
     }
 
@@ -300,20 +356,34 @@ impl RuntimeAdapter for CliHerdr {
                 .and_then(|()| self.send_keys(pane, &["enter"]))
                 .map_err(|e| stale_pane(e, agent, pane));
         }
-        self.call(&["agent", "prompt", agent, text], agent).map(|_| ())
+        self.call(&["agent", "prompt", agent, text], agent)
+            .map(|_| ())
     }
 
     fn read_output(&self, agent: &str, lines: u32) -> Result<String> {
         let n = lines.to_string();
-        self.call(&["agent", "read", agent, "--source", "recent-unwrapped", "--lines", &n], agent)
+        self.call(
+            &[
+                "agent",
+                "read",
+                agent,
+                "--source",
+                "recent-unwrapped",
+                "--lines",
+                &n,
+            ],
+            agent,
+        )
     }
 
     fn rename_agent(&self, target: &str, new_name: &str) -> Result<()> {
-        self.call(&["agent", "rename", target, new_name], target).map(|_| ())
+        self.call(&["agent", "rename", target, new_name], target)
+            .map(|_| ())
     }
 
     fn rename_pane(&self, pane: &str, label: &str) -> Result<()> {
-        self.call(&["pane", "rename", pane, label], pane).map(|_| ())
+        self.call(&["pane", "rename", pane, label], pane)
+            .map(|_| ())
     }
 
     fn pane(&self, pane: &str) -> Result<PaneInfo> {
@@ -351,7 +421,11 @@ impl RuntimeAdapter for CliHerdr {
         }
         args.push(if req.focus { "--focus" } else { "--no-focus" }.into());
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        self.field(&refs, req.from_pane.as_deref().unwrap_or("(current pane)"), "pane")
+        self.field(
+            &refs,
+            req.from_pane.as_deref().unwrap_or("(current pane)"),
+            "pane",
+        )
     }
 
     fn run_command(&self, pane: &str, command: &str) -> Result<()> {
@@ -359,7 +433,8 @@ impl RuntimeAdapter for CliHerdr {
     }
 
     fn send_text(&self, pane: &str, text: &str) -> Result<()> {
-        self.call(&["pane", "send-text", pane, text], pane).map(|_| ())
+        self.call(&["pane", "send-text", pane, text], pane)
+            .map(|_| ())
     }
 
     fn send_keys(&self, pane: &str, keys: &[&str]) -> Result<()> {

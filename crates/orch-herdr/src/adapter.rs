@@ -187,7 +187,12 @@ mod tests {
     #[test]
     fn the_trait_is_object_safe_and_serves_a_boxed_backend() {
         let fake = FakeHerdr::new();
-        fake.add_agent(crate::model::AgentInfo::new("claude-1", "claude", "w1:p1", AgentStatus::Idle));
+        fake.add_agent(crate::model::AgentInfo::new(
+            "claude-1",
+            "claude",
+            "w1:p1",
+            AgentStatus::Idle,
+        ));
         let backend: Box<dyn RuntimeAdapter> = Box::new(fake);
         assert_eq!(backend.agent_status("claude-1").unwrap(), AgentStatus::Idle);
         assert!(backend.agent_status("nobody").unwrap() == AgentStatus::Gone);
@@ -197,7 +202,14 @@ mod tests {
     #[test]
     fn agent_status_reports_gone_for_a_missing_agent() {
         let fake = FakeHerdr::new();
-        fake.fail_next(CallKind::AgentGet, 1, HerdrError::AgentNotFound { agent: "x".into(), message: "gone".into() });
+        fake.fail_next(
+            CallKind::AgentGet,
+            1,
+            HerdrError::AgentNotFound {
+                agent: "x".into(),
+                message: "gone".into(),
+            },
+        );
         assert_eq!(fake.agent_status("x").unwrap(), AgentStatus::Gone);
     }
 
@@ -211,7 +223,10 @@ mod tests {
             "w1:p2",
             AgentStatus::Unwatchable,
         ));
-        assert_eq!(fake.agent_status("hermes-1").unwrap(), AgentStatus::Unwatchable);
+        assert_eq!(
+            fake.agent_status("hermes-1").unwrap(),
+            AgentStatus::Unwatchable
+        );
     }
 }
 
@@ -226,7 +241,13 @@ mod kinds_tests {
         assert!(fake.agent_kinds().unwrap().contains(&"claude".to_string()));
         fake.set_agent_kinds(&["a", "b"]);
         assert_eq!(fake.agent_kinds().unwrap(), ["a", "b"]);
-        fake.fail_next(CallKind::AgentKinds, 1, HerdrError::Unavailable { message: "down".into() });
+        fake.fail_next(
+            CallKind::AgentKinds,
+            1,
+            HerdrError::Unavailable {
+                message: "down".into(),
+            },
+        );
         assert!(fake.agent_kinds().is_err());
     }
 }

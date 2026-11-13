@@ -64,7 +64,10 @@ pub enum SendOutcome {
     Sent { delivery: Delivery },
     /// The runtime refused it: the delivery stays unconfirmed with the error
     /// kind and message kept, and the agent's failure count went up.
-    Failed { delivery: Delivery, error: HerdrError },
+    Failed {
+        delivery: Delivery,
+        error: HerdrError,
+    },
 }
 
 /// What recovery decided about one unconfirmed delivery.
@@ -109,9 +112,9 @@ impl<'a> Deliverer<'a> {
     /// before anything reaches the runtime, so a crash in between leaves the
     /// job recoverable, not lost).
     pub fn send(&mut self, req: NewDelivery<'_>) -> Result<SendOutcome, StoreError> {
-        let id = self
-            .store
-            .record_delivery(req.agent, req.task, req.attempt, req.kind, req.prompt)?;
+        let id =
+            self.store
+                .record_delivery(req.agent, req.task, req.attempt, req.kind, req.prompt)?;
         self.deliver(id)
     }
 
