@@ -380,3 +380,18 @@ fn the_backend_comes_from_the_tunables() {
     assert!(h.agents().unwrap().is_empty());
     assert_eq!(s.lines("calls.jsonl").len(), 1, "the HERDR binary was the one run");
 }
+
+#[test]
+fn agent_kinds_reads_the_kinds_line_of_plain_herdr_agent() {
+    let st = State::new();
+    let h = st.herdr();
+    assert_eq!(h.agent_kinds().unwrap(), ["pi", "claude", "codex", "gemini", "agy", "opencode", "amp", "hermes"]);
+    st.put("kinds.txt", "alpha|beta\n");
+    assert_eq!(st.herdr().agent_kinds().unwrap(), ["alpha", "beta"]);
+}
+
+#[test]
+fn agent_kinds_fails_when_herdr_is_missing() {
+    let h = CliHerdr::new("/nonexistent/herdr", 5);
+    assert!(h.agent_kinds().is_err());
+}

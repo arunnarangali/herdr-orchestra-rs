@@ -55,6 +55,13 @@ pub fn render_agents(reg: &Registry) -> String {
             roles.join(",")
         ));
     }
+    let missing = crate::doctor::kinds_missing_skills(reg);
+    if !missing.is_empty() {
+        s.push_str(&format!(
+            "\n{}: orch-plan/orch-run missing — run: orch agents sync\n",
+            missing.join(", ")
+        ));
+    }
     s.push_str(&format!(
         "\nOverride or add kinds in {}\n",
         agents::user_agents_file().display()

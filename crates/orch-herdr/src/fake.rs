@@ -21,6 +21,8 @@ pub enum CallKind {
     PaneCurrent,
     /// [`RuntimeAdapter::agents`].
     AgentList,
+    /// [`RuntimeAdapter::agent_kinds`].
+    AgentKinds,
     /// [`RuntimeAdapter::agent`] (and the default
     /// [`RuntimeAdapter::agent_status`], which goes through it).
     AgentGet,
@@ -73,6 +75,7 @@ struct State {
     current_pane: Option<String>,
     panes: BTreeMap<String, PaneInfo>,
     agents: BTreeMap<String, AgentInfo>,
+    agent_kinds: Vec<String>,
     workspaces: BTreeMap<String, WorkspaceInfo>,
     outputs: BTreeMap<String, String>,
     sent: Vec<Sent>,
@@ -99,6 +102,9 @@ impl FakeHerdr {
                 current_pane: None,
                 panes: BTreeMap::new(),
                 agents: BTreeMap::new(),
+                agent_kinds: ["pi", "claude", "codex", "gemini", "agy", "opencode", "amp", "hermes"]
+                    .map(String::from)
+                    .to_vec(),
                 workspaces: BTreeMap::from([("w1".to_string(), w)]),
                 outputs: BTreeMap::new(),
                 sent: Vec::new(),
@@ -206,6 +212,11 @@ impl FakeHerdr {
             .insert(name.to_string(), output.into());
     }
 
+    /// Script the agent kinds herdr can detect (`herdr agent`'s `kinds:` line).
+    pub fn set_agent_kinds(&self, kinds: &[&str]) {
+        self.state.lock().unwrap().agent_kinds = kinds.iter().map(|k| k.to_string()).collect();
+    }
+
     /// Put a workspace into the fake.
     pub fn add_workspace(&self, workspace: WorkspaceInfo) {
         self.state
@@ -279,6 +290,12 @@ impl RuntimeAdapter for FakeHerdr {
         let mut st = self.state.lock().unwrap();
         self.failing(&mut st, CallKind::AgentList)?;
         Ok(st.agents.values().cloned().collect())
+    }
+
+    fn agent_kinds(&self) -> Result<Vec<String>> {
+        let mut st = self.state.lock().unwrap();
+        self.failing(&mut st, CallKind::AgentKinds)?;
+        Ok(st.agent_kinds.clone())
     }
 
     fn agent(&self, target: &str) -> Result<AgentInfo> {

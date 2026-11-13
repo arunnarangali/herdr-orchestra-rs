@@ -95,6 +95,11 @@ pub trait RuntimeAdapter {
     /// All agents herdr recognises. Corresponds to `herdr agent list`.
     fn agents(&self) -> Result<Vec<AgentInfo>>;
 
+    /// The agent kinds herdr can detect (`pi`, `claude`, `codex`, ...), not the
+    /// live agents. Corresponds to the `kinds: a|b|c` line that plain
+    /// `herdr agent` prints in its usage text.
+    fn agent_kinds(&self) -> Result<Vec<String>>;
+
     /// One agent by name or pane id. Corresponds to `herdr agent get <target>`.
     ///
     /// Fails with [`HerdrError::AgentNotFound`] when herdr has no such agent;
@@ -207,5 +212,21 @@ mod tests {
             AgentStatus::Unwatchable,
         ));
         assert_eq!(fake.agent_status("hermes-1").unwrap(), AgentStatus::Unwatchable);
+    }
+}
+
+#[cfg(test)]
+mod kinds_tests {
+    use super::*;
+    use crate::fake::{CallKind, FakeHerdr};
+
+    #[test]
+    fn agent_kinds_are_scriptable_and_can_fail() {
+        let fake = FakeHerdr::new();
+        assert!(fake.agent_kinds().unwrap().contains(&"claude".to_string()));
+        fake.set_agent_kinds(&["a", "b"]);
+        assert_eq!(fake.agent_kinds().unwrap(), ["a", "b"]);
+        fake.fail_next(CallKind::AgentKinds, 1, HerdrError::Unavailable { message: "down".into() });
+        assert!(fake.agent_kinds().is_err());
     }
 }
