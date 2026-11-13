@@ -1,6 +1,9 @@
 //! `orch` binary: CLI parsing and command dispatch only.
 
 mod commands;
+mod doctor;
+mod listing;
+mod team;
 
 use clap::{Parser, Subcommand};
 use commands::{COMMAND_NAMES, EXIT_NOT_IMPLEMENTED, usage};

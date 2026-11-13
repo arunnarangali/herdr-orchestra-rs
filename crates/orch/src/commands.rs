@@ -1,5 +1,6 @@
 //! The command table: every command name, its help line, and the usage text.
 
+use crate::{doctor, listing, team};
 use orch_config::tunables::Tunables;
 use orch_herdr::RuntimeAdapter;
 use orch_herdr::cli::CliHerdr;
@@ -54,7 +55,12 @@ pub const COMMAND_NAMES: &[&str] = &[
 ];
 
 /// The variables a Hermes-style agent shell must pass through to see its pane.
-const HERDR_PANE_ENV: [&str; 4] = ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"];
+const HERDR_PANE_ENV: [&str; 4] = [
+    "HERDR_ENV",
+    "HERDR_PANE_ID",
+    "HERDR_SOCKET_PATH",
+    "HERDR_BIN_PATH",
+];
 
 /// Run an implemented command and return its exit code, or `None` when the command is
 /// still a stub (the caller then reports "not implemented"). `args` is the command name
@@ -63,6 +69,17 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
     let sub = args.get(1).map(String::as_str);
     match (args.first().map(String::as_str)?, sub) {
         ("lead", Some("check")) => Some(lead_check(&herdr_adapter())),
+        ("agents", None) => Some(listing::agents_table()),
+        ("agents", Some("launch")) => Some(listing::agents_launch(&args[2..])),
+        ("agents", Some("check")) => doctor::agents_check(&args[2..]),
+        ("agents", Some("sync")) => doctor::agents_sync(&args[2..]),
+        // `agents dirs` (the installer's feed) is not built yet.
+        ("agents", Some("dirs")) => None,
+        ("agents", Some(_)) => Some(listing::die(listing::AGENTS_USAGE)),
+        ("models", _) => Some(listing::models(&args[1..])),
+        ("doctor", _) => doctor::doctor(&args[1..]),
+        ("team", Some("up")) => team::team_up(&args[2..]),
+        ("team", _) => team::team(&args[1..]),
         _ => None,
     }
 }
@@ -86,8 +103,13 @@ Add this to ~/.hermes/config.yaml, then restart Hermes:\n    terminal:\n      cl
         HERDR_PANE_ENV.join(", ")
     );
     if std::env::var("HERDR_ENV").is_ok_and(|v| v == "1") {
-        let pane = std::env::var("HERDR_PANE_ID").ok().filter(|p| !p.is_empty());
-        println!("OK inside a Herdr pane (HERDR_ENV=1, pane {})", pane.as_deref().unwrap_or("?"));
+        let pane = std::env::var("HERDR_PANE_ID")
+            .ok()
+            .filter(|p| !p.is_empty());
+        println!(
+            "OK inside a Herdr pane (HERDR_ENV=1, pane {})",
+            pane.as_deref().unwrap_or("?")
+        );
         return 0;
     }
     match runtime.current_pane() {
