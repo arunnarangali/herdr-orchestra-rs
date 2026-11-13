@@ -3,6 +3,8 @@
 mod commands;
 mod doctor;
 mod listing;
+mod plan_cmds;
+mod task_cmds;
 mod team;
 
 use clap::{Parser, Subcommand};

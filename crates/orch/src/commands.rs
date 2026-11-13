@@ -1,6 +1,6 @@
 //! The command table: every command name, its help line, and the usage text.
 
-use crate::{doctor, listing, team};
+use crate::{doctor, listing, plan_cmds, task_cmds, team};
 use orch_config::tunables::Tunables;
 use orch_herdr::RuntimeAdapter;
 use orch_herdr::cli::CliHerdr;
@@ -69,6 +69,12 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
     let sub = args.get(1).map(String::as_str);
     match (args.first().map(String::as_str)?, sub) {
         ("lead", Some("check")) => Some(lead_check(&herdr_adapter())),
+        ("lead", Some(which @ ("plan" | "run"))) => task_cmds::lead_playbook(which, &args[2..]),
+        ("lead", Some("whoami")) => task_cmds::lead_whoami(&args[2..]),
+        ("sync", _) => plan_cmds::sync(&args[1..]),
+        ("status", _) => plan_cmds::status(&args[1..]),
+        ("set", _) => plan_cmds::set(&args[1..]),
+        ("write-task", _) => task_cmds::write_task(&args[1..]),
         ("agents", None) => Some(listing::agents_table()),
         ("agents", Some("launch")) => Some(listing::agents_launch(&args[2..])),
         ("agents", Some("check")) => doctor::agents_check(&args[2..]),
