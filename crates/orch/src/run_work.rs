@@ -1,15 +1,17 @@
 //! The event manager's real [`Work`] (§13, §24 Phase 8): everything `orch autopilot` asks of a
-//! milestone up to review — prepare and save its work (git), write its contract, run the plan's
-//! check in the right folder, build the fix prompts, and find the files the coder changed outside
-//! its `Likely files`. Landing is `GitWork`'s; review is not built yet and says so.
+//! milestone from dispatch to review — prepare and save its work (git), write its contract, run
+//! the plan's check in the right folder, build the fix prompts, find the files the coder changed
+//! outside its `Likely files`, and run the review round: `review_body` builds the reviewer's
+//! prompt and `review_verdict` reads the strict `review-N.json` (a missing or malformed file, or a
+//! reviewer that changed files, is reported as unusable). Landing is `GitWork`'s.
 //!
 //! The one rule of the checks: they run in the folder the code is in. A milestone's check runs in
 //! its coder's worktree (worktree mode) or the main folder (shared mode); the final check and the
 //! baseline run in the main folder, which must be on the run branch. A folder that is not the
 //! expected one is an error, never a silent check of something else.
 //!
-//! `review_body` and `review_verdict` are separate methods the review milestone replaces; nothing
-//! else in this file is theirs to touch.
+//! The review logic itself (schema, prompt, diff, snapshot) lives in `orch_core::review`; the two
+//! review methods here only wire it to the run's folders.
 
 use crate::task_cmds::write_task;
 use orch_core::check::{self, CheckRun, Records};
@@ -340,6 +342,10 @@ Acceptance criteria:
             let root = t.path().canonicalize().unwrap().join("repo");
             std::fs::create_dir(&root).unwrap();
             g(&root, &["init", "-q", "-b", "main"]);
+            // an identity in the repo itself (its worktrees share it): saving work must not depend
+            // on whatever git config the machine running the tests happens to have
+            g(&root, &["config", "user.name", "t"]);
+            g(&root, &["config", "user.email", "t@t"]);
             std::fs::write(root.join("a.txt"), "a\n").unwrap();
             g(&root, &["add", "-A"]);
             g(&root, &["commit", "-q", "-m", "init"]);
