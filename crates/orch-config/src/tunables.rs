@@ -49,6 +49,11 @@ pub struct Tunables {
     pub lead_wait_s: i64,
     pub lead_rewake_s: i64,
     pub lead_max_wakes: i64,
+    /// Short window after a wake-up in which the lead must read its events (`orch events`),
+    /// else it is woken again while its pane is idle (`ORCH_LEAD_CONFIRM_S`).
+    pub lead_confirm_s: i64,
+    /// How many of those quick re-wakes one wake-up round gets (`ORCH_LEAD_CONFIRM_WAKES`).
+    pub lead_confirm_wakes: i64,
     pub lead_idle_max_s: i64,
     pub no_autostart: bool,
     pub team_wait_s: f64,
@@ -96,6 +101,8 @@ impl Tunables {
             lead_wait_s: lead_wait_min * 60,
             lead_rewake_s: int(&mut get, "ORCH_LEAD_REWAKE_S", 300)?,
             lead_max_wakes: int(&mut get, "ORCH_LEAD_MAX_WAKES", 3)?,
+            lead_confirm_s: int(&mut get, "ORCH_LEAD_CONFIRM_S", 20)?,
+            lead_confirm_wakes: int(&mut get, "ORCH_LEAD_CONFIRM_WAKES", 2)?,
             lead_idle_max_s: lead_idle_max_min * 60,
             no_autostart: get("ORCH_NO_AUTOSTART").is_some_and(|v| v == "1"),
             team_wait_s: float(&mut get, "ORCH_TEAM_WAIT_S", 90.0)?,
@@ -188,6 +195,8 @@ mod tests {
         assert_eq!(t.lead_wait_s, 900);
         assert_eq!(t.lead_rewake_s, 300);
         assert_eq!(t.lead_max_wakes, 3);
+        assert_eq!(t.lead_confirm_s, 20);
+        assert_eq!(t.lead_confirm_wakes, 2);
         assert_eq!(t.lead_idle_max_s, 43200);
         assert!(!t.no_autostart);
         assert_eq!(t.team_wait_s, 90.0);

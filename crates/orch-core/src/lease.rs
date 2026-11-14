@@ -219,7 +219,7 @@ fn hostname() -> String {
 
 /// Local time of day of an epoch value, `HH:MM:SS`, like Python's
 /// `time.strftime("%H:%M:%S", time.localtime(started))`.
-fn hhmmss(epoch: i64) -> String {
+pub(crate) fn hhmmss(epoch: i64) -> String {
     hhmmss_in(epoch, tz_source().as_deref())
 }
 

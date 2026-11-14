@@ -1,7 +1,10 @@
 //! `orch` binary: CLI parsing and command dispatch only.
 
+mod autopilot;
 mod commands;
+mod dispatch_cmds;
 mod doctor;
+mod events_cmd;
 mod listing;
 mod plan_cmds;
 mod task_cmds;

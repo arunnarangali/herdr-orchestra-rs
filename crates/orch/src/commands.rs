@@ -1,6 +1,6 @@
 //! The command table: every command name, its help line, and the usage text.
 
-use crate::{doctor, listing, plan_cmds, task_cmds, team};
+use crate::{autopilot, dispatch_cmds, doctor, events_cmd, listing, plan_cmds, task_cmds, team};
 use orch_config::tunables::Tunables;
 use orch_herdr::RuntimeAdapter;
 use orch_herdr::cli::CliHerdr;
@@ -75,6 +75,13 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("status", _) => plan_cmds::status(&args[1..]),
         ("set", _) => plan_cmds::set(&args[1..]),
         ("write-task", _) => task_cmds::write_task(&args[1..]),
+        ("events", _) => events_cmd::events(&args[1..]),
+        ("dispatch", _) => Some(dispatch_cmds::dispatch(&args[1..])),
+        ("answer", _) => Some(dispatch_cmds::answer(&args[1..])),
+        ("fix", _) => Some(dispatch_cmds::fix(&args[1..])),
+        ("approve", _) => Some(dispatch_cmds::approve(&args[1..])),
+        ("escalate", _) => Some(dispatch_cmds::escalate(&args[1..])),
+        ("autopilot", _) => Some(autopilot::run(&args[1..])),
         ("agents", None) => Some(listing::agents_table()),
         ("agents", Some("launch")) => Some(listing::agents_launch(&args[2..])),
         ("agents", Some("check")) => doctor::agents_check(&args[2..]),

@@ -8,6 +8,7 @@
 //!   serialised and each transition is validated against the latest state (no lost updates).
 
 use crate::error::Error;
+use crate::lead_queue::LeadKind;
 use crate::task::{Mode, State, Task, TaskError, Transition, check_transition};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use std::path::{Path, PathBuf};
@@ -21,6 +22,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../migrations/0001_init.sql")),
     (2, include_str!("../migrations/0002_deliveries.sql")),
     (3, include_str!("../migrations/0003_run.sql")),
+    (4, include_str!("../migrations/0004_lead_queue.sql")),
 ];
 
 /// The schema version this build writes.
@@ -623,6 +625,15 @@ pub(crate) fn apply_transition(
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         params![ts, id, from.as_str(), to.as_str(), why, agent, t.model, t.attempt, forced, lead],
     )?;
+    if lead {
+        // Same transaction as the state change: both are stored, or neither is.
+        let text = if why.is_empty() {
+            t.reason.as_str()
+        } else {
+            why.as_str()
+        };
+        crate::lead_queue::enqueue(tx, LeadKind::from_state(to), Some(id), text)?;
+    }
     Ok(Outcome::Recorded(Transition {
         task: id.to_string(),
         ts,
@@ -964,7 +975,7 @@ mod tests {
         }
         let mut s = Store::open(&path).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 3);
+        assert_eq!(SCHEMA_VERSION, 4);
         add(&mut s, "M1", &[]);
         let id = s
             .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")
@@ -1013,7 +1024,7 @@ mod tests {
             dump(&conn)
         };
         let s = Store::open(&path).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 3);
+        assert_eq!(s.schema_version().unwrap(), 4);
         assert_eq!(dump(&s.conn), before, "upgrade changed existing rows");
         assert!(s.load_run().unwrap().is_none());
         for table in ["run", "run_agents", "task_plan"] {
