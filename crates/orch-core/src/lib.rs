@@ -20,6 +20,7 @@ pub mod paths;
 pub mod plan;
 pub mod plan_edit;
 pub mod reconcile;
+pub mod review;
 pub mod refs;
 pub mod run_store;
 pub mod scope;

@@ -155,6 +155,8 @@ struct FkWork {
     strays: RefCell<Vec<String>>,
     /// The typed fix problems the manager asked prompts for.
     kinds: RefCell<Vec<FixKind>>,
+    /// The reviewer's blocker lines.
+    lines: RefCell<Vec<String>>,
 }
 
 impl Work for FkWork {
@@ -184,6 +186,10 @@ impl Work for FkWork {
     ) -> std::result::Result<String, String> {
         self.kinds.borrow_mut().push(kind.clone());
         self.fix_body(task, round, "")
+    }
+
+    fn blocker_lines(&mut self, _task: &str, _round: u32) -> std::result::Result<Vec<String>, String> {
+        Ok(self.lines.borrow().clone())
     }
 
     fn strays(&mut self, _task: &str) -> std::result::Result<Vec<String>, String> {
@@ -394,6 +400,7 @@ impl One {
                 save_calls: Cell::new(0),
                 strays: RefCell::new(vec![]),
                 kinds: RefCell::new(vec![]),
+                lines: RefCell::new(vec![]),
             },
             notes: Notes(RefCell::new(vec![])),
             say_log: Rc::new(RefCell::new(Vec::new())),
@@ -553,6 +560,7 @@ fn recovery_confirms_from_a_working_agent_and_resends_to_an_idle_one() {
         save_calls: Cell::new(0),
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
+        lines: RefCell::new(vec![]),
     };
     let mut say = pusher(&say_log);
     let report = reconcile(
@@ -720,6 +728,7 @@ fn the_lead_waits_then_the_milestone_is_auto_dispatched() {
             save_calls: Cell::new(0),
             strays: RefCell::new(vec![]),
             kinds: RefCell::new(vec![]),
+            lines: RefCell::new(vec![]),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -777,6 +786,7 @@ fn the_budget_used_up_stops_the_run_with_a_stopped_entry() {
             save_calls: Cell::new(0),
             strays: RefCell::new(vec![]),
             kinds: RefCell::new(vec![]),
+            lines: RefCell::new(vec![]),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -827,6 +837,7 @@ fn reconcile_parks_a_coding_task_whose_agent_vanished() {
         save_calls: Cell::new(0),
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
+        lines: RefCell::new(vec![]),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -868,6 +879,7 @@ fn reconcile_clears_a_half_finished_wake_up() {
         save_calls: Cell::new(0),
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
+        lines: RefCell::new(vec![]),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -894,6 +906,7 @@ fn reconcile_never_marks_incomplete_work_as_completed() {
         save_calls: Cell::new(0),
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
+        lines: RefCell::new(vec![]),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -915,6 +928,7 @@ fn park_with_lost_fails_the_milestone_at_max_lost() {
         save_calls: Cell::new(0),
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
+        lines: RefCell::new(vec![]),
     };
     for _ in 0..3 {
         let st = park_with_lost(
@@ -1141,6 +1155,7 @@ fn a_passing_check_with_a_plan_review_goes_to_review_then_merges() {
             save_calls: Cell::new(0),
             strays: RefCell::new(vec![]),
             kinds: RefCell::new(vec![]),
+            lines: RefCell::new(vec![]),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -1235,6 +1250,130 @@ fn a_stray_already_sent_back_does_not_send_the_milestone_back_again() {
     one.store.transition("M1", &TransitionRequest::auto(State::Verifying, None)).unwrap();
     one.cycle();
     assert_eq!(one.store.get_task("M1").unwrap().status, State::Merged, "{}", joined(&one.say_log));
+}
+
+// ---- the review flow
+
+/// A run whose only milestone has `Review: yes` and `agents` as its team, its coder (`w1`) done
+/// and its check green: one cycle puts it in `awaiting-review`.
+fn review_rig(agents: Vec<RunAgent>) -> One {
+    let mut one = One::new();
+    let mut plan = plan_task("M1", Some("medium"));
+    plan.review = true;
+    one.store
+        .apply_sync(&SyncInput { settings: settings(false), agents, tasks: vec![plan] })
+        .unwrap();
+    one.cycle(); // dispatched, coding
+    one.with_manager(|m, _| {
+        m.apply_event(&RunEvent::Done { task: "M1".into(), agent: "w1".into() }).unwrap()
+    });
+    one.cycle(); // check passes -> saved, awaiting review
+    one
+}
+
+fn agent(role: AgentRole, name: &str, tier: Option<&str>) -> RunAgent {
+    RunAgent {
+        role,
+        name: name.into(),
+        kind: "claude".into(),
+        model: None,
+        tier: tier.map(String::from),
+        detect: true,
+        pane: None,
+    }
+}
+
+#[test]
+fn a_milestone_with_review_no_never_reaches_the_reviewer() {
+    let mut one = One::new();
+    one.cycle();
+    one.with_manager(|m, _| {
+        m.apply_event(&RunEvent::Done { task: "M1".into(), agent: "w1".into() }).unwrap()
+    });
+    one.cycle();
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Merged);
+    assert!(one.store.latest_delivery("M1", 1, DeliveryKind::Reviewer).unwrap().is_none());
+}
+
+#[test]
+fn a_missing_reviewer_parks_the_milestone_with_the_reason() {
+    let mut one = review_rig(vec![agent(AgentRole::Worker, "w1", Some("medium"))]);
+    one.cycle();
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!(t.status, State::Paused, "{}", joined(&one.say_log));
+    assert!(t.reason.contains("no reviewer"), "{}", t.reason);
+}
+
+#[test]
+fn a_reviewer_is_never_the_coder_who_wrote_the_milestone() {
+    let mut one = review_rig(vec![
+        agent(AgentRole::Worker, "w1", Some("medium")),
+        agent(AgentRole::Reviewer, "w1", Some("high")),
+    ]);
+    one.cycle();
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!(t.status, State::Paused, "{}", joined(&one.say_log));
+    assert!(t.reason.contains("never reviewed by its own coder"), "{}", t.reason);
+}
+
+#[test]
+fn a_reviewer_of_a_lower_tier_is_flagged_in_the_log_and_the_review_goes_ahead() {
+    let mut one = review_rig(vec![
+        agent(AgentRole::Worker, "w1", Some("high")),
+        agent(AgentRole::Reviewer, "rev", Some("small")),
+    ]);
+    one.cycle();
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Reviewing);
+    let log = joined(&one.say_log);
+    assert!(log.contains("reviewer rev (small-tier) is weaker than its coder's tier (high)"), "{log}");
+    // an equal or stronger reviewer says nothing
+    let mut ok = review_rig(vec![
+        agent(AgentRole::Worker, "w1", Some("medium")),
+        agent(AgentRole::Reviewer, "rev", Some("high")),
+    ]);
+    ok.cycle();
+    assert!(!joined(&ok.say_log).contains("weaker"));
+}
+
+#[test]
+fn review_blockers_queue_a_fix_job_with_the_blocker_lines_and_rounds_are_bounded() {
+    let mut one = review_rig(vec![
+        agent(AgentRole::Worker, "w1", Some("medium")),
+        agent(AgentRole::Reviewer, "rev", Some("high")),
+    ]);
+    one.cycle(); // reviewing, round 1
+    assert_eq!(one.store.get_task("M1").unwrap().review_rounds, 1);
+    *one.work.lines.borrow_mut() = vec!["BLOCKER: a.rs:3 — bad — breaks".into()];
+    one.work.review = ReviewOutcome::Blockers { count: 1 };
+    one.with_manager(|m, _| {
+        m.apply_event(&RunEvent::Reviewed { task: "M1".into(), agent: "rev".into() }).unwrap()
+    });
+    one.cycle();
+    // queued, then handed straight to the free coder in the same cycle's dispatch pass
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!((t.status, t.attempt), (State::Coding, 2), "{}", joined(&one.say_log));
+    assert_eq!(
+        one.work.kinds.borrow().last(),
+        Some(&FixKind::Blockers { round: 1, lines: vec!["BLOCKER: a.rs:3 — bad — breaks".into()] })
+    );
+    // the job file was written for the coder to read
+    let file = one.dir.path().join(".orch-task/M1/review-fix-1.md");
+    assert!(std::fs::read_to_string(file).unwrap().contains("fix M1 round 1"));
+
+    // the cap is the manager's: after MAX_REVIEW rounds blockers no longer queue a job
+    let mut capped = review_rig(vec![
+        agent(AgentRole::Worker, "w1", Some("medium")),
+        agent(AgentRole::Reviewer, "rev", Some("high")),
+    ]);
+    capped.cycle();
+    capped.store.bump("M1", Counter::Review).unwrap(); // round 2 was asked
+    capped.work.review = ReviewOutcome::Blockers { count: 1 };
+    capped.with_manager(|m, _| {
+        m.apply_event(&RunEvent::Reviewed { task: "M1".into(), agent: "rev".into() }).unwrap()
+    });
+    capped.cycle();
+    assert_ne!(capped.store.get_task("M1").unwrap().status, State::NeedsFix);
+    assert!(joined(&capped.say_log).contains("reviewer still has blockers after 2 rounds"), "{}", joined(&capped.say_log));
 }
 
 // ---- helpers

@@ -29,14 +29,14 @@ const NO_RUN: &str = "no run in .orchestrate/state.db — run `orch sync` after 
 /// Python's exit code for a prompt that did not reach the coder.
 const EXIT_DELIVERY: i32 = 5;
 
-struct Ctx {
-    root: PathBuf,
-    orch: PathBuf,
-    store: Store,
-    run: Run,
+pub(crate) struct Ctx {
+    pub(crate) root: PathBuf,
+    pub(crate) orch: PathBuf,
+    pub(crate) store: Store,
+    pub(crate) run: Run,
 }
 
-fn open() -> Result<Ctx, i32> {
+pub(crate) fn open() -> Result<Ctx, i32> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let root = paths::main_root(&cwd).map_err(die)?;
     let orch = root.join(ORCH_DIR);
@@ -51,7 +51,7 @@ fn open() -> Result<Ctx, i32> {
 }
 
 /// Python `task(st, tid)`.
-fn known_task(ctx: &Ctx, tid: &str) -> Result<Task, i32> {
+pub(crate) fn known_task(ctx: &Ctx, tid: &str) -> Result<Task, i32> {
     ctx.store.get_task(tid).map_err(|_| {
         let known: Vec<&str> = ctx.run.plan.iter().map(|p| p.id.as_str()).collect();
         die(format!(
@@ -62,11 +62,11 @@ fn known_task(ctx: &Ctx, tid: &str) -> Result<Task, i32> {
     })
 }
 
-fn usage(args: &[String], what: &str) -> Result<(), i32> {
+pub(crate) fn usage(args: &[String], what: &str) -> Result<(), i32> {
     if args.is_empty() { Err(die(format!("usage: orch {what}"))) } else { Ok(()) }
 }
 
-fn refuse_while_driving(ctx: &Ctx, what: &str) -> Result<(), i32> {
+pub(crate) fn refuse_while_driving(ctx: &Ctx, what: &str) -> Result<(), i32> {
     if driver_alive(&driver_lock_path(&ctx.orch)) {
         Err(die(format!("`orch autopilot` is running — it {what} itself; stop it first to do this by hand")))
     } else {
