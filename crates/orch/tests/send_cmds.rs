@@ -254,6 +254,7 @@ fn send_job_sends_the_check_fix_job_orch_merge_queued() {
     assert_eq!(o.status.code(), Some(6), "{}{}", out(&o), err(&o));
     let o = sb.orch(&["send-job", "M2"]);
     assert_eq!(o.status.code(), Some(5), "{}{}", out(&o), err(&o));
-    let file = std::fs::read_to_string(sb.wt("claude-2").join(".orch-task/M2/fix-1.md")).unwrap();
-    assert!(file.contains("Checks failing for M2"), "{file}");
+    let file = std::fs::read_to_string(sb.wt("claude-2").join(".orch-task/M2/integration-fix-1.md")).unwrap();
+    assert!(file.contains("# M2 fails the check once merged onto `feature/demo` (round 1)"), "{file}");
+    assert!(file.contains("git merge --no-commit feature/demo"), "{file}");
 }

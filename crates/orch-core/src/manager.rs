@@ -13,6 +13,7 @@
 //! a kill at any point leaves the run consistent (reconcile repairs the rest).
 
 use crate::claim::ClaimError;
+use crate::conflict::IssueKind;
 use crate::check::Records;
 use crate::fix::FixKind;
 use crate::events::{PollOutcome, PollSource, RunEvent, RuntimeView};
@@ -545,6 +546,9 @@ impl<'a> Manager<'a> {
         if let Some(code) = self.baseline_gate() {
             return code;
         }
+        if let Some(code) = self.integration_gate() {
+            return code;
+        }
         loop {
             if stop() {
                 self.log("stopped by request — the run is kept", false);
@@ -913,6 +917,39 @@ impl<'a> Manager<'a> {
         Ok(true)
     }
 
+    /// A run branch marked broken (its final check failed): check it before anything else. Still
+    /// red stops the run (exit 3) with the failing lines; green clears the mark and carries on.
+    fn integration_gate(&mut self) -> Option<i32> {
+        let broken = match self.store.integration_broken() {
+            Ok(Some(b)) => b,
+            Ok(None) => return None,
+            Err(e) => {
+                self.log(&format!("could not read the broken-branch mark: {e}"), true);
+                return Some(EXIT_STOPPED);
+            }
+        };
+        let branch = self.settings().ok().flatten().map_or_else(String::new, |s| s.branch);
+        let (ok, tail) = match self.work.baseline() {
+            Ok(r) => r,
+            Err(e) => (false, format!("orch error: {e}")),
+        };
+        if !ok {
+            let msg = format!(
+                "{branch} still fails its check (broken since {}). Fix it, then run autopilot again. Stopping.",
+                broken.reason
+            );
+            let _ = self.store.enqueue_lead_event(LeadKind::Stopped, None, &msg);
+            self.log(&format!("{msg}\n{tail}"), true);
+            return Some(EXIT_STOPPED);
+        }
+        if let Err(e) = self.store.clear_integration_broken() {
+            self.log(&format!("could not clear the broken-branch mark: {e}"), true);
+            return Some(EXIT_STOPPED);
+        }
+        self.log(&format!("{branch} passes its check again — carrying on"), true);
+        None
+    }
+
     /// The baseline gate (Python's start of `cmd_autopilot`): with no `.orchestrate/baseline.txt`,
     /// run the check on the run branch before any work. Green writes the file (its output tail);
     /// red stops the run, leaving no file, so the next start runs it again. `Some(exit code)`
@@ -1152,11 +1189,6 @@ impl<'a> Manager<'a> {
             Ok(o) => o,
             Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
         };
-        let outcome_kind = match &outcome {
-            CommitOutcome::Conflict { .. } => Some(true),
-            CommitOutcome::BranchFails { .. } => Some(false),
-            _ => None,
-        };
         match outcome {
             CommitOutcome::Merged => {
                 self.store.release_claim(id).ok();
@@ -1174,9 +1206,9 @@ impl<'a> Manager<'a> {
                 );
                 Ok(())
             }
-            CommitOutcome::Conflict { line } | CommitOutcome::BranchFails { line } => {
-                let is_conflict = matches!(outcome_kind, Some(true));
-                // a check tail runs to many lines: the transition keeps the first
+            CommitOutcome::BranchFails { line } => self.integration_failed(id, &line),
+            CommitOutcome::Conflict { line } => {
+                // a conflict line can run to many lines: the transition keeps the first
                 let line = line.lines().next().unwrap_or_default().to_string();
                 let t = self.store.get_task(id)?;
                 if t.conflict_rounds >= MAX_CONFLICT {
@@ -1195,13 +1227,63 @@ impl<'a> Manager<'a> {
                         Some(&format!("{line} (conflict round {n})")),
                     ),
                 )?;
-                if is_conflict {
-                    self.queue_conflict_job(id, n);
-                }
+                self.queue_conflict_job(id, n);
                 self.log(&format!("{line} -> queued for the next free coder"), false);
                 Ok(())
             }
         }
+    }
+
+    /// The squash merged cleanly but the check fails on the run branch (Python's
+    /// `_integration_failed`): nothing was committed. The round counts against the milestone's
+    /// fix rounds; the job goes to its own coder. After `MAX_FIX` rounds it fails and the lead is
+    /// woken (no escalation: a stronger model does not change what the merge broke).
+    fn integration_failed(&mut self, id: &str, line: &str) -> Result<()> {
+        let Some(s) = self.settings()? else {
+            return self.park(id, State::Paused, "orch error: no synced run", false);
+        };
+        let n = self.store.bump(id, Counter::Fix)?;
+        // the tail merge.rs stored for the coder's job (the outcome's line carries it too)
+        let tail = match self.store.issue(id)? {
+            Some(i) if i.kind == IssueKind::Check => i.detail,
+            _ => line.split_once('\n').map_or(String::new(), |(_, t)| t.to_string()),
+        };
+        if n > MAX_FIX {
+            let reason = format!("passes alone but fails the check on {} after {MAX_FIX} fix rounds", s.branch);
+            self.park(id, State::Failed, &reason, false)?;
+            self.log(
+                &format!("CAP {id}: still fails the check on {} after {MAX_FIX} fix rounds\n{tail}", s.branch),
+                true,
+            );
+            return Ok(());
+        }
+        let attempt = self.store.get_task(id)?.attempt;
+        let body = crate::integration::job_body(
+            id,
+            &s.branch,
+            &s.check_command,
+            n,
+            &tail,
+            &format!("result-{}.json", attempt + 1),
+        );
+        self.store.transition(
+            id,
+            &TransitionRequest::auto(
+                State::NeedsFix,
+                Some(&format!("fails the check on {} once merged (round {n})", s.branch)),
+            ),
+        )?;
+        self.state.jobs.retain(|j| j.task != id);
+        self.state.jobs.push(QueuedJob { task: id.to_string(), file: crate::integration::job_file(n), body });
+        self.state.save(&self.root.join(crate::paths::ORCH_DIR)).ok();
+        self.log(
+            &format!(
+                "{id} passes alone but fails the check on {} once merged -> integration-fix round {n} for its coder\n{tail}",
+                s.branch
+            ),
+            true,
+        );
+        Ok(())
     }
 
     /// Queue the conflict job (`conflict-<n>.md`) for the milestone's coder: the stored conflict
@@ -1379,21 +1461,38 @@ impl<'a> Manager<'a> {
             Err(_) => return Cycle::Continue,
         };
         if !tasks.is_empty() && tasks.iter().all(|t| matches!(t.status, State::Merged | State::Skipped)) {
-            let ok = self.work.check("(final check)") == Ok(CheckOutcome::Pass);
+            let (ok, tail) = match self.work.check("(final check)") {
+                Ok(CheckOutcome::Pass) => (true, String::new()),
+                Ok(CheckOutcome::Fail { tail }) => (false, tail),
+                Err(e) => (false, format!("orch error: {e}")),
+            };
             let branch = self.settings().ok().flatten().map_or_else(String::new, |s| s.branch);
+            if !ok {
+                // never carry on over a red branch: mark it, tell the lead, stop
+                if let Err(e) = self.store.mark_integration_broken(crate::integration::FINAL_CHECK_REASON) {
+                    self.log(&format!("could not record the broken branch: {e}"), true);
+                }
+                let msg = format!(
+                    "{branch} fails its final check after every milestone merged. Fix it, then run autopilot \
+                     again: it re-checks before it carries on."
+                );
+                let _ = self.store.enqueue_lead_event(LeadKind::Stopped, None, &msg);
+                self.log(&format!("STOPPED — {msg}\n{tail}"), true);
+                return Cycle::Exit(EXIT_STOPPED);
+            }
+            if let Err(e) = self.store.clear_integration_broken() {
+                self.log(&format!("could not clear the broken mark: {e}"), true);
+            }
             let _ = self.store.enqueue_lead_event(
                 LeadKind::AllDone,
                 None,
-                &format!("final check {} on {branch}", if ok { "PASS" } else { "FAIL" }),
+                &format!("final check PASS on {branch}"),
             );
             self.log(
-                &format!(
-                    "ALL_DONE on {branch} — final check {}. Run `orch finish` to push and open the PR.",
-                    if ok { "PASS" } else { "FAIL" }
-                ),
+                &format!("ALL_DONE on {branch} — final check PASS. Run `orch finish` to push and open the PR."),
                 true,
             );
-            return Cycle::Exit(if ok { EXIT_ALL_DONE } else { EXIT_STOPPED });
+            return Cycle::Exit(EXIT_ALL_DONE);
         }
         let active = tasks.iter().any(|t| {
             matches!(

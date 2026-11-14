@@ -51,6 +51,11 @@ pub fn status(_args: &[String]) -> Option<i32> {
     Some(sync_status::run_status(&cwd(), &mut std::io::stdout()))
 }
 
+/// `orch report`: rounds and outcomes per milestone, and whether the branch fails its check.
+pub fn report(_args: &[String]) -> Option<i32> {
+    Some(sync_status::run_report(&cwd(), &mut std::io::stdout()))
+}
+
 /// `orch set <Mn> <status> [reason] [--force]`.
 pub fn set(args: &[String]) -> Option<i32> {
     Some(sync_status::run_set(&cwd(), args, &mut std::io::stdout()))

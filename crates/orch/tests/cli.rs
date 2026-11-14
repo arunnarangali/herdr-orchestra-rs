@@ -101,6 +101,7 @@ fn every_command_is_accepted_and_not_implemented() {
             "doctor",
             "sync",
             "status",
+            "report",
             "set",
             "write-task",
             "events",
