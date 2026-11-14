@@ -442,6 +442,25 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The newest delivery for `(task, attempt, kind)`, `None` when no prompt went
+    /// out for it (the event manager's in-flight view of a milestone).
+    pub fn latest_delivery(
+        &self,
+        task: &str,
+        attempt: u32,
+        kind: DeliveryKind,
+    ) -> Res<Option<Delivery>> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "{DELIVERY_SELECT} WHERE task_id=?1 AND attempt=?2 AND kind=?3 ORDER BY id DESC LIMIT 1"
+            ))?;
+        let row = stmt
+            .query_row(params![task, attempt, kind.as_str()], row_delivery)
+            .optional()?;
+        Ok(row)
+    }
+
     /// Mark a delivery confirmed (the runtime accepted the send). Idempotent
     /// rejection: confirming a confirmed or missing delivery is an error.
     pub fn confirm_delivery(&mut self, id: i64) -> Res<()> {

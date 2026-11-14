@@ -206,16 +206,8 @@ fn no_run_is_an_error() {
 }
 
 #[test]
-fn autopilot_routes_to_its_stub_handler() {
-    let sb = Sandbox::new(PLAN);
-    let c = "autopilot";
-    {
-        let o = sb.orch(&[c]);
-        assert_eq!(o.status.code(), Some(70), "{c}");
-        assert!(
-            err(&o).contains(&format!("orch {c}: not implemented in this build")),
-            "{c}: {}",
-            err(&o)
-        );
-    }
+fn no_stub_routes_are_left() {
+    // `dispatch`, `answer`, `fix`, `approve` and `escalate` are real (tests/dispatch_cmds.rs,
+    // the commands milestone); `autopilot` is real too (tests/autopilot_cmd.rs, the
+    // event-manager milestone). Nothing routes to a stub handler any more.
 }
