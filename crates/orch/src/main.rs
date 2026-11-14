@@ -5,6 +5,7 @@ mod commands;
 mod dispatch_cmds;
 mod doctor;
 mod events_cmd;
+mod finish_cmd;
 mod git_cmds;
 mod listing;
 mod merge_cmds;

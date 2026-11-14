@@ -116,6 +116,16 @@ pub fn start(_args: &[String], rt: &dyn RuntimeAdapter) -> i32 {
             herdr_state(rt, &r.name, r.pane.as_deref(), r.detect)
         );
     }
+    // task branches left by orch versions before 4.5 are carried into hidden refs (§15)
+    let order: Vec<String> = ctx.run.plan.iter().map(|p| p.id.clone()).collect();
+    match orch_core::legacy::pickup(&ctx.root, &report.branch, &order) {
+        Ok(pickups) => {
+            for p in pickups {
+                println!("{}", p.line());
+            }
+        }
+        Err(e) => return fail(e),
+    }
     0
 }
 
