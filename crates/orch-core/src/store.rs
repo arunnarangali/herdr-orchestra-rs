@@ -23,9 +23,11 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("../migrations/0002_deliveries.sql")),
     (3, include_str!("../migrations/0003_run.sql")),
     (4, include_str!("../migrations/0004_lead_queue.sql")),
+    (5, include_str!("../migrations/0005_scheduler.sql")),
 ];
 
-/// The schema version this build writes.
+/// The schema version this build writes: the last migration in the list (the list stays
+/// ordered; each milestone inserts its own version in order).
 pub const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 
 #[derive(Debug, thiserror::Error)]
@@ -975,7 +977,7 @@ mod tests {
         }
         let mut s = Store::open(&path).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 4);
+        assert_eq!(SCHEMA_VERSION, 5);
         add(&mut s, "M1", &[]);
         let id = s
             .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")
@@ -1024,7 +1026,7 @@ mod tests {
             dump(&conn)
         };
         let s = Store::open(&path).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
         assert_eq!(dump(&s.conn), before, "upgrade changed existing rows");
         assert!(s.load_run().unwrap().is_none());
         for table in ["run", "run_agents", "task_plan"] {
