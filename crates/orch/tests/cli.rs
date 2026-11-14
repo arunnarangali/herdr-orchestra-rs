@@ -90,7 +90,7 @@ fn every_command_is_accepted_and_not_implemented() {
     // too (tests/events_cmd.rs); `dispatch`, `answer`, `fix`, `approve` and `escalate` are real
     // (tests/dispatch_cmds.rs); `autopilot` became real in the event-manager
     // milestone (tests/autopilot_cmd.rs). `start`, `prepare`, `setup-done`, `park` and `cleanup`
-    // are real (tests/git_cmds.rs). The merge family is still stubbed.
+    // are real (tests/git_cmds.rs). `commit` and `merge` are real too (tests/merge_cmds.rs).
     for n in NAMES.iter().filter(|n| {
         ![
             "agents",
@@ -113,6 +113,8 @@ fn every_command_is_accepted_and_not_implemented() {
             "setup-done",
             "park",
             "cleanup",
+            "commit",
+            "merge",
         ]
         .contains(n)
     }) {

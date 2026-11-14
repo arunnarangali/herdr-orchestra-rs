@@ -7,6 +7,7 @@ mod doctor;
 mod events_cmd;
 mod git_cmds;
 mod listing;
+mod merge_cmds;
 mod plan_cmds;
 mod task_cmds;
 mod team;
