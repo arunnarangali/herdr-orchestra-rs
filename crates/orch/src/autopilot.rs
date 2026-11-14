@@ -295,8 +295,8 @@ impl Work for StubWork {
         Err("reading review verdicts is not built yet — Phase 8".into())
     }
 
-    fn commit(&mut self, _task: &str) -> std::result::Result<CommitOutcome, String> {
-        Err("commit and merge are not built yet — Phase 7".into())
+    fn commit(&mut self, task: &str) -> std::result::Result<CommitOutcome, String> {
+        self.0.commit(task)
     }
 }
 

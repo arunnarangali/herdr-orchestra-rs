@@ -112,6 +112,22 @@ impl GitWork {
         run().map_err(|e| e.to_string())
     }
 
+    /// [`Work::commit`]: land the milestone on the feature branch — squash, check on the merged
+    /// result, commit only when green (see [`crate::merge`]). Repairs an interrupted merge first.
+    /// `Err` means nothing was landed and the tree is as it was (a merge in progress elsewhere,
+    /// a dirty main folder, missing saved work).
+    pub fn commit(&self, task: &str) -> std::result::Result<CommitOutcome, String> {
+        let run = || -> crate::Result<CommitOutcome> {
+            let mut store = self.open()?;
+            let landing = crate::merge::land(&mut store, &self.root, task, &crate::merge::Fault::from_env())?;
+            if let Some(r) = &landing.recovered {
+                tracing::warn!("{r}");
+            }
+            Ok(landing.outcome.outcome(task))
+        };
+        run().map_err(|e| e.to_string())
+    }
+
     /// [`Work::save_work`]: keep the milestone's uncommitted work in its hidden ref. An error
     /// means the work is still in the folder, untouched.
     pub fn save_work(&self, task: &str) -> std::result::Result<(), String> {
@@ -433,6 +449,15 @@ impl<'a> Manager<'a> {
     /// the process; the OS then releases the driver lease, and every state write is
     /// one transaction, so nothing is corrupted.
     pub fn run(&mut self, stop: &dyn Fn() -> bool) -> i32 {
+        // a merge a crash interrupted is finished or undone before anything is scheduled
+        match crate::merge::recover(self.store, &self.root) {
+            Ok(Some(r)) => self.log(&r.to_string(), true),
+            Ok(None) => {}
+            Err(e) => {
+                self.log(&format!("merge recovery failed: {e}"), true);
+                return EXIT_STOPPED;
+            }
+        }
         {
             let store = &mut *self.store;
             let work = &mut *self.work;
@@ -928,6 +953,11 @@ impl<'a> Manager<'a> {
             Ok(o) => o,
             Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
         };
+        let outcome_kind = match &outcome {
+            CommitOutcome::Conflict { .. } => Some(true),
+            CommitOutcome::BranchFails { .. } => Some(false),
+            _ => None,
+        };
         match outcome {
             CommitOutcome::Merged => {
                 self.store.release_claim(id).ok();
@@ -946,6 +976,9 @@ impl<'a> Manager<'a> {
                 Ok(())
             }
             CommitOutcome::Conflict { line } | CommitOutcome::BranchFails { line } => {
+                let is_conflict = matches!(outcome_kind, Some(true));
+                // a check tail runs to many lines: the transition keeps the first
+                let line = line.lines().next().unwrap_or_default().to_string();
                 let t = self.store.get_task(id)?;
                 if t.conflict_rounds >= MAX_CONFLICT {
                     return self.park(
@@ -963,10 +996,28 @@ impl<'a> Manager<'a> {
                         Some(&format!("{line} (conflict round {n})")),
                     ),
                 )?;
+                if is_conflict {
+                    self.queue_conflict_job(id, n);
+                }
                 self.log(&format!("{line} -> queued for the next free coder"), false);
                 Ok(())
             }
         }
+    }
+
+    /// Queue the conflict job (`conflict-<n>.md`) for the milestone's coder: the stored conflict
+    /// files, and the plan's check command to re-run.
+    fn queue_conflict_job(&mut self, id: &str, n: u32) {
+        let (Ok(Some(s)), Ok(t)) = (self.store.run_settings(), self.store.get_task(id)) else {
+            return;
+        };
+        let files = self.store.issue(id).ok().flatten().map(|i| i.files).unwrap_or_default();
+        self.state.jobs.push(QueuedJob {
+            task: id.to_string(),
+            file: format!("conflict-{n}.md"),
+            body: crate::conflict::job_body(id, &t.title, &s.branch, &s.check_command, &files),
+        });
+        self.state.save(&self.root.join(crate::paths::ORCH_DIR)).ok();
     }
 
     // ---- 2. dispatch (the scheduler, M2)
