@@ -14,6 +14,7 @@
 //!   milestone is merged again from its saved work (the hidden ref is only deleted once landed).
 //! * **One merge at a time**, by a lock file held for the whole landing (and the recovery in it).
 
+use crate::check;
 use crate::conflict::{Issue, IssueKind};
 use crate::error::{EXIT_USAGE, Error, Result};
 use crate::git;
@@ -27,10 +28,8 @@ use crate::task::{State, Task};
 use crate::worktree;
 use fs2::FileExt;
 use std::fs::File;
-use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn die(msg: impl Into<String>) -> Error {
     Error::wrap(std::io::Error::other(msg.into()), EXIT_USAGE)
@@ -207,11 +206,6 @@ pub fn commit_message(root: &Path, s: &RunSettings, t: &Task) -> String {
 
 // ---------------------------------------------------------------- risk hold
 
-fn tail_lines(text: &str, n: usize) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    lines[lines.len().saturating_sub(n)..].join("\n")
-}
-
 /// What kinds of risky path `path` is (Python's `RISK_RULES`).
 fn risk_kinds(path: &str) -> Vec<&'static str> {
     let mut out = Vec::new();
@@ -310,60 +304,12 @@ fn held_line(task: &str, risks: &[String]) -> String {
 
 // ---------------------------------------------------------------- the check
 
-fn check_timeout() -> Duration {
-    let min = std::env::var("ORCH_CHECK_TIMEOUT_MIN")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(30);
-    Duration::from_secs(min * 60)
-}
-
-/// Run the plan's check command in `dir` — as written, through the shell, never interpreted.
-/// `(passed, last 60 lines of its output)`; an empty command passes.
+/// Run the plan's check command in `dir` — as written, through the shell, never interpreted — by
+/// the one runner ([`crate::check::run`]). `(passed, last 60 lines of its output)`; an empty
+/// command passes.
 pub fn run_check(command: &str, dir: &Path, limit: Duration) -> (bool, String) {
-    if command.trim().is_empty() {
-        return (true, String::new());
-    }
-    let spawned = Command::new("sh")
-        .args(["-c", command])
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let mut child = match spawned {
-        Ok(c) => c,
-        Err(e) => return (false, format!("could not run the check command: {e}")),
-    };
-    let drain = |s: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut buf = String::new();
-            if let Some(mut s) = s {
-                let _ = s.read_to_string(&mut buf);
-            }
-            buf
-        })
-    };
-    let out = drain(child.stdout.take().map(|s| Box::new(s) as _));
-    let err = drain(child.stderr.take().map(|s| Box::new(s) as _));
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(st)) => break Some(st),
-            Ok(None) if start.elapsed() > limit => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return (false, format!("waiting for the check command: {e}")),
-        }
-    };
-    let text = format!("{}{}", out.join().unwrap_or_default(), err.join().unwrap_or_default());
-    match status {
-        None => (false, format!("check command timed out after {} min", limit.as_secs() / 60)),
-        Some(st) => (st.success(), tail_lines(&text, 60)),
-    }
+    let r = check::run(command, dir, limit, 60);
+    (r.ok, r.tail)
 }
 
 // ---------------------------------------------------------------- landing
@@ -609,7 +555,7 @@ fn land_worktree(
     if !empty {
         // check BEFORE committing: nothing red ever lands on the feature branch
         let (ok, tail) = match setup::ensure_setup(store, s, root) {
-            Ok(_) => run_check(&s.check_command, root, check_timeout()),
+            Ok(_) => run_check(&s.check_command, root, check::timeout_from_env()),
             Err(e) => (false, e.to_string()),
         };
         if ok {

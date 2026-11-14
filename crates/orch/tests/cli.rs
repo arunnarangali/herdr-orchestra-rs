@@ -91,6 +91,7 @@ fn every_command_is_accepted_and_not_implemented() {
     // (tests/dispatch_cmds.rs); `autopilot` became real in the event-manager
     // milestone (tests/autopilot_cmd.rs). `start`, `prepare`, `setup-done`, `park` and `cleanup`
     // are real (tests/git_cmds.rs). `commit` and `merge` are real too (tests/merge_cmds.rs).
+    // `send-job`, `handoff` and `needs-fix` are real (tests/send_cmds.rs).
     for n in NAMES.iter().filter(|n| {
         ![
             "agents",
@@ -107,6 +108,9 @@ fn every_command_is_accepted_and_not_implemented() {
             "answer",
             "fix",
             "approve",
+            "send-job",
+            "handoff",
+            "needs-fix",
             "escalate",
             "start",
             "prepare",

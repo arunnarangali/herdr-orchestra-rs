@@ -92,27 +92,11 @@ fn default_base(root: &Path, branch: &str) -> Result<String> {
     ))
 }
 
-/// Run the plan's check command through the shell in `root`; `Err` carries its last 30 lines
-/// of output, as Python shows them.
+/// Run the plan's check command in `root` through the one check runner; `Err` carries its last
+/// 30 lines of output, as Python shows them (a timeout says so).
 fn run_check(command: &str, root: &Path) -> std::result::Result<(), String> {
-    let out = Command::new("sh")
-        .args(["-c", command])
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("could not run `{command}`: {e}"))?;
-    if out.status.success() {
-        return Ok(());
-    }
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let lines: Vec<&str> = text.lines().collect();
-    Err(lines[lines.len().saturating_sub(30)..].join("\n"))
+    let r = crate::check::run(command, root, crate::check::timeout_from_env(), crate::check::TAIL_LINES);
+    if r.ok { Ok(()) } else { Err(r.tail) }
 }
 
 /// `orch finish` (§13): validate, run the plan's check command, clean the run's worktrees and

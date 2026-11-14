@@ -77,6 +77,14 @@ impl std::error::Error for Msg {}
 /// scope) and the task.md section texts come from `plan.md`.
 fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
     let start = std::env::current_dir().map_err(|e| Error::io("reading the current folder", e))?;
+    generate_for(tid, &start, None)
+}
+
+/// [`generate`] from `start` (any folder of the repo), writing into `dest`'s `.orch-task/<Mn>/`
+/// when given — the coder's own folder, so the contract is where its prompt says to read it —
+/// else into the main folder's.
+pub(crate) fn generate_for(tid: &str, start: &Path, dest: Option<&Path>) -> Result<Vec<PathBuf>, Error> {
+    let start = start.to_path_buf();
     let root = paths::main_root(&start)?;
     let orch = paths::orchestrate_dir(&start)?;
 
@@ -211,7 +219,7 @@ fn generate(tid: &str) -> Result<Vec<PathBuf>, Error> {
     parts.push(String::new());
     parts.push(WORKER_RULES.to_string());
 
-    let out = root.join(".orch-task").join(tid);
+    let out = dest.unwrap_or(&root).join(".orch-task").join(tid);
     std::fs::create_dir_all(&out)
         .map_err(|e| Error::io(format!("creating {}", out.display()), e))?;
     let md = out.join("task.md");

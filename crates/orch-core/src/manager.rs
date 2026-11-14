@@ -13,6 +13,8 @@
 //! a kill at any point leaves the run consistent (reconcile repairs the rest).
 
 use crate::claim::ClaimError;
+use crate::check::Records;
+use crate::fix::FixKind;
 use crate::events::{PollOutcome, PollSource, RunEvent, RuntimeView};
 use crate::error::Result;
 use crate::lead_queue::LeadKind;
@@ -68,6 +70,43 @@ pub trait Work {
     fn review_verdict(&mut self, task: &str, round: u32) -> std::result::Result<ReviewOutcome, String>;
     /// Commit the milestone and merge it into the run branch (Phase 7).
     fn commit(&mut self, task: &str) -> std::result::Result<CommitOutcome, String>;
+
+    /// The fix prompt for a typed problem, naming what is wrong and the result file to write
+    /// next. The default folds the kind into [`fix_body`](Work::fix_body)'s `tail` argument
+    /// (the check's tail, `"result file"`, or empty), so a `Work` that only knows the narrow
+    /// form keeps working.
+    fn fix_prompt(&mut self, task: &str, round: u32, kind: &FixKind) -> std::result::Result<String, String> {
+        let tail = match kind {
+            FixKind::Check { tail } => tail.as_str(),
+            FixKind::ResultFile => "result file",
+            _ => "",
+        };
+        self.fix_body(task, round, tail)
+    }
+    /// The files the coder changed outside the milestone's `Likely files` right now (the scope
+    /// check). The default finds none, so only a real `Work` can send a milestone back for it.
+    fn strays(&mut self, _task: &str) -> std::result::Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
+    /// The check on the run branch before any work starts (the baseline gate): `(passed, the
+    /// tail of its output)`. Not recorded against a milestone. The default passes.
+    fn baseline(&mut self) -> std::result::Result<(bool, String), String> {
+        Ok((true, String::new()))
+    }
+}
+
+/// The prompt a coder gets for a prompt file (`task.md`, `fix-2.md`, …): Python `cmd_send`'s
+/// text, with `attempt` naming the result, report and done files.
+pub fn coder_prompt(task: &str, file: &str, attempt: u32) -> String {
+    let rel = format!(".orch-task/{task}");
+    format!(
+        "Read {rel}/{file} and carry it out exactly (the milestone's contract is {rel}/task.json). When \
+         completely finished, write {rel}/result-{attempt}.json in the `result_format` shape from task.json, \
+         and a short report {rel}/report-{attempt}.md (max 20 lines: files changed, what you did, check \
+         result; if something was ambiguous, status `question` in the result, a line starting QUESTION: \
+         here, and stop; last line `COMMIT: <one-line commit message for the change>`), then create the \
+         empty file {rel}/done-{attempt} as your very last action."
+    )
 }
 
 /// The git-backed parts of [`Work`] (§13): `prepare` and `save_work`, over the run's
@@ -490,6 +529,9 @@ impl<'a> Manager<'a> {
         if let Some(code) = self.banner() {
             return code;
         }
+        if let Some(code) = self.baseline_gate() {
+            return code;
+        }
         loop {
             if stop() {
                 self.log("stopped by request — the run is kept", false);
@@ -697,6 +739,9 @@ impl<'a> Manager<'a> {
                     let joined: String = qs.join("; ").chars().take(400).collect();
                     return self.park(id, State::Paused, &joined, false);
                 }
+                if self.scope_gate(id)? {
+                    return Ok(());
+                }
                 let unmet: Vec<&serde_json::Value> = v
                     .get("criteria")
                     .and_then(|c| c.as_array())
@@ -712,6 +757,13 @@ impl<'a> Manager<'a> {
                         .filter_map(|c| c.get("id").and_then(|i| i.as_str()))
                         .map(String::from)
                         .collect();
+                    let pairs: Vec<(String, String)> = unmet
+                        .iter()
+                        .map(|c| {
+                            let text = |k: &str| c.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+                            (text("id"), text("evidence"))
+                        })
+                        .collect();
                     self.log(
                         &format!("{id}: the coder reports {} not met -> fix round", ids.join(", ")),
                         false,
@@ -719,7 +771,7 @@ impl<'a> Manager<'a> {
                     return self.fix_round(
                         id,
                         &format!("acceptance criteria still not met: {}", ids.join(", ")),
-                        "",
+                        FixKind::Criteria { unmet: pairs },
                     );
                 }
             }
@@ -733,7 +785,7 @@ impl<'a> Manager<'a> {
                         &format!("{id}: result file not usable -> asked the coder once to rewrite it"),
                         false,
                     );
-                    let body = match self.work.fix_body(id, 1, "result file") {
+                    let body = match self.work.fix_prompt(id, 1, &FixKind::ResultFile) {
                         Ok(b) => b,
                         Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
                     };
@@ -752,6 +804,9 @@ impl<'a> Manager<'a> {
                 if let Some(q) = qline {
                     return self.park(id, State::Paused, &q, false);
                 }
+                if self.scope_gate(id)? {
+                    return Ok(());
+                }
             }
         }
         let outcome = match self.work.check(id) {
@@ -767,7 +822,7 @@ impl<'a> Manager<'a> {
                         "checks still failing: {}",
                         tail.lines().next().unwrap_or("no output")
                     ),
-                    &tail,
+                    FixKind::Check { tail },
                 )
             }
             CheckOutcome::Pass => {
@@ -799,15 +854,92 @@ impl<'a> Manager<'a> {
         }
     }
 
+    /// The scope check: the coder's real diff against `Likely files`. Strays are kept in the
+    /// milestone's record for the summary. `Scope: warn` says so and carries on (`false`);
+    /// `Scope: strict` sends the milestone back for the strays not already complained about
+    /// (`true`: handled, stop verifying). A check that cannot be made never blocks the milestone.
+    fn scope_gate(&mut self, id: &str) -> Result<bool> {
+        let out = match self.work.strays(id) {
+            Ok(o) => o,
+            Err(e) => {
+                self.log(&format!("{id}: could not check its files against Likely files: {e}"), false);
+                return Ok(false);
+            }
+        };
+        let previous = Records::load(&self.root).0.get(id).map(|r| r.out_of_scope.clone()).unwrap_or_default();
+        let fresh: Vec<String> = out.iter().filter(|f| !previous.contains(f)).cloned().collect();
+        if !out.is_empty() {
+            Records::set_out_of_scope(&self.root, id, &out)?;
+        }
+        if fresh.is_empty() {
+            return Ok(false);
+        }
+        let strict = self.settings()?.is_some_and(|s| s.scope == "strict");
+        let joined = fresh.join(", ");
+        if !strict {
+            let hot: Vec<&str> = fresh.iter().map(String::as_str).filter(|f| crate::scope::is_hotspot(f)).collect();
+            let extra = if hot.is_empty() {
+                String::new()
+            } else {
+                format!(" (shared hotspot files: {})", hot.join(", "))
+            };
+            self.log(&format!("{id} changed files outside its Likely files: {joined}{extra}"), !hot.is_empty());
+            return Ok(false);
+        }
+        self.log(&format!("{id} changed files outside its Likely files: {joined} -> fix round"), false);
+        let allowed = self
+            .store
+            .load_run()?
+            .and_then(|r| r.plan.into_iter().find(|p| p.id == id).map(|p| p.files))
+            .unwrap_or_default();
+        self.fix_round(
+            id,
+            &format!("still outside its scope after {MAX_FIX} fix rounds: {joined}"),
+            FixKind::Scope { allowed, files: fresh },
+        )?;
+        Ok(true)
+    }
+
+    /// The baseline gate (Python's start of `cmd_autopilot`): with no `.orchestrate/baseline.txt`,
+    /// run the check on the run branch before any work. Green writes the file (its output tail);
+    /// red stops the run, leaving no file, so the next start runs it again. `Some(exit code)`
+    /// stops the run.
+    fn baseline_gate(&mut self) -> Option<i32> {
+        let file = self.root.join(crate::paths::ORCH_DIR).join("baseline.txt");
+        if file.exists() {
+            return None;
+        }
+        let (ok, tail) = match self.work.baseline() {
+            Ok(r) => r,
+            Err(e) => (false, format!("orch error: {e}")),
+        };
+        if ok {
+            if let Err(e) = std::fs::write(&file, &tail) {
+                self.log(&format!("could not write baseline.txt: {e}"), true);
+                return Some(EXIT_STOPPED);
+            }
+            return None;
+        }
+        let msg = format!(
+            "Baseline check fails on the feature branch before any work. Autopilot needs a green check: fix \
+             the failures, or narrow the plan's `Check command` to what should pass (ask the lead: \
+             `orch lead run` helps with this), then run autopilot again. Stopping.\n{tail}"
+        );
+        let _ = std::fs::remove_file(&file);
+        let _ = self.store.enqueue_lead_event(LeadKind::Stopped, None, msg.lines().next().unwrap_or_default());
+        self.log(&msg, true);
+        Some(EXIT_STOPPED)
+    }
+
     /// Count a fix round (capped at `MAX_FIX`), then queue a fix job the scheduler
     /// hands to a coder — preferably the builder (M2).
-    fn fix_round(&mut self, id: &str, cap_reason: &str, tail: &str) -> Result<()> {
+    fn fix_round(&mut self, id: &str, cap_reason: &str, kind: FixKind) -> Result<()> {
         let t = self.store.get_task(id)?;
         if t.fix_rounds >= MAX_FIX {
             return self.out_of_rounds(id, cap_reason);
         }
         let n = self.store.bump(id, Counter::Fix)?;
-        let body = match self.work.fix_body(id, n, tail) {
+        let body = match self.work.fix_prompt(id, n, &kind) {
             Ok(b) => b,
             Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
         };
@@ -817,7 +949,7 @@ impl<'a> Manager<'a> {
         )?;
         self.state.jobs.push(QueuedJob {
             task: id.to_string(),
-            file: format!("fix-{n}.md"),
+            file: format!("{}-{n}.md", crate::fix::file_prefix(&kind)),
             body,
         });
         self.state.save(&self.root.join(crate::paths::ORCH_DIR)).ok();
@@ -1100,15 +1232,7 @@ impl<'a> Manager<'a> {
     fn send_prompt(&mut self, task: &str, file: &str, kind: DeliveryKind) -> std::result::Result<(), String> {
         let t = self.store.get_task(task).map_err(|e| e.to_string())?;
         let attempt = t.attempt.max(1);
-        let rel = format!(".orch-task/{task}");
-        let text = format!(
-            "Read {rel}/{file} and carry it out exactly (the milestone's contract is {rel}/task.json). When \
-             completely finished, write {rel}/result-{attempt}.json in the `result_format` shape from task.json, \
-             and a short report {rel}/report-{attempt}.md (max 20 lines: files changed, what you did, check \
-             result; if something was ambiguous, status `question` in the result, a line starting QUESTION: \
-             here, and stop; last line `COMMIT: <one-line commit message for the change>`), then create the \
-             empty file {rel}/done-{attempt} as your very last action."
-        );
+        let text = coder_prompt(task, file, attempt);
         let agent = match kind {
             DeliveryKind::Coder => t.worker.clone().unwrap_or_default(),
             DeliveryKind::Reviewer => self.reviewer_of().map_err(|e| e.to_string())?,

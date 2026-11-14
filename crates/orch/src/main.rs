@@ -10,6 +10,8 @@ mod git_cmds;
 mod listing;
 mod merge_cmds;
 mod plan_cmds;
+mod run_work;
+mod send_cmds;
 mod task_cmds;
 mod team;
 

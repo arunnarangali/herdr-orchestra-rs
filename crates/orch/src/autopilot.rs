@@ -2,9 +2,8 @@
 //! It takes the driver lease, reconciles whatever a crash left half-done, then loops:
 //! budget accounting, in-flight work, scheduler dispatch, lead wake-ups, and a bounded
 //! poll of the runtime and the done files. Everything git, check, commit, merge and
-//! review related goes through `orch_core::manager::Work` — Phase 7 and Phase 8
-//! implement it; until then a stub answers with an error the manager parks the
-//! milestone with, so the loop is testable end to end with fakes.
+//! review related goes through `orch_core::manager::Work`; [`RunWork`] is the real one
+//! (review is not built into it yet, so a milestone that needs review parks with that error).
 //!
 //! herdr's adapter is wired onto orch-core's narrow [`RuntimeView`] and
 //! [`Deliveries`] traits here; orch-core itself carries no herdr code.
@@ -13,13 +12,12 @@
 //! integration tests' lever).
 
 use crate::events_cmd::HerdrLead;
+use crate::run_work::RunWork;
 use orch_config::tunables::Tunables;
 use orch_core::events::{AgentState, HerdrPoll, PollTunables, RuntimeView};
 use orch_core::lease::{driver_lock_path, hhmmss, take_lease};
 use orch_core::manager::{
-    CheckOutcome, CommitOutcome, Deliveries, DeliveryOutcome, GitWork, LoopTunables, Manager,
-    NewDelivery,
-    Recovered, ReviewOutcome, Work,
+    Deliveries, DeliveryOutcome, LoopTunables, Manager, NewDelivery, Recovered,
 };
 use orch_core::paths::{ORCH_DIR, main_root};
 use orch_core::store::{Store, StoreError};
@@ -102,7 +100,7 @@ pub fn run(args: &[String]) -> i32 {
             review_budget_s: tun.review_budget_min * 60,
         },
     };
-    let mut work = StubWork(GitWork::new(root.clone()));
+    let mut work = RunWork::new(root.clone());
 
     let log_path = orch.join("autopilot.log");
     let mut say = move |msg: &str, important: bool| {
@@ -260,43 +258,3 @@ impl Deliveries for HerdrDeliveries<'_> {
         Ok(out)
     }
 }
-
-/// The milestones' git/check/review work. `prepare` and `save_work` are real (git worktrees and
-/// hidden refs, Phase 7); the rest answers with an error until its phase, which the manager
-/// parks the milestone with. The event loop itself is built and tested against this narrow seam.
-struct StubWork(GitWork);
-
-impl Work for StubWork {
-    fn prepare(&mut self, task: &str, worker: &str) -> std::result::Result<(), String> {
-        self.0.prepare(task, worker)
-    }
-
-    fn write_task(&mut self, _task: &str) -> std::result::Result<(), String> {
-        Err("writing task files is not built yet — Phase 7".into())
-    }
-
-    fn fix_body(&mut self, _task: &str, _round: u32, _tail: &str) -> std::result::Result<String, String> {
-        Err("fix prompts are not built yet — Phase 8".into())
-    }
-
-    fn check(&mut self, _task: &str) -> std::result::Result<CheckOutcome, String> {
-        Err("running the check command is not built yet — Phase 8".into())
-    }
-
-    fn save_work(&mut self, task: &str) -> std::result::Result<(), String> {
-        self.0.save_work(task)
-    }
-
-    fn review_body(&mut self, _task: &str, _round: u32) -> std::result::Result<String, String> {
-        Err("review prompts are not built yet — Phase 7/8".into())
-    }
-
-    fn review_verdict(&mut self, _task: &str, _round: u32) -> std::result::Result<ReviewOutcome, String> {
-        Err("reading review verdicts is not built yet — Phase 8".into())
-    }
-
-    fn commit(&mut self, task: &str) -> std::result::Result<CommitOutcome, String> {
-        self.0.commit(task)
-    }
-}
-

@@ -2,7 +2,7 @@
 
 use crate::{
     autopilot, dispatch_cmds, doctor, events_cmd, finish_cmd, git_cmds, listing, merge_cmds,
-    plan_cmds, task_cmds, team,
+    plan_cmds, send_cmds, task_cmds, team,
 };
 use orch_config::tunables::Tunables;
 use orch_herdr::RuntimeAdapter;
@@ -85,6 +85,9 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("fix", _) => Some(dispatch_cmds::fix(&args[1..])),
         ("approve", _) => Some(dispatch_cmds::approve(&args[1..])),
         ("escalate", _) => Some(dispatch_cmds::escalate(&args[1..])),
+        ("send-job", _) => Some(send_cmds::send_job(&args[1..])),
+        ("handoff", _) => Some(send_cmds::handoff(&args[1..])),
+        ("needs-fix", _) => Some(send_cmds::needs_fix(&args[1..])),
         ("autopilot", _) => Some(autopilot::run(&args[1..])),
         ("start", _) => Some(
             merge_cmds::recover_on_start()

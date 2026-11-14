@@ -5,6 +5,8 @@
 use orch_core::events::{
     AgentState, HerdrPoll, PollOutcome, PollSource, PollTunables, RunEvent, RuntimeView,
 };
+use orch_core::check::Records;
+use orch_core::fix::FixKind;
 use orch_core::lead_queue::LeadKind;
 use orch_core::manager::{
     CheckOutcome, CommitOutcome, Deliveries, DeliveryOutcome, LoopTunables, Manager, NewDelivery,
@@ -149,6 +151,10 @@ struct FkWork {
     review: ReviewOutcome,
     fix_rounds: Cell<u32>,
     save_calls: Cell<u32>,
+    /// What the scope check finds in the coder's folder.
+    strays: RefCell<Vec<String>>,
+    /// The typed fix problems the manager asked prompts for.
+    kinds: RefCell<Vec<FixKind>>,
 }
 
 impl Work for FkWork {
@@ -168,6 +174,20 @@ impl Work for FkWork {
     ) -> std::result::Result<String, String> {
         self.fix_rounds.set(self.fix_rounds.get() + 1);
         Ok(format!("# fix {task} round {round}"))
+    }
+
+    fn fix_prompt(
+        &mut self,
+        task: &str,
+        round: u32,
+        kind: &FixKind,
+    ) -> std::result::Result<String, String> {
+        self.kinds.borrow_mut().push(kind.clone());
+        self.fix_body(task, round, "")
+    }
+
+    fn strays(&mut self, _task: &str) -> std::result::Result<Vec<String>, String> {
+        Ok(self.strays.borrow().clone())
     }
 
     fn check(&mut self, _task: &str) -> std::result::Result<CheckOutcome, String> {
@@ -372,6 +392,8 @@ impl One {
                 review: ReviewOutcome::Approved,
                 fix_rounds: Cell::new(0),
                 save_calls: Cell::new(0),
+                strays: RefCell::new(vec![]),
+                kinds: RefCell::new(vec![]),
             },
             notes: Notes(RefCell::new(vec![])),
             say_log: Rc::new(RefCell::new(Vec::new())),
@@ -529,6 +551,8 @@ fn recovery_confirms_from_a_working_agent_and_resends_to_an_idle_one() {
         review: ReviewOutcome::Approved,
         fix_rounds: Cell::new(0),
         save_calls: Cell::new(0),
+        strays: RefCell::new(vec![]),
+        kinds: RefCell::new(vec![]),
     };
     let mut say = pusher(&say_log);
     let report = reconcile(
@@ -694,6 +718,8 @@ fn the_lead_waits_then_the_milestone_is_auto_dispatched() {
             review: ReviewOutcome::Approved,
             fix_rounds: Cell::new(0),
             save_calls: Cell::new(0),
+            strays: RefCell::new(vec![]),
+            kinds: RefCell::new(vec![]),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -749,6 +775,8 @@ fn the_budget_used_up_stops_the_run_with_a_stopped_entry() {
             review: ReviewOutcome::Approved,
             fix_rounds: Cell::new(0),
             save_calls: Cell::new(0),
+            strays: RefCell::new(vec![]),
+            kinds: RefCell::new(vec![]),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -797,6 +825,8 @@ fn reconcile_parks_a_coding_task_whose_agent_vanished() {
         review: ReviewOutcome::Approved,
         fix_rounds: Cell::new(0),
         save_calls: Cell::new(0),
+        strays: RefCell::new(vec![]),
+        kinds: RefCell::new(vec![]),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -836,6 +866,8 @@ fn reconcile_clears_a_half_finished_wake_up() {
         review: ReviewOutcome::Approved,
         fix_rounds: Cell::new(0),
         save_calls: Cell::new(0),
+        strays: RefCell::new(vec![]),
+        kinds: RefCell::new(vec![]),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -860,6 +892,8 @@ fn reconcile_never_marks_incomplete_work_as_completed() {
         review: ReviewOutcome::Approved,
         fix_rounds: Cell::new(0),
         save_calls: Cell::new(0),
+        strays: RefCell::new(vec![]),
+        kinds: RefCell::new(vec![]),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -879,6 +913,8 @@ fn park_with_lost_fails_the_milestone_at_max_lost() {
         review: ReviewOutcome::Approved,
         fix_rounds: Cell::new(0),
         save_calls: Cell::new(0),
+        strays: RefCell::new(vec![]),
+        kinds: RefCell::new(vec![]),
     };
     for _ in 0..3 {
         let st = park_with_lost(
@@ -1103,6 +1139,8 @@ fn a_passing_check_with_a_plan_review_goes_to_review_then_merges() {
             review: ReviewOutcome::Approved,
             fix_rounds: Cell::new(0),
             save_calls: Cell::new(0),
+            strays: RefCell::new(vec![]),
+            kinds: RefCell::new(vec![]),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -1131,6 +1169,72 @@ fn a_passing_check_with_a_plan_review_goes_to_review_then_merges() {
     one.cycle();
     let t = one.store.get_task("M1").unwrap();
     assert_eq!(t.status, State::Merged);
+}
+
+// ---- the scope check (Scope: warn | strict)
+
+/// A run whose `Scope:` is `scope`, with M1 (Likely files `M1.rs`) done by its coder and a stray
+/// file in its folder, about to be verified.
+fn strayed(scope: &str) -> One {
+    let mut one = One::new();
+    let mut s = settings(false);
+    s.scope = scope.into();
+    one.store
+        .apply_sync(&SyncInput {
+            settings: s,
+            agents: agents(&["w1", "w2"], false),
+            tasks: vec![plan_task("M1", Some("medium"))],
+        })
+        .unwrap();
+    one.cycle(); // dispatched, coding
+    one.work.strays.borrow_mut().push("Cargo.toml".into());
+    one.with_manager(|m, _| {
+        m.apply_event(&RunEvent::Done { task: "M1".into(), agent: "w1".into() }).unwrap()
+    });
+    one
+}
+
+#[test]
+fn strict_scope_sends_the_milestone_back_naming_the_stray_files() {
+    let mut one = strayed("strict");
+    one.cycle(); // verifying: the scope check fires before the check
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!(t.status, State::NeedsFix, "{}", joined(&one.say_log));
+    assert_eq!(t.fix_rounds, 1);
+    assert_eq!(
+        one.work.kinds.borrow().as_slice(),
+        &[FixKind::Scope { allowed: vec!["M1.rs".into()], files: vec!["Cargo.toml".into()] }]
+    );
+    assert!(joined(&one.say_log).contains("outside its Likely files: Cargo.toml -> fix round"));
+    let rec = Records::load(one.dir.path());
+    assert_eq!(rec.0["M1"].out_of_scope, vec!["Cargo.toml"]);
+    let job = one.with_manager(|m, _| m.state.jobs.clone());
+    assert_eq!(job.len(), 1);
+    assert_eq!(job[0].file, "scope-fix-1.md");
+}
+
+#[test]
+fn warn_scope_lists_the_strays_in_the_record_and_carries_on() {
+    let mut one = strayed("warn");
+    one.cycle();
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Merged, "{}", joined(&one.say_log));
+    assert!(one.work.kinds.borrow().is_empty(), "no fix round");
+    let log = joined(&one.say_log);
+    assert!(log.contains("M1 changed files outside its Likely files: Cargo.toml"), "{log}");
+    assert!(log.contains("shared hotspot files: Cargo.toml"), "{log}");
+    assert_eq!(Records::load(one.dir.path()).0["M1"].out_of_scope, vec!["Cargo.toml"]);
+}
+
+#[test]
+fn a_stray_already_sent_back_does_not_send_the_milestone_back_again() {
+    let mut one = strayed("strict");
+    one.cycle();
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::NeedsFix);
+    // the coder explained why in its report and left the file: the next verify carries on
+    one.store.transition("M1", &TransitionRequest::auto(State::Coding, None)).unwrap();
+    one.store.transition("M1", &TransitionRequest::auto(State::Verifying, None)).unwrap();
+    one.cycle();
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Merged, "{}", joined(&one.say_log));
 }
 
 // ---- helpers
