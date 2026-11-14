@@ -1,5 +1,6 @@
 //! Shared core of orch: error type, repo paths, logging, tasks, storage and the driver lease.
 
+pub mod claim;
 pub mod error;
 pub mod graph;
 pub mod lead_queue;
@@ -8,6 +9,7 @@ pub mod logging;
 pub mod paths;
 pub mod plan;
 pub mod run_store;
+pub mod scheduler;
 pub mod store;
 pub mod task;
 pub mod task_contract;
