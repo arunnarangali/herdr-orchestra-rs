@@ -113,6 +113,7 @@ fn every_command_is_accepted_and_not_implemented() {
             "setup-done",
             "park",
             "cleanup",
+            "finish",
             "commit",
             "merge",
         ]
