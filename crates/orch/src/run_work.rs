@@ -17,6 +17,8 @@ use orch_core::fix::{self, FixContext, FixKind};
 use orch_core::git;
 use orch_core::manager::{CheckOutcome, CommitOutcome, GitWork, ReviewOutcome, Work};
 use orch_core::paths::ORCH_DIR;
+use orch_core::refs::{self, task_ref};
+use orch_core::review;
 use orch_core::run_store::RunSettings;
 use orch_core::scope;
 use orch_core::store::Store;
@@ -26,6 +28,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 type Res<T> = std::result::Result<T, String>;
+
+fn write(path: &Path, text: &str) -> Res<()> {
+    std::fs::write(path, text).map_err(|e| format!("writing {}: {e}", path.display()))
+}
 
 /// The task name the manager gives the branch-wide check.
 pub const FINAL_CHECK: &str = "(final check)";
@@ -184,12 +190,105 @@ impl Work for RunWork {
         self.git.save_work(task)
     }
 
-    fn review_body(&mut self, _task: &str, _round: u32) -> Res<String> {
-        Err("review is not built yet".into())
+    /// The review prompt for round `round`: writes the milestone's diff against the merge-base
+    /// (`diff.patch`), a copy of its contract, and the main folder's snapshot (so a reviewer that
+    /// edits files is caught) into `.orchestrate/review/<Mn>/`, and returns the prompt text.
+    fn review_body(&mut self, task: &str, round: u32) -> Res<String> {
+        let store = self.store()?;
+        let s = self.settings(&store)?;
+        let t = store.get_task(task).map_err(|e| e.to_string())?;
+        let orch = self.root.join(ORCH_DIR);
+        let rd = review::review_dir(&orch, task);
+        std::fs::create_dir_all(&rd).map_err(|e| format!("creating {}: {e}", rd.display()))?;
+        let coder_dir = self.coder_dir(&s, &t).ok();
+
+        // the saved work (both modes park it in the hidden ref before review); else the folder
+        let src = refs::read(&self.root, &task_ref(&s.branch, task)).map_err(|e| e.to_string())?;
+        let diff = match (&src, &coder_dir) {
+            (Some(src), _) => review::diff_of_ref(&self.root, &s.branch, src)?,
+            (None, Some(dir)) => review::snapshot_diff(dir, &s.branch)?,
+            (None, None) => {
+                return Err(format!("{task} has no saved work ({}) to review", task_ref(&s.branch, task)));
+            }
+        };
+        write(&rd.join("diff.patch"), &diff)?;
+        let issue = store.issue(task).map_err(|e| e.to_string())?;
+        let resolution = match (&issue, &src) {
+            (Some(i), Some(src)) if i.rereview && i.resolution_base.is_some() => {
+                let base = i.resolution_base.as_deref().unwrap_or_default();
+                let args = ["diff", base, src.as_str()];
+                let d = git::run(&self.root, &args).map_err(|e| e.to_string())?;
+                write(&rd.join("resolution.patch"), &d.stdout)?;
+                true
+            }
+            _ => false,
+        };
+        for name in ["task.md", "task.json"] {
+            let from = [coder_dir.as_deref(), Some(self.root.as_path())]
+                .into_iter()
+                .flatten()
+                .map(|d| d.join(".orch-task").join(task).join(name))
+                .find(|p| p.is_file());
+            if let Some(from) = from {
+                std::fs::copy(&from, rd.join(name)).map_err(|e| format!("copying {name}: {e}"))?;
+            }
+        }
+        review::write_snapshot(&self.root, task, round).map_err(|e| e.to_string())?;
+        // the poll watches `.orch-task/<Mn>/done-<attempt>`: the coder's own done file for this
+        // attempt is still there, and would end the review before it starts
+        let done = format!(".orch-task/{task}/done-{}", t.attempt.max(1));
+        let _ = std::fs::remove_file(self.root.join(&done));
+        Ok(review::prompt(task, &t.title, round, &done, resolution))
     }
 
-    fn review_verdict(&mut self, _task: &str, _round: u32) -> Res<ReviewOutcome> {
-        Err("review is not built yet".into())
+    /// The reviewer's verdict for `round`: `Approved` (approved, or approved with warnings, whose
+    /// suggestions are kept for the summary), `Blockers` (changes requested or blocked), or
+    /// `Unusable` with the reason — a missing, empty, malformed or self-contradicting file, a
+    /// criterion left unjudged, or a reviewer that changed files in the main folder.
+    fn review_verdict(&mut self, task: &str, round: u32) -> Res<ReviewOutcome> {
+        let unusable = |line: String| Ok(ReviewOutcome::Unusable { line });
+        let changed = review::changed_since(&self.root, task, round).map_err(|e| e.to_string())?;
+        if !changed.is_empty() {
+            return unusable(format!(
+                "the reviewer changed files in the repository during review round {round} ({}) — the review is not trusted",
+                changed.join(", ")
+            ));
+        }
+        let orch = self.root.join(ORCH_DIR);
+        let r = match review::read_round(&orch, task, round) {
+            Ok(r) => r,
+            Err(line) => return unusable(line),
+        };
+        let wanted = review::contract_criteria(&orch, task);
+        let unjudged = review::unjudged(&r, &wanted);
+        if !unjudged.is_empty() {
+            return unusable(format!(
+                "review output not usable: review-{round}.json gives no verdict for {}",
+                unjudged.join(", ")
+            ));
+        }
+        review::store_suggestions(&orch, task, round, &r.suggestion_lines()).map_err(|e| e.to_string())?;
+        Ok(if r.outcome.approves() {
+            ReviewOutcome::Approved
+        } else {
+            ReviewOutcome::Blockers { count: r.blocker_count() }
+        })
+    }
+
+    /// A queued job's file goes into the coder's folder (`prepare` has just put it there), where
+    /// the prompt says to read it.
+    fn write_job(&mut self, _root: &Path, task: &str, file: &str, body: &str) -> Res<()> {
+        let store = self.store()?;
+        let s = self.settings(&store)?;
+        let t = store.get_task(task).map_err(|e| e.to_string())?;
+        let dir = self.coder_dir(&s, &t)?.join(".orch-task").join(task);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        write(&dir.join(file), body)
+    }
+
+    fn blocker_lines(&mut self, task: &str, round: u32) -> Res<Vec<String>> {
+        let r = review::read_round(&self.root.join(ORCH_DIR), task, round)?;
+        Ok(r.blocker_lines())
     }
 
     fn commit(&mut self, task: &str) -> Res<CommitOutcome> {
@@ -426,10 +525,127 @@ Acceptance criteria:
         assert!(fx.work.fix_prompt("M1", 1, &kind).unwrap().contains("BLOCKER: a.rs:1 — x — y"));
     }
 
+    /// M1's work saved to its hidden ref, as the manager does before review; contract written.
+    fn reviewable(fx: &mut Fx) {
+        let wt = fx.coding();
+        fx.work.write_task("M1").unwrap();
+        put(&wt, "src/new.rs");
+        fx.work.save_work("M1").unwrap();
+    }
+
+    fn write_review(fx: &Fx, round: u32, text: &str) {
+        let d = fx.root.join(ORCH_DIR).join("review/M1");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join(format!("review-{round}.json")), text).unwrap();
+    }
+
+    const OK: &str = r#"{"outcome":"approved","criteria":[{"id":"AC1","met":true,"note":"ok"}],"blockers":[],"suggestions":[]}"#;
+
     #[test]
-    fn review_answers_with_a_clear_not_built_yet_error() {
+    fn the_review_prompt_has_the_diff_the_contract_and_the_rules() {
         let mut fx = Fx::new("worktree", "true");
-        assert!(fx.work.review_body("M1", 1).unwrap_err().contains("review is not built yet"));
-        assert!(fx.work.review_verdict("M1", 1).unwrap_err().contains("review is not built yet"));
+        reviewable(&mut fx);
+        let body = fx.work.review_body("M1", 1).unwrap();
+        let rd = fx.root.join(ORCH_DIR).join("review/M1");
+        let diff = std::fs::read_to_string(rd.join("diff.patch")).unwrap();
+        assert!(diff.contains("src/new.rs") && !diff.contains("a.txt"), "{diff}");
+        assert!(rd.join("task.md").is_file() && rd.join("task.json").is_file());
+        for want in [
+            ".orchestrate/review/M1/review-1.json", "BLOCKER: file:line — what — why", "Do NOT modify",
+            ".orchestrate/review/M1/diff.patch", ".orch-task/M1/done-1",
+        ] {
+            assert!(body.contains(want), "{want}\n{body}");
+        }
+    }
+
+    #[test]
+    fn a_stale_coder_done_file_is_removed_so_the_review_waits_for_the_reviewer() {
+        let mut fx = Fx::new("worktree", "true");
+        reviewable(&mut fx);
+        let done = fx.root.join(".orch-task/M1/done-1");
+        std::fs::create_dir_all(done.parent().unwrap()).unwrap();
+        std::fs::write(&done, "").unwrap();
+        fx.work.review_body("M1", 1).unwrap();
+        assert!(!done.exists());
+    }
+
+    #[test]
+    fn a_queued_job_is_written_into_the_coders_folder() {
+        let mut fx = Fx::new("worktree", "true");
+        let wt = fx.coding();
+        let root = fx.root.clone();
+        fx.work.write_job(&root, "M1", "review-fix-1.md", "# job").unwrap();
+        assert_eq!(std::fs::read_to_string(wt.join(".orch-task/M1/review-fix-1.md")).unwrap(), "# job");
+        assert!(!root.join(".orch-task/M1/review-fix-1.md").exists());
+    }
+
+    #[test]
+    fn verdicts_map_to_the_manager_outcomes() {
+        let mut fx = Fx::new("worktree", "true");
+        reviewable(&mut fx);
+        fx.work.review_body("M1", 1).unwrap();
+        write_review(&fx, 1, OK);
+        assert_eq!(fx.work.review_verdict("M1", 1).unwrap(), ReviewOutcome::Approved);
+        write_review(
+            &fx,
+            1,
+            r#"{"outcome":"approved-with-warnings","criteria":[{"id":"AC1","met":true}],"blockers":[],
+                "suggestions":[{"file":"a.rs","line":1,"problem":"p","why":"w"}]}"#,
+        );
+        assert_eq!(fx.work.review_verdict("M1", 1).unwrap(), ReviewOutcome::Approved);
+        // the warning is kept on the milestone for the summary
+        let kept = review::suggestions_section(&fx.root.join(ORCH_DIR), &["M1".to_string()]);
+        assert_eq!(kept, vec!["- M1: SUGGESTION: a.rs:1 — p — w"]);
+        write_review(
+            &fx,
+            1,
+            r#"{"outcome":"changes-requested","criteria":[{"id":"AC1","met":false,"note":"n"}],
+                "blockers":[{"file":"a.rs","line":2,"problem":"p","why":"w"}],"suggestions":[]}"#,
+        );
+        assert_eq!(fx.work.review_verdict("M1", 1).unwrap(), ReviewOutcome::Blockers { count: 2 });
+        assert_eq!(fx.work.blocker_lines("M1", 1).unwrap().len(), 2);
+        write_review(
+            &fx,
+            1,
+            r#"{"outcome":"blocked","criteria":[{"id":"AC1","met":true}],
+                "blockers":[{"file":"a.rs","problem":"p"}],"suggestions":[]}"#,
+        );
+        assert_eq!(fx.work.review_verdict("M1", 1).unwrap(), ReviewOutcome::Blockers { count: 1 });
+    }
+
+    #[test]
+    fn missing_empty_malformed_and_incomplete_files_are_unusable_with_a_reason() {
+        let mut fx = Fx::new("worktree", "true");
+        reviewable(&mut fx);
+        fx.work.review_body("M1", 1).unwrap();
+        let line = |fx: &mut Fx| match fx.work.review_verdict("M1", 1).unwrap() {
+            ReviewOutcome::Unusable { line } => line,
+            other => panic!("expected Unusable, got {other:?}"),
+        };
+        assert!(line(&mut fx).contains("review-1.json is missing"));
+        write_review(&fx, 1, "");
+        assert!(line(&mut fx).contains("is empty"));
+        write_review(&fx, 1, "{oops");
+        assert!(line(&mut fx).contains("not valid JSON"));
+        write_review(&fx, 1, r#"{"outcome":"maybe","criteria":[],"blockers":[],"suggestions":[]}"#);
+        assert!(line(&mut fx).contains("`outcome`"));
+        // approved, but the contract's criterion AC1 was never judged
+        write_review(&fx, 1, r#"{"outcome":"approved","criteria":[],"blockers":[],"suggestions":[]}"#);
+        assert!(line(&mut fx).contains("no verdict for AC1"));
+    }
+
+    #[test]
+    fn a_reviewer_that_edited_the_repository_makes_the_review_unusable() {
+        let mut fx = Fx::new("worktree", "true");
+        reviewable(&mut fx);
+        fx.work.review_body("M1", 1).unwrap();
+        write_review(&fx, 1, OK);
+        put(&fx.root, "sneaky.txt"); // the reviewer's edit in the main folder
+        match fx.work.review_verdict("M1", 1).unwrap() {
+            ReviewOutcome::Unusable { line } => {
+                assert!(line.contains("changed files") && line.contains("sneaky.txt"), "{line}");
+            }
+            other => panic!("expected Unusable, got {other:?}"),
+        }
     }
 }

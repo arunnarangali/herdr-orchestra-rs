@@ -105,6 +105,9 @@ pub fn file_prefix(kind: &FixKind) -> &'static str {
 /// of `review-<round>.md`. `known` is false when neither file is usable (Python
 /// `review_findings`). Blocker lines come back prefixed `BLOCKER: `.
 pub fn review_findings(orch_dir: &Path, task: &str, round: u32) -> (Vec<String>, Vec<String>, bool) {
+    if let Ok(r) = crate::review::read_round(orch_dir, task, round) {
+        return (r.blocker_lines(), r.suggestion_lines(), true);
+    }
     let dir = orch_dir.join("review").join(task);
     if let Some(v) = std::fs::read(dir.join(format!("review-{round}.json")))
         .ok()

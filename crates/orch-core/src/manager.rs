@@ -88,6 +88,19 @@ pub trait Work {
     fn strays(&mut self, _task: &str) -> std::result::Result<Vec<String>, String> {
         Ok(Vec::new())
     }
+    /// Write a queued job's body (`fix-1.md`, `review-fix-1.md`, `conflict-1.md`) where the coder
+    /// will read it, just before the job is sent. The default writes it under the main folder's
+    /// `.orch-task/<Mn>/`; a real `Work` writes it into the coder's own folder.
+    fn write_job(&mut self, root: &Path, task: &str, file: &str, body: &str) -> std::result::Result<(), String> {
+        let dir = root.join(".orch-task").join(task);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        std::fs::write(dir.join(file), body).map_err(|e| format!("writing {}: {e}", dir.join(file).display()))
+    }
+    /// The `BLOCKER: …` lines of review round `round`, for the coder's fix job. The default has
+    /// none (no job is queued); a real `Work` reads them from the reviewer's file.
+    fn blocker_lines(&mut self, _task: &str, _round: u32) -> std::result::Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
     /// The check on the run branch before any work starts (the baseline gate): `(passed, the
     /// tail of its output)`. Not recorded against a milestone. The default passes.
     fn baseline(&mut self) -> std::result::Result<(bool, String), String> {
@@ -1025,6 +1038,9 @@ impl<'a> Manager<'a> {
     fn send_review(&mut self, id: &str) -> Result<()> {
         let t = self.store.get_task(id)?;
         let round = (t.review_rounds + 1).min(MAX_REVIEW.max(1));
+        if let Some(why) = self.reviewer_problem(id)? {
+            return self.park(id, State::Paused, &why, false);
+        }
         let body = match self.work.review_body(id, round) {
             Ok(b) => b,
             Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
@@ -1047,6 +1063,42 @@ impl<'a> Manager<'a> {
             self.bench_after_delivery_failure(&reviewer, id, &e)?;
         }
         Ok(())
+    }
+
+    /// Whether the milestone can be reviewed at all. A reviewer that is missing, or is the very
+    /// coder who wrote the milestone, parks it with the reason (never a silent skip); a reviewer
+    /// of a lower tier than the coder's is said in the log and the review goes ahead.
+    fn reviewer_problem(&mut self, id: &str) -> Result<Option<String>> {
+        let Some(run) = self.store.load_run()? else {
+            return Ok(None);
+        };
+        let Some(reviewer) = run.agents.iter().find(|a| a.role == AgentRole::Reviewer) else {
+            return Ok(Some(format!("{id} needs a review (`Review: yes`) but the team has no reviewer")));
+        };
+        let t = self.store.get_task(id)?;
+        let coder_name = t.worker.as_deref().or(t.last_worker.as_deref());
+        if coder_name == Some(reviewer.name.as_str()) {
+            return Ok(Some(format!(
+                "{id}: the reviewer {} is the coder who wrote it — a milestone is never reviewed by its own coder",
+                reviewer.name
+            )));
+        }
+        let coder_tier = coder_name
+            .and_then(|c| run.agents.iter().find(|a| a.name == c))
+            .and_then(|a| a.tier.clone());
+        let (rr, cr) = (scheduler::rank(reviewer.tier.as_deref()), scheduler::rank(coder_tier.as_deref()));
+        if rr > 0 && cr > 0 && rr < cr {
+            self.log(
+                &format!(
+                    "{id}: the reviewer {} ({}-tier) is weaker than its coder's tier ({}) — reviewing anyway",
+                    reviewer.name,
+                    reviewer.tier.as_deref().unwrap_or("?"),
+                    coder_tier.as_deref().unwrap_or("?")
+                ),
+                true,
+            );
+        }
+        Ok(None)
     }
 
     fn reviewer_of(&self) -> Result<String> {
@@ -1072,10 +1124,25 @@ impl<'a> Manager<'a> {
             );
         }
         self.log(&format!("{id} review: {count} blocker(s) -> fix job queued"), false);
+        let round = t.review_rounds.max(1);
+        let lines = self.work.blocker_lines(id, round).unwrap_or_default();
+        let body = if lines.is_empty() {
+            None
+        } else {
+            match self.work.fix_prompt(id, round, &FixKind::Blockers { round, lines }) {
+                Ok(b) => Some(b),
+                Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
+            }
+        };
         self.store.transition(
             id,
             &TransitionRequest::auto(State::NeedsFix, Some(&format!("{count} review blocker(s)"))),
         )?;
+        if let Some(body) = body {
+            self.state.jobs.retain(|j| j.task != id);
+            self.state.jobs.push(QueuedJob { task: id.to_string(), file: format!("review-fix-{round}.md"), body });
+            self.state.save(&self.root.join(crate::paths::ORCH_DIR)).ok();
+        }
         Ok(())
     }
 
@@ -1195,6 +1262,13 @@ impl<'a> Manager<'a> {
             .iter()
             .position(|j| j.task == a.task)
             .map(|i| self.state.jobs.remove(i));
+        if let Some(j) = &job
+            && let Err(e) = self.write_job(&a.task, j)
+        {
+            self.state.jobs.push(j.clone());
+            self.state.save(&self.root.join(crate::paths::ORCH_DIR)).ok();
+            return self.park(&a.task, State::Paused, &format!("orch error: {e}"), false);
+        }
         self.mark_dispatched(&a.task)?;
         let who = a.worker.clone();
         let file = job.as_ref().map_or("task.md", |j| j.file.as_str());
@@ -1220,6 +1294,11 @@ impl<'a> Manager<'a> {
         }
     }
 
+    /// Put a job's body where the coder reads it (the `Work`'s choice of folder).
+    fn write_job(&mut self, task: &str, job: &QueuedJob) -> std::result::Result<(), String> {
+        self.work.write_job(&self.root, task, &job.file, &job.body)
+    }
+
     fn mark_dispatched(&mut self, task: &str) -> Result<()> {
         if self.lead_on() {
             self.store.mark_dispatched(task)?;
@@ -1232,7 +1311,10 @@ impl<'a> Manager<'a> {
     fn send_prompt(&mut self, task: &str, file: &str, kind: DeliveryKind) -> std::result::Result<(), String> {
         let t = self.store.get_task(task).map_err(|e| e.to_string())?;
         let attempt = t.attempt.max(1);
-        let text = coder_prompt(task, file, attempt);
+        let text = match kind {
+            DeliveryKind::Coder => coder_prompt(task, file, attempt),
+            DeliveryKind::Reviewer => crate::review::reviewer_message(task, t.review_rounds.max(1)),
+        };
         let agent = match kind {
             DeliveryKind::Coder => t.worker.clone().unwrap_or_default(),
             DeliveryKind::Reviewer => self.reviewer_of().map_err(|e| e.to_string())?,
