@@ -89,7 +89,8 @@ fn every_command_is_accepted_and_not_implemented() {
     // the task-contract milestone (see tests/write_task.rs and tests/lead.rs). `events` is real
     // too (tests/events_cmd.rs); `dispatch`, `answer`, `fix`, `approve` and `escalate` are real
     // (tests/dispatch_cmds.rs); `autopilot` became real in the event-manager
-    // milestone (tests/autopilot_cmd.rs). No stub routes are left here.
+    // milestone (tests/autopilot_cmd.rs). `start`, `prepare`, `setup-done`, `park` and `cleanup`
+    // are real (tests/git_cmds.rs). The merge family is still stubbed.
     for n in NAMES.iter().filter(|n| {
         ![
             "agents",
@@ -107,6 +108,11 @@ fn every_command_is_accepted_and_not_implemented() {
             "fix",
             "approve",
             "escalate",
+            "start",
+            "prepare",
+            "setup-done",
+            "park",
+            "cleanup",
         ]
         .contains(n)
     }) {

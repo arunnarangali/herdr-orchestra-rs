@@ -70,6 +70,60 @@ pub trait Work {
     fn commit(&mut self, task: &str) -> std::result::Result<CommitOutcome, String>;
 }
 
+/// The git-backed parts of [`Work`] (§13): `prepare` and `save_work`, over the run's
+/// repository. It holds no state of its own: each call opens the run's database, so the event
+/// manager can keep its own connection. An implementation of [`Work`] delegates to it.
+#[derive(Debug, Clone)]
+pub struct GitWork {
+    /// The main repository root.
+    pub root: PathBuf,
+}
+
+impl GitWork {
+    pub fn new(root: PathBuf) -> Self {
+        GitWork { root }
+    }
+
+    fn open(&self) -> crate::Result<Store> {
+        Ok(Store::open_in(&self.root.join(crate::paths::ORCH_DIR))?)
+    }
+
+    /// [`Work::prepare`]: put the coder's folder on the milestone's starting point (its saved
+    /// work, else the feature branch tip) and run the setup command there when none ran before
+    /// or the dependency files changed. Refuses, with a message, a folder holding unsaved
+    /// changes of another milestone.
+    pub fn prepare(&self, task: &str, worker: &str) -> std::result::Result<(), String> {
+        let run = || -> crate::Result<()> {
+            let mut store = self.open()?;
+            let prepared = crate::worktree::prepare_workdir(&mut store, &self.root, task, worker)?;
+            for note in &prepared.notes {
+                tracing::warn!("{note}");
+            }
+            let settings = store.run_settings()?.ok_or_else(|| {
+                crate::Error::wrap(std::io::Error::other("no run in state.db"), crate::error::EXIT_USAGE)
+            })?;
+            if settings.isolation == "worktree"
+                && let Some(why) = crate::setup::ensure_setup(&mut store, &settings, &prepared.dir)?
+            {
+                tracing::info!(?why, dir = %prepared.dir.display(), "ran the setup command");
+            }
+            Ok(())
+        };
+        run().map_err(|e| e.to_string())
+    }
+
+    /// [`Work::save_work`]: keep the milestone's uncommitted work in its hidden ref. An error
+    /// means the work is still in the folder, untouched.
+    pub fn save_work(&self, task: &str) -> std::result::Result<(), String> {
+        let run = || -> crate::Result<()> {
+            let store = self.open()?;
+            crate::worktree::save_task_work(&store, &self.root, task, "saved by the event manager")?;
+            Ok(())
+        };
+        run().map_err(|e| e.to_string())
+    }
+}
+
 /// What the plan's check command said (Phase 8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckOutcome {

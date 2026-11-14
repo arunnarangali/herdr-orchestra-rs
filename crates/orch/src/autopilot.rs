@@ -17,7 +17,8 @@ use orch_config::tunables::Tunables;
 use orch_core::events::{AgentState, HerdrPoll, PollTunables, RuntimeView};
 use orch_core::lease::{driver_lock_path, hhmmss, take_lease};
 use orch_core::manager::{
-    CheckOutcome, CommitOutcome, Deliveries, DeliveryOutcome, LoopTunables, Manager, NewDelivery,
+    CheckOutcome, CommitOutcome, Deliveries, DeliveryOutcome, GitWork, LoopTunables, Manager,
+    NewDelivery,
     Recovered, ReviewOutcome, Work,
 };
 use orch_core::paths::{ORCH_DIR, main_root};
@@ -101,7 +102,7 @@ pub fn run(args: &[String]) -> i32 {
             review_budget_s: tun.review_budget_min * 60,
         },
     };
-    let mut work = StubWork;
+    let mut work = StubWork(GitWork::new(root.clone()));
 
     let log_path = orch.join("autopilot.log");
     let mut say = move |msg: &str, important: bool| {
@@ -260,14 +261,14 @@ impl Deliveries for HerdrDeliveries<'_> {
     }
 }
 
-/// The milestones' git/check/review work, Phase 7 and Phase 8's trait: until then
-/// every step answers with an error, which the manager parks the milestone with.
-/// The event loop itself is built and tested against this narrow seam.
-struct StubWork;
+/// The milestones' git/check/review work. `prepare` and `save_work` are real (git worktrees and
+/// hidden refs, Phase 7); the rest answers with an error until its phase, which the manager
+/// parks the milestone with. The event loop itself is built and tested against this narrow seam.
+struct StubWork(GitWork);
 
 impl Work for StubWork {
-    fn prepare(&mut self, _task: &str, _worker: &str) -> std::result::Result<(), String> {
-        Err("milestone work (worktrees, setup) is not built yet — Phase 7".into())
+    fn prepare(&mut self, task: &str, worker: &str) -> std::result::Result<(), String> {
+        self.0.prepare(task, worker)
     }
 
     fn write_task(&mut self, _task: &str) -> std::result::Result<(), String> {
@@ -282,8 +283,8 @@ impl Work for StubWork {
         Err("running the check command is not built yet — Phase 8".into())
     }
 
-    fn save_work(&mut self, _task: &str) -> std::result::Result<(), String> {
-        Err("saving work to the hidden ref is not built yet — Phase 7".into())
+    fn save_work(&mut self, task: &str) -> std::result::Result<(), String> {
+        self.0.save_work(task)
     }
 
     fn review_body(&mut self, _task: &str, _round: u32) -> std::result::Result<String, String> {
