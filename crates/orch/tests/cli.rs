@@ -87,8 +87,8 @@ fn every_command_is_accepted_and_not_implemented() {
     // plan parsing of Phase 5. `sync`, `status` and `set` are real too (tests/sync_cmd.rs).
     // `write-task` and the lead subcommands became real in
     // the task-contract milestone (see tests/write_task.rs and tests/lead.rs). `events` is real
-    // too (tests/events_cmd.rs); `dispatch`, `answer`, `fix`, `approve`, `escalate` and
-    // `autopilot` have their own handler files but are still stubs.
+    // too (tests/events_cmd.rs); `dispatch`, `answer`, `fix`, `approve` and `escalate` are real
+    // (tests/dispatch_cmds.rs); `autopilot` has its own handler file but is still a stub.
     for n in NAMES.iter().filter(|n| {
         ![
             "agents",
@@ -100,6 +100,11 @@ fn every_command_is_accepted_and_not_implemented() {
             "set",
             "write-task",
             "events",
+            "dispatch",
+            "answer",
+            "fix",
+            "approve",
+            "escalate",
         ]
         .contains(n)
     }) {

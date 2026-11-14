@@ -43,6 +43,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "report",
     "events",
     "dispatch",
+    "retry",
     "answer",
     "escalate",
     "fix",
@@ -76,7 +77,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("set", _) => plan_cmds::set(&args[1..]),
         ("write-task", _) => task_cmds::write_task(&args[1..]),
         ("events", _) => events_cmd::events(&args[1..]),
-        ("dispatch", _) => Some(dispatch_cmds::dispatch(&args[1..])),
+        ("dispatch" | "retry", _) => Some(dispatch_cmds::dispatch(&args[1..])),
         ("answer", _) => Some(dispatch_cmds::answer(&args[1..])),
         ("fix", _) => Some(dispatch_cmds::fix(&args[1..])),
         ("approve", _) => Some(dispatch_cmds::approve(&args[1..])),
@@ -189,6 +190,10 @@ pub const HELP: &[(&str, &str)] = &[
     (
         "dispatch <Mn>... [--to <worker>] [--tier <tier>]",
         "(lead) start or restart milestones; starts the event manager",
+    ),
+    (
+        "retry <Mn>... [--to <worker>] [--tier <tier>]",
+        "alias of dispatch, for a failed or paused milestone",
     ),
     (
         "answer <Mn> <text>",
@@ -373,6 +378,7 @@ mod tests {
             "report",
             "events",
             "dispatch",
+            "retry",
             "answer",
             "escalate",
             "fix",

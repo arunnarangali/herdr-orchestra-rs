@@ -8,6 +8,7 @@ pub mod lease;
 pub mod logging;
 pub mod paths;
 pub mod plan;
+pub mod plan_edit;
 pub mod run_store;
 pub mod scheduler;
 pub mod store;

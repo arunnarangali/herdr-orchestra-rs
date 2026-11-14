@@ -184,11 +184,12 @@ fn two_drivers_claiming_the_same_milestone_never_both_win() {
             let b = barrier.clone();
             std::thread::spawn(move || {
                 let mut s = Store::open(&p).unwrap();
-                b.wait();
+                // Both drivers decide on a snapshot taken before either claims, then race
+                // to claim (a snapshot taken after the other's claim would see nothing ready).
                 let snap = s.scheduler_snapshot().unwrap().unwrap();
                 let out = scheduler::schedule(&snap, 10);
-                // Both drivers see M1 ready and try to claim it for w1.
                 assert_eq!(out.assignments.len(), 1, "driver {i}");
+                b.wait();
                 let ok = s.claim("M1", "w1", None).is_ok();
                 (i, ok)
             })

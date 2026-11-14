@@ -206,16 +206,10 @@ fn no_run_is_an_error() {
 }
 
 #[test]
-fn the_dispatch_family_routes_to_stub_handlers() {
+fn autopilot_routes_to_its_stub_handler() {
     let sb = Sandbox::new(PLAN);
-    for c in [
-        "dispatch",
-        "answer",
-        "fix",
-        "approve",
-        "escalate",
-        "autopilot",
-    ] {
+    let c = "autopilot";
+    {
         let o = sb.orch(&[c]);
         assert_eq!(o.status.code(), Some(70), "{c}");
         assert!(
