@@ -1,6 +1,8 @@
 //! The command table: every command name, its help line, and the usage text.
 
-use crate::{autopilot, dispatch_cmds, doctor, events_cmd, listing, plan_cmds, task_cmds, team};
+use crate::{
+    autopilot, dispatch_cmds, doctor, events_cmd, git_cmds, listing, plan_cmds, task_cmds, team,
+};
 use orch_config::tunables::Tunables;
 use orch_herdr::RuntimeAdapter;
 use orch_herdr::cli::CliHerdr;
@@ -83,6 +85,11 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("approve", _) => Some(dispatch_cmds::approve(&args[1..])),
         ("escalate", _) => Some(dispatch_cmds::escalate(&args[1..])),
         ("autopilot", _) => Some(autopilot::run(&args[1..])),
+        ("start", _) => Some(git_cmds::start(&args[1..], &herdr_adapter())),
+        ("prepare", _) => Some(git_cmds::prepare(&args[1..])),
+        ("setup-done", _) => Some(git_cmds::setup_done(&args[1..])),
+        ("park", _) => Some(git_cmds::park(&args[1..])),
+        ("cleanup", _) => Some(git_cmds::cleanup(&args[1..])),
         ("agents", None) => Some(listing::agents_table()),
         ("agents", Some("launch")) => Some(listing::agents_launch(&args[2..])),
         ("agents", Some("check")) => doctor::agents_check(&args[2..]),

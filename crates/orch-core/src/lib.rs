@@ -3,6 +3,7 @@
 pub mod claim;
 pub mod error;
 pub mod events;
+pub mod git;
 pub mod graph;
 pub mod lead_queue;
 pub mod lease;
@@ -12,11 +13,14 @@ pub mod paths;
 pub mod plan;
 pub mod plan_edit;
 pub mod reconcile;
+pub mod refs;
 pub mod run_store;
 pub mod scheduler;
+pub mod setup;
 pub mod store;
 pub mod task;
 pub mod task_contract;
 pub mod wake;
+pub mod worktree;
 
 pub use error::{Error, Result};

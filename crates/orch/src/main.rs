@@ -5,6 +5,7 @@ mod commands;
 mod dispatch_cmds;
 mod doctor;
 mod events_cmd;
+mod git_cmds;
 mod listing;
 mod plan_cmds;
 mod task_cmds;

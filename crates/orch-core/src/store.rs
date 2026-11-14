@@ -24,6 +24,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (3, include_str!("../migrations/0003_run.sql")),
     (4, include_str!("../migrations/0004_lead_queue.sql")),
     (5, include_str!("../migrations/0005_scheduler.sql")),
+    (6, include_str!("../migrations/0006_setup_fingerprints.sql")),
 ];
 
 /// The schema version this build writes: the last migration in the list (the list stays
@@ -243,6 +244,13 @@ impl Store {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Record the branch the run starts from (`orch start`), keeping the rest of the run.
+    pub fn set_run_base(&mut self, base: &str) -> Res<()> {
+        self.conn
+            .execute("UPDATE run SET base=?1 WHERE id=1", params![base])?;
+        Ok(())
     }
 
     pub fn schema_version(&self) -> Res<i64> {
@@ -996,7 +1004,7 @@ mod tests {
         }
         let mut s = Store::open(&path).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 5);
+        assert_eq!(SCHEMA_VERSION, 6);
         add(&mut s, "M1", &[]);
         let id = s
             .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")
