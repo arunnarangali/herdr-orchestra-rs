@@ -7,7 +7,7 @@ use std::process::{Command, Output};
 const PLAN: &str = "\
 # Plan: Demo
 Branch: feature/demo
-Check command: cargo test
+Check command: CHECK
 Workers: claude-1 (claude: sonnet)
 Reviewer: none
 
@@ -46,6 +46,12 @@ fn git(dir: &Path, args: &[&str]) {
 
 impl Sandbox {
     fn new() -> Sandbox {
+        Sandbox::with("cargo test", false)
+    }
+
+    /// A sandbox whose plan has `check` as its check command; `on_branch` puts the main folder
+    /// on the run branch, as `orch start` leaves it.
+    fn with(check: &str, on_branch: bool) -> Sandbox {
         let t = tempfile::tempdir().unwrap();
         let base = t.path().canonicalize().unwrap();
         let (root, home) = (base.join("repo"), base.join("home"));
@@ -54,10 +60,13 @@ impl Sandbox {
         git(&root, &["init", "-q"]);
         git(&root, &["commit", "-q", "--allow-empty", "-m", "init"]);
         std::fs::create_dir_all(root.join(".orchestrate")).unwrap();
-        std::fs::write(root.join(".orchestrate/plan.md"), PLAN).unwrap();
+        std::fs::write(root.join(".orchestrate/plan.md"), PLAN.replace("CHECK", check)).unwrap();
         let sb = Sandbox { _t: t, root, home };
         let o = sb.orch(&["sync"]);
         assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+        if on_branch {
+            git(&sb.root, &["switch", "-q", "-c", "feature/demo"]);
+        }
         sb
     }
 
@@ -91,12 +100,13 @@ fn err(o: &Output) -> String {
 fn one_cycle_with_once_reconciles_and_writes_the_log() {
     let sb = Sandbox::new();
     let o = sb.orch(&["autopilot", "--once"]);
-    // the milestone work is Phase 7: the stub parks M1 and the run stops for a
-    // human (exit 3) — the cycle itself ran
+    // the main folder is not on the run branch, so the baseline check cannot run: the run stops
+    // (exit 3) before any work, after the start line
     assert_eq!(o.status.code(), Some(3), "{}{}", out(&o), err(&o));
     let text = format!("{}{}", out(&o), err(&o));
     assert!(text.contains("autopilot started"), "{text}");
-    assert!(text.contains("STOPPED — needs you"), "{text}");
+    assert!(text.contains("Baseline check fails"), "{text}");
+    assert!(text.contains("not on the run branch feature/demo"), "{text}");
     // the cycle ran and logged its lines with timestamps
     let log = std::fs::read_to_string(sb.orch_dir().join("autopilot.log")).unwrap();
     assert!(log.contains("autopilot started"), "{log}");
@@ -131,4 +141,31 @@ fn an_unknown_flag_prints_the_usage_and_exits_two() {
     let o = sb.orch(&["autopilot", "--badflag"]);
     assert_eq!(o.status.code(), Some(2), "{}{}", out(&o), err(&o));
     assert!(err(&o).contains("usage: orch autopilot [--once]"), "{}", err(&o));
+}
+
+#[test]
+fn a_red_baseline_stops_the_run_before_any_work_and_leaves_no_file() {
+    let sb = Sandbox::with("echo BASELINE-BAD-LINE; exit 1", true);
+    let o = sb.orch(&["autopilot", "--once"]);
+    assert_eq!(o.status.code(), Some(3), "{}{}", out(&o), err(&o));
+    let text = format!("{}{}", out(&o), err(&o));
+    assert!(text.contains("Baseline check fails on the feature branch before any work"), "{text}");
+    assert!(text.contains("BASELINE-BAD-LINE"), "the failing lines are shown: {text}");
+    assert!(!sb.orch_dir().join("baseline.txt").exists());
+    // no milestone was started
+    assert!(!text.contains("M1 ->"), "{text}");
+}
+
+#[test]
+fn a_green_baseline_writes_the_file_and_a_second_start_does_not_rerun_it() {
+    let sb = Sandbox::with("echo ran >> ../ran.log; echo GREEN-OUT", true);
+    let ran = sb.root.parent().unwrap().join("ran.log");
+    let first = sb.orch(&["autopilot", "--once"]);
+    let text = format!("{}{}", out(&first), err(&first));
+    assert!(!text.contains("Baseline check fails"), "{text}");
+    let base = std::fs::read_to_string(sb.orch_dir().join("baseline.txt")).unwrap();
+    assert!(base.contains("GREEN-OUT"), "{base}");
+    assert_eq!(std::fs::read_to_string(&ran).unwrap().lines().count(), 1, "{text}");
+    let _ = sb.orch(&["autopilot", "--once"]);
+    assert_eq!(std::fs::read_to_string(&ran).unwrap().lines().count(), 1, "the baseline is not re-run");
 }
