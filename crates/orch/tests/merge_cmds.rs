@@ -171,6 +171,64 @@ fn a_check_that_fails_on_the_branch_exits_6_and_commits_nothing() {
 }
 
 #[test]
+fn integration_fix_rounds_count_against_the_cap_and_the_lead_is_told() {
+    let sb = Sandbox::new("worktree", "! [ -e a1.txt -a -e a2.txt ]");
+    // a lead is on the run, so its events are queued
+    let plan_file = sb.root.join(".orchestrate/plan.md");
+    let plan = std::fs::read_to_string(&plan_file).unwrap();
+    std::fs::write(&plan_file, plan.replace("Reviewer: none", "Reviewer: none\nLead mode: events\nLead: lead (claude: opus)"))
+        .unwrap();
+    sb.ok(&["sync"]);
+    sb.ok(&["start"]);
+    sb.coded("M1", "claude-1", "a1.txt", "1\n");
+    sb.coded("M2", "claude-2", "a2.txt", "2\n");
+    sb.ok(&["commit", "M1"]);
+    sb.ok(&["commit", "M2"]);
+    sb.ok(&["merge", "M1"]);
+    let tip = sb.tip();
+    for round in 1..=3 {
+        let o = sb.orch(&["merge", "M2"]);
+        assert_eq!(o.status.code(), Some(6), "round {round}: {}{}", out(&o), err(&o));
+        assert!(out(&o).contains("CHECK_FAILED M2 on feature/demo"), "{}", out(&o));
+        // the coder fixes nothing here; send it back through the normal steps
+        sb.ok(&["set", "M2", "verifying", "--force"]);
+        sb.ok(&["commit", "M2"]);
+    }
+    let o = sb.orch(&["merge", "M2"]);
+    assert_eq!(o.status.code(), Some(3), "{}{}", out(&o), err(&o));
+    assert!(out(&o).starts_with("CAP M2: still fails the check on feature/demo after 3 fix rounds"), "{}", out(&o));
+    assert_eq!(sb.tip(), tip);
+    assert_eq!(git(&sb.root, &["status", "--porcelain"]), "");
+    assert!(sb.ok(&["status"]).contains("failed"));
+    let store = orch_core::store::Store::open_in(&sb.root.join(".orchestrate")).unwrap();
+    let events = store.lead_entries().unwrap();
+    assert!(
+        events.iter().any(|e| e.task.as_deref() == Some("M2") && e.text.contains("after 3 fix rounds")),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn status_says_when_the_branch_fails_its_check() {
+    let sb = Sandbox::new("worktree", "true");
+    sb.ok(&["start"]);
+    assert!(!sb.ok(&["status"]).contains("INTEGRATION BROKEN"));
+    let mut store = orch_core::store::Store::open_in(&sb.root.join(".orchestrate")).unwrap();
+    store.mark_integration_broken("the final check").unwrap();
+    let t = sb.ok(&["status"]);
+    assert!(
+        t.contains("INTEGRATION BROKEN: the check failed on feature/demo after merging the final check"),
+        "{t}"
+    );
+    let r = sb.ok(&["report"]);
+    assert!(r.contains("INTEGRATION BROKEN: the check failed on feature/demo"), "{r}");
+    assert!(r.contains("M1") && r.contains("merged 0/2"), "{r}");
+    store.clear_integration_broken().unwrap();
+    assert!(!sb.ok(&["status"]).contains("INTEGRATION BROKEN"));
+    assert!(!sb.ok(&["report"]).contains("INTEGRATION BROKEN"));
+}
+
+#[test]
 fn a_conflict_exits_4_and_leaves_the_tree_clean() {
     let sb = Sandbox::new("worktree", "true");
     sb.ok(&["start"]);

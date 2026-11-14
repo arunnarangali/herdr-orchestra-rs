@@ -78,6 +78,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("sync", _) => plan_cmds::sync(&args[1..]),
         ("status", _) => plan_cmds::status(&args[1..]),
         ("set", _) => plan_cmds::set(&args[1..]),
+        ("report", _) => plan_cmds::report(&args[1..]),
         ("write-task", _) => task_cmds::write_task(&args[1..]),
         ("events", _) => events_cmd::events(&args[1..]),
         ("dispatch" | "retry", _) => Some(dispatch_cmds::dispatch(&args[1..])),

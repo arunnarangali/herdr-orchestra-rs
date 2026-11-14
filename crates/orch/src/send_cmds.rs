@@ -11,6 +11,7 @@ use crate::listing::die;
 use orch_config::tunables::Tunables;
 use orch_core::conflict::{self, IssueKind};
 use orch_core::fix::{self, FixContext, FixKind};
+use orch_core::integration;
 use orch_core::lease::{driver_alive, driver_lock_path};
 use orch_core::manager::{DriverState, QueuedJob, coder_prompt};
 use orch_core::paths::{self, ORCH_DIR};
@@ -89,15 +90,13 @@ fn queued_job(ctx: &Ctx, state: &DriverState, t: &Task) -> Option<QueuedJob> {
             body: conflict::job_body(&t.id, &t.title, &s.branch, &s.check_command, &issue.files),
         },
         IssueKind::Check => {
+            // the squash merged cleanly but the check fails on the run branch: an integration-fix
             let round = t.fix_rounds.max(1);
             let result_file = format!("result-{}.json", t.attempt + 1);
             QueuedJob {
                 task: t.id.clone(),
-                file: format!("fix-{round}.md"),
-                body: fix::body(
-                    &FixKind::Check { tail: issue.detail },
-                    &FixContext { task: &t.id, title: &t.title, check: &s.check_command, round, result_file: &result_file },
-                ),
+                file: integration::job_file(round),
+                body: integration::job_body(&t.id, &s.branch, &s.check_command, round, &issue.detail, &result_file),
             }
         }
     })

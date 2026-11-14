@@ -50,6 +50,9 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
         s.max_parallel,
         s.reviewer.as_deref().unwrap_or("None")
     );
+    if let Ok(Some(b)) = store.integration_broken() {
+        let _ = writeln!(out, "  {}", orch_core::integration::status_line(&s.branch, &b.reason));
+    }
     for w in run
         .agents
         .iter()
@@ -119,6 +122,56 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
             out,
             "STUCK — nothing running and nothing ready; resolve paused/needs-answer/failed tasks with the developer"
         );
+    }
+    0
+}
+
+/// `orch report`: per milestone the tries, fix, review and conflict rounds and lost
+/// attempts, the totals, and, while the run branch fails its check, the broken line. Read from the
+/// store only.
+pub fn run_report(start: &Path, out: &mut dyn Write) -> i32 {
+    let (store, run) = match open_run(start) {
+        Ok(x) => x,
+        Err(e) => return die(e),
+    };
+    let tasks = match store.list_tasks() {
+        Ok(t) => t,
+        Err(e) => return die(e),
+    };
+    let broken = store.integration_broken().ok().flatten();
+    let branch = run.settings.branch.as_str();
+    let rows: Vec<&Task> = run.plan.iter().filter_map(|p| tasks.iter().find(|t| t.id == p.id)).collect();
+    let merged = rows.iter().filter(|t| t.status == State::Merged).count();
+    let failed = rows.iter().filter(|t| t.status == State::Failed).count();
+    let sum = |f: fn(&Task) -> u32| rows.iter().map(|t| f(t)).sum::<u32>();
+    let _ = writeln!(
+        out,
+        "{:<5} {:<15} {:>5} {:>4} {:>6} {:>5} {:>4}",
+        "task", "status", "tries", "fix", "review", "confl", "lost"
+    );
+    for t in &rows {
+        let _ = writeln!(
+            out,
+            "{:<5} {:<15} {:>5} {:>4} {:>6} {:>5} {:>4}",
+            t.id,
+            t.status.as_str(),
+            t.attempt,
+            t.fix_rounds,
+            t.review_rounds,
+            t.conflict_rounds,
+            t.lost
+        );
+    }
+    let _ = writeln!(
+        out,
+        "\nmerged {merged}/{}, failed {failed}; conflicts {}; lost attempts {}; fix rounds {}",
+        rows.len(),
+        sum(|t| t.conflict_rounds),
+        sum(|t| t.lost),
+        sum(|t| t.fix_rounds)
+    );
+    if let Some(b) = broken {
+        let _ = writeln!(out, "{}", orch_core::integration::status_line(branch, &b.reason));
     }
     0
 }

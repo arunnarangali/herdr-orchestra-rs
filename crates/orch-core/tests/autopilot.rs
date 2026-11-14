@@ -157,6 +157,10 @@ struct FkWork {
     kinds: RefCell<Vec<FixKind>>,
     /// The reviewer's blocker lines.
     lines: RefCell<Vec<String>>,
+    /// What landing answers (the next one is used; empty means merged).
+    commits: RefCell<Vec<CommitOutcome>>,
+    /// What the check on the run branch before work answers (`None`: passes).
+    baseline: RefCell<Option<(bool, String)>>,
 }
 
 impl Work for FkWork {
@@ -218,7 +222,12 @@ impl Work for FkWork {
     }
 
     fn commit(&mut self, _task: &str) -> std::result::Result<CommitOutcome, String> {
-        Ok(CommitOutcome::Merged)
+        let mut c = self.commits.borrow_mut();
+        Ok(if c.is_empty() { CommitOutcome::Merged } else { c.remove(0) })
+    }
+
+    fn baseline(&mut self) -> std::result::Result<(bool, String), String> {
+        Ok(self.baseline.borrow().clone().unwrap_or((true, String::new())))
     }
 }
 
@@ -401,6 +410,8 @@ impl One {
                 strays: RefCell::new(vec![]),
                 kinds: RefCell::new(vec![]),
                 lines: RefCell::new(vec![]),
+                commits: RefCell::new(vec![]),
+                baseline: RefCell::new(None),
             },
             notes: Notes(RefCell::new(vec![])),
             say_log: Rc::new(RefCell::new(Vec::new())),
@@ -561,6 +572,8 @@ fn recovery_confirms_from_a_working_agent_and_resends_to_an_idle_one() {
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
         lines: RefCell::new(vec![]),
+        commits: RefCell::new(vec![]),
+        baseline: RefCell::new(None),
     };
     let mut say = pusher(&say_log);
     let report = reconcile(
@@ -729,6 +742,8 @@ fn the_lead_waits_then_the_milestone_is_auto_dispatched() {
             strays: RefCell::new(vec![]),
             kinds: RefCell::new(vec![]),
             lines: RefCell::new(vec![]),
+            commits: RefCell::new(vec![]),
+            baseline: RefCell::new(None),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -787,6 +802,8 @@ fn the_budget_used_up_stops_the_run_with_a_stopped_entry() {
             strays: RefCell::new(vec![]),
             kinds: RefCell::new(vec![]),
             lines: RefCell::new(vec![]),
+            commits: RefCell::new(vec![]),
+            baseline: RefCell::new(None),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -838,6 +855,8 @@ fn reconcile_parks_a_coding_task_whose_agent_vanished() {
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
         lines: RefCell::new(vec![]),
+        commits: RefCell::new(vec![]),
+        baseline: RefCell::new(None),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -880,6 +899,8 @@ fn reconcile_clears_a_half_finished_wake_up() {
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
         lines: RefCell::new(vec![]),
+        commits: RefCell::new(vec![]),
+        baseline: RefCell::new(None),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -907,6 +928,8 @@ fn reconcile_never_marks_incomplete_work_as_completed() {
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
         lines: RefCell::new(vec![]),
+        commits: RefCell::new(vec![]),
+        baseline: RefCell::new(None),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -929,6 +952,8 @@ fn park_with_lost_fails_the_milestone_at_max_lost() {
         strays: RefCell::new(vec![]),
         kinds: RefCell::new(vec![]),
         lines: RefCell::new(vec![]),
+        commits: RefCell::new(vec![]),
+        baseline: RefCell::new(None),
     };
     for _ in 0..3 {
         let st = park_with_lost(
@@ -1156,6 +1181,8 @@ fn a_passing_check_with_a_plan_review_goes_to_review_then_merges() {
             strays: RefCell::new(vec![]),
             kinds: RefCell::new(vec![]),
             lines: RefCell::new(vec![]),
+            commits: RefCell::new(vec![]),
+            baseline: RefCell::new(None),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -1415,4 +1442,136 @@ fn now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_secs()).unwrap_or(0))
         .unwrap_or(0)
+}
+
+// ---- M3: integration validation and the broken-branch stop
+
+/// Drive M1 to the landing: coding, done, verifying, check, commit.
+fn land_m1(one: &mut One) {
+    one.cycle();
+    one.with_manager(|m, _| {
+        m.apply_event(&RunEvent::Done { task: "M1".into(), agent: "w1".into() }).unwrap()
+    });
+    for _ in 0..3 {
+        if one.store.get_task("M1").unwrap().status != State::Verifying
+            && one.store.get_task("M1").unwrap().status != State::Committed
+        {
+            break;
+        }
+        one.cycle();
+    }
+}
+
+fn branch_fails(tail: &str) -> CommitOutcome {
+    CommitOutcome::BranchFails {
+        line: format!("M1 passes alone but fails the check on the feature branch once merged\n{tail}"),
+    }
+}
+
+#[test]
+fn a_merged_result_that_fails_the_check_goes_back_as_an_integration_fix_round() {
+    let mut one = One::new();
+    *one.work.commits.borrow_mut() = vec![branch_fails("FAILED: x::y")];
+    land_m1(&mut one);
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!(t.status, State::NeedsFix, "{}", joined(&one.say_log));
+    assert_eq!((t.fix_rounds, t.conflict_rounds), (1, 0));
+    assert!(t.reason.contains("fails the check on feature/x once merged (round 1)"), "{}", t.reason);
+    // the job text (Python's `_integration_failed`) names the branch and the failing tail
+    let state = orch_core::manager::DriverState::load(&one.dir.path().join(".orchestrate"));
+    let job = state.jobs.iter().find(|j| j.task == "M1").expect("a queued job");
+    assert_eq!(job.file, "integration-fix-1.md");
+    assert!(job.body.contains("fails the check once merged onto `feature/x` (round 1)"), "{}", job.body);
+    assert!(job.body.contains("FAILED: x::y"), "{}", job.body);
+    assert!(joined(&one.say_log).contains("integration-fix round 1"), "{}", joined(&one.say_log));
+}
+
+#[test]
+fn integration_fix_rounds_stop_at_three_and_fail_the_milestone() {
+    let mut one = One::new();
+    *one.work.commits.borrow_mut() = vec![branch_fails("t"), branch_fails("t"), branch_fails("t"), branch_fails("t")];
+    land_m1(&mut one);
+    for _ in 0..2 {
+        // the coder fixed it (as far as the fake goes): back to verifying, then landing again
+        one.store.transition("M1", &TransitionRequest::auto(State::Coding, None)).unwrap();
+        one.store.transition("M1", &TransitionRequest::auto(State::Verifying, None)).unwrap();
+        one.cycle();
+        assert_eq!(one.store.get_task("M1").unwrap().status, State::NeedsFix);
+    }
+    assert_eq!(one.store.get_task("M1").unwrap().fix_rounds, 3);
+    one.store.transition("M1", &TransitionRequest::auto(State::Coding, None)).unwrap();
+    one.store.transition("M1", &TransitionRequest::auto(State::Verifying, None)).unwrap();
+    one.cycle();
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!(t.status, State::Failed, "{}", joined(&one.say_log));
+    assert_eq!(t.reason, "passes alone but fails the check on feature/x after 3 fix rounds");
+    assert!(joined(&one.say_log).contains("CAP M1: still fails the check on feature/x after 3 fix rounds"));
+}
+
+#[test]
+fn a_failing_final_check_marks_the_branch_broken_and_stops() {
+    let mut one = One::new();
+    one.work.check = Err("never asked".into());
+    one.cycle();
+    for st in [State::Verifying, State::Merged] {
+        one.store.transition("M1", &TransitionRequest::auto(st, None)).unwrap();
+    }
+    one.work.check = Ok(CheckOutcome::Fail { tail: "FINAL RED".into() });
+    assert_eq!(one.cycle(), orch_core::manager::Cycle::Exit(3));
+    let b = one.store.integration_broken().unwrap().expect("marked");
+    assert_eq!(b.reason, "the final check");
+    let log = joined(&one.say_log);
+    assert!(log.contains("fails its final check") && log.contains("FINAL RED"), "{log}");
+    assert!(!log.contains("ALL_DONE"), "{log}");
+}
+
+#[test]
+fn a_green_final_check_leaves_no_mark() {
+    let mut one = One::new();
+    one.cycle();
+    for st in [State::Verifying, State::Merged] {
+        one.store.transition("M1", &TransitionRequest::auto(st, None)).unwrap();
+    }
+    one.store.mark_integration_broken("the final check").unwrap();
+    assert_eq!(one.cycle(), orch_core::manager::Cycle::Exit(0));
+    assert_eq!(one.store.integration_broken().unwrap(), None);
+}
+
+#[test]
+fn a_broken_run_stays_stopped_while_the_branch_is_still_red() {
+    let mut one = One::new();
+    std::fs::create_dir_all(one.dir.path().join(".orchestrate")).unwrap();
+    std::fs::write(one.dir.path().join(".orchestrate/baseline.txt"), "").unwrap();
+    one.store.mark_integration_broken("the final check").unwrap();
+    *one.work.baseline.borrow_mut() = Some((false, "STILL RED LINE".into()));
+    let code = one.with_manager(|m, _| m.run(&|| false));
+    assert_eq!(code, 3);
+    assert!(one.store.integration_broken().unwrap().is_some());
+    let log = joined(&one.say_log);
+    assert!(log.contains("feature/x still fails its check (broken since the final check)"), "{log}");
+    assert!(log.contains("STILL RED LINE"), "{log}");
+    // nothing was started over a red branch
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Pending);
+}
+
+#[test]
+fn a_broken_run_carries_on_once_the_branch_is_green() {
+    let mut one = One::new();
+    std::fs::create_dir_all(one.dir.path().join(".orchestrate")).unwrap();
+    std::fs::write(one.dir.path().join(".orchestrate/baseline.txt"), "").unwrap();
+    one.store.mark_integration_broken("the final check").unwrap();
+    let stop = Cell::new(false);
+    let code = one.with_manager(|m, _| {
+        // stop after the gate: the first cycle runs, then the request is seen
+        let calls = Cell::new(0);
+        m.run(&|| {
+            calls.set(calls.get() + 1);
+            stop.set(calls.get() > 1);
+            stop.get()
+        })
+    });
+    assert_eq!(code, 0);
+    assert_eq!(one.store.integration_broken().unwrap(), None);
+    let log = joined(&one.say_log);
+    assert!(log.contains("feature/x passes its check again — carrying on"), "{log}");
 }

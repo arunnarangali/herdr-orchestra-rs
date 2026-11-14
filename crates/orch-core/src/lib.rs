@@ -9,6 +9,7 @@ pub mod finish;
 pub mod fix;
 pub mod git;
 pub mod graph;
+pub mod integration;
 pub mod journal;
 pub mod lead_queue;
 pub mod lease;
