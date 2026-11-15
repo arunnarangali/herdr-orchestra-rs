@@ -22,6 +22,7 @@ use crate::lead_queue::LeadKind;
 use crate::reconcile::park_with_lost;
 use crate::run_store::AgentRole;
 use crate::scheduler::{self, Assignment, Escalation, Job};
+use crate::actions::{RunControl, Source};
 use crate::store::{Counter, Delivery, DeliveryKind, Res, Store, TransitionRequest};
 use crate::task::{check_transition, Mode, State};
 use crate::wake::{wake_tick, Clock, LeadRuntime, Notifier, WakeEnv, WakeTunables};
@@ -540,6 +541,12 @@ impl<'a> Manager<'a> {
             }
         }
         self.state.prune_stale();
+        // A stop the developer asked for ended the last manager; starting a new one is the
+        // developer's choice to carry on. A pause stays (only `resume` lifts it), and a stop
+        // still waiting to be carried out (`Stopping`) is carried out by this manager.
+        if matches!(self.store.run_control(), Ok(RunControl::Stopped)) {
+            let _ = self.store.set_run_control(RunControl::Running, Source::Manager);
+        }
         if let Some(code) = self.banner() {
             return code;
         }
@@ -553,6 +560,9 @@ impl<'a> Manager<'a> {
             if stop() {
                 self.log("stopped by request — the run is kept", false);
                 return EXIT_ALL_DONE;
+            }
+            if matches!(self.store.run_control(), Ok(RunControl::Stopping)) {
+                return self.stop_on_request();
             }
             match self.cycle() {
                 Cycle::Continue => {}
@@ -571,6 +581,29 @@ impl<'a> Manager<'a> {
                 PollOutcome::Waiting { .. } => {}
             }
         }
+    }
+
+    /// The developer paused the run (`orch pause`, `POST /run/pause`).
+    fn paused(&self) -> bool {
+        matches!(self.store.run_control(), Ok(RunControl::Paused))
+    }
+
+    /// `orch stop`: save each running coder's work and end cleanly. Their milestones go back
+    /// to `pending` (the work is kept in its hidden ref and goes to a coder again on the next
+    /// start); milestones in the manager's own steps (check, review, merge) are left as they
+    /// are, because they hold no coder.
+    fn stop_on_request(&mut self) -> i32 {
+        self.log("STOP requested — saving each running coder's work", true);
+        let tasks = self.store.list_tasks().unwrap_or_default();
+        for t in tasks.iter().filter(|t| t.status == State::Coding && t.worker.is_some()) {
+            if let Err(e) = self.park(&t.id, State::Pending, "stopped by the developer — work saved", false) {
+                self.log(&format!("{}: could not save its work: {e}", t.id), true);
+            }
+        }
+        let _ = self.store.set_run_control(RunControl::Stopped, Source::Manager);
+        let _ = self.store.enqueue_lead_event(LeadKind::Stopped, None, "the developer stopped the run");
+        self.log("stopped — `orch autopilot` (or `orch dispatch`) starts it again; work in progress is kept", true);
+        EXIT_ALL_DONE
     }
 
     /// The start banner; `Some(code)` stops the run right away (no synced run).
@@ -629,7 +662,7 @@ impl<'a> Manager<'a> {
         let now = self.now();
         let mut el = (now - self.last_tick) as f64;
         self.last_tick = now;
-        if self.state.waiting_since.is_some() {
+        if self.state.waiting_since.is_some() || self.paused() {
             el = 0.0;
         }
         self.state.driven_s += el;
@@ -671,12 +704,24 @@ impl<'a> Manager<'a> {
             }
         }
 
-        // 2. dispatch: the scheduler assigns queued fix jobs and new milestones
-        if let Err(e) = self.dispatch_pass() {
-            self.log(&format!("dispatch failed: {e}"), false);
+        // Paused by the developer: running milestones finished their step above; nothing new
+        // starts, and the run is neither "done" nor "stuck" while it waits.
+        let paused = self.paused();
+        if paused && self.applied.insert("run-paused".into()) {
+            self.log("PAUSED — no new work starts; running milestones finish their step. `orch resume` carries on.", true);
         }
-        if let Err(e) = self.lead_ready() {
-            self.log(&format!("lead dispatch check failed: {e}"), false);
+        if !paused && self.applied.remove("run-paused") {
+            self.log("resumed — carrying on", false);
+        }
+
+        // 2. dispatch: the scheduler assigns queued fix jobs and new milestones
+        if !paused {
+            if let Err(e) = self.dispatch_pass() {
+                self.log(&format!("dispatch failed: {e}"), false);
+            }
+            if let Err(e) = self.lead_ready() {
+                self.log(&format!("lead dispatch check failed: {e}"), false);
+            }
         }
         {
             let env = self.wake_env();
@@ -688,7 +733,10 @@ impl<'a> Manager<'a> {
             }
         }
 
-        // 3. finished or stuck?
+        // 3. finished or stuck? (not while paused: the run waits for `orch resume`)
+        if paused {
+            return Cycle::Continue;
+        }
         self.finish_or_stop_check()
     }
 

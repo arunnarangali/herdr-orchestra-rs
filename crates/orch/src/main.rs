@@ -11,6 +11,7 @@ mod listing;
 mod merge_cmds;
 mod plan_cmds;
 mod review_cmds;
+mod run_ctl_cmds;
 mod run_work;
 mod send_cmds;
 mod serve_cmd;

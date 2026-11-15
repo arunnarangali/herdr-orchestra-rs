@@ -6,12 +6,13 @@
 //! transaction; nothing here touches the database or `plan.md` directly. `orch answer` and
 //! `orch fix` replace `plan.md` only after their transaction commits.
 
+use orch_core::actions::{self, Source};
 use orch_core::lease::{driver_alive, driver_info, driver_lock_path};
 use orch_core::paths;
 use orch_core::plan_edit::{EditError, py_repr};
 use orch_core::run_store::{AgentRole, Run};
 use orch_core::scheduler::{TIERS, need_rank, rank};
-use orch_core::store::{DB_FILE, Store, TransitionRequest};
+use orch_core::store::{DB_FILE, Store};
 use orch_core::task::State;
 use std::path::PathBuf;
 
@@ -199,6 +200,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         return edit_err(e);
     }
     for tid in &args {
+        let _ = ctx.store.record_action(Source::Cli, "dispatch", Some(tid), "");
         let t = match known_task(&ctx, tid) {
             Ok(t) => t,
             Err(c) => return c,
@@ -261,6 +263,7 @@ pub fn answer(args: &[String]) -> i32 {
         Ok(d) => d,
         Err(e) => return edit_err(e),
     };
+    let _ = ctx.store.record_action(Source::Cli, "answer", Some(tid), "");
     println!(
         "ANSWERED {tid}: written to plan.md; it goes back to {} with its work so far",
         done.last_worker.as_deref().unwrap_or("the next free coder")
@@ -298,6 +301,7 @@ pub fn fix(args: &[String]) -> i32 {
         Ok(f) => f,
         Err(e) => return edit_err(e),
     };
+    let _ = ctx.store.record_action(Source::Cli, "fix", Some(&f.id), &format!("fix for {tid}"));
     println!(
         "FIX {} \"{}\" -> {}; added to plan.md, the check{} still run",
         f.id,
@@ -325,17 +329,7 @@ pub fn approve(args: &[String]) -> i32 {
         Ok(c) => c,
         Err(c) => return c,
     };
-    let t = match known_task(&ctx, tid) {
-        Ok(t) => t,
-        Err(c) => return c,
-    };
-    if t.status != State::Held {
-        return die(format!("{tid} is {}, not held", t.status));
-    }
-    if let Err(e) = ctx.store.transition(
-        tid,
-        &TransitionRequest::auto(State::Committed, Some("approved by the developer")),
-    ) {
+    if let Err(e) = actions::approve(&mut ctx.store, tid, Source::Cli) {
         return die(e);
     }
     println!("APPROVED {tid}: it lands on the next autopilot step (or `orch merge {tid}`)");
@@ -357,6 +351,7 @@ pub fn escalate(args: &[String]) -> i32 {
     }
     match ctx.store.escalate_milestone(tid, &reason) {
         Ok(Some(tier)) => {
+            let _ = ctx.store.record_action(Source::Cli, "escalate", Some(tid), tier);
             println!("ESCALATED {tid} -> {tier}");
             0
         }
