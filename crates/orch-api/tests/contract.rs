@@ -90,6 +90,8 @@ fn event() -> EventInfo {
         task: some("M1"),
         task_title: some("Foundation"),
         text: s("M1 needs an answer"),
+        agent: None,
+        prompt: None,
         read: false,
         open: true,
         help: s("run `orch answer M1 \"…\"`"),
@@ -466,6 +468,8 @@ fn lead_event() -> LeadQueueEvent {
         task: some("M1"),
         task_id: some("M1"),
         text: s("M1 needs an answer"),
+        agent: None,
+        prompt: None,
         read_at: Some(1_700_000_200),
     }
 }

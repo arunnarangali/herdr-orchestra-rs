@@ -363,6 +363,9 @@ pub fn lead_event_help(kind: LeadKind) -> &'static str {
         LeadKind::AnswerProvided => {
             "an answer for {t} was given (by you or by the developer) and goes to its coder. Nothing to do unless it changes what you told the developer."
         }
+        LeadKind::Blocked => {
+            "an agent sits at a permission prompt or question in its pane (its name and the prompt are in the entry). Answer it there; the run keeps going while it waits."
+        }
     }
 }
 
@@ -402,6 +405,10 @@ pub struct EventView {
     pub open: bool,
     /// What the lead is told to do about it.
     pub help: String,
+    /// The blocked agent the entry names (only `blocked` entries).
+    pub agent: Option<String>,
+    /// The pane's visible prompt text the blocked agent wants answered (§15A).
+    pub prompt: Option<String>,
 }
 
 /// A milestone waiting for the lead's dispatch.
@@ -433,6 +440,8 @@ fn event_view(store: &Store, e: &LeadEntry) -> Result<EventView> {
         task_title,
         open: store.lead_entry_open(e)?,
         help: lead_event_help(e.kind).replace("{t}", e.task.as_deref().unwrap_or("<Mn>")),
+        agent: e.agent.clone(),
+        prompt: e.prompt.clone(),
     })
 }
 

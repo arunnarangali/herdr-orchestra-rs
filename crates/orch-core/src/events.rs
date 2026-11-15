@@ -21,8 +21,9 @@ pub enum RunEvent {
     Unconfirmed { task: String, agent: String },
     /// The milestone is in flight but no prompt ever went out.
     Orphan { task: String, status: String },
-    /// The agent waits for a permission or an answer in its pane.
-    Blocked { task: String, agent: String },
+    /// The agent waits for a permission or an answer in its pane. `prompt` is the pane's
+    /// visible prompt text (the command or question), when herdr could read it (§15A).
+    Blocked { task: String, agent: String, prompt: Option<String> },
     /// The agent went idle without writing its done file.
     Idle { task: String, agent: String, after_s: i64 },
     /// The agent is over its time budget.
@@ -67,7 +68,7 @@ impl RunEvent {
             RunEvent::Reviewed { task, agent } => format!("REVIEWED {task} {agent}"),
             RunEvent::Unconfirmed { task, agent } => format!("UNCONFIRMED {task} {agent}"),
             RunEvent::Orphan { task, .. } => format!("ORPHAN {task}"),
-            RunEvent::Blocked { task, agent } => format!("BLOCKED {task} {agent}"),
+            RunEvent::Blocked { task, agent, .. } => format!("BLOCKED {task} {agent}"),
             RunEvent::Idle { task, agent, after_s } => format!("IDLE {task} {agent} {after_s}"),
             RunEvent::Timeout { task, agent, after_min } => {
                 format!("TIMEOUT {task} {agent} {after_min}")
@@ -88,7 +89,10 @@ impl RunEvent {
             RunEvent::Orphan { task, status } => {
                 format!("ORPHAN {task} status={status} (no agent was prompted)")
             }
-            RunEvent::Blocked { task, agent } => format!("BLOCKED {task} agent={agent}"),
+            RunEvent::Blocked { task, agent, prompt } => match prompt {
+                Some(p) => format!("BLOCKED {task} agent={agent} (wants: {p})"),
+                None => format!("BLOCKED {task} agent={agent}"),
+            },
             RunEvent::Idle { task, agent, after_s } => {
                 format!("IDLE {task} agent={agent} (no sentinel after {after_s}s)")
             }
@@ -158,6 +162,13 @@ impl RunEvent {
             "BLOCKED" => Some(RunEvent::Blocked {
                 task,
                 agent: field("agent")?,
+                prompt: rest
+                    .find(" (wants: ")
+                    .and_then(|i| {
+                        rest[i + " (wants: ".len()..]
+                            .strip_suffix(')')
+                            .map(String::from)
+                    }),
             }),
             "IDLE" => Some(RunEvent::Idle {
                 task,
@@ -332,6 +343,7 @@ impl<'a> HerdrPoll<'a> {
                 Some(AgentState::Blocked) => out.push(RunEvent::Blocked {
                     task: t.id.clone(),
                     agent: d.agent.clone(),
+                    prompt: prompt_from_output(self.adapter.output(&d.agent, PROMPT_LINES)),
                 }),
                 Some(s)
                     if age > self.tun.idle_grace_s
@@ -396,6 +408,44 @@ pub fn latest_delivery(
         .flatten()
 }
 
+/// How many recent output lines the blocked-pane prompt is looked for in (§15A: a
+/// permission prompt sits at the bottom of the pane).
+pub const PROMPT_LINES: u32 = 8;
+
+/// The pane's visible prompt text for a blocked agent (§15A item 1): the last non-empty
+/// line of its recent output, control characters and terminal escapes removed, capped to
+/// one line of 160 characters. `None` when the output cannot be read or is blank.
+pub fn prompt_from_output(out: Option<String>) -> Option<String> {
+    let line = out?
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())?
+        .trim()
+        .to_string();
+    let text: String = strip_control(&line).trim().chars().take(160).collect();
+    (!text.is_empty()).then_some(text)
+}
+
+/// Remove terminal escape sequences (`ESC [ … letter`) and other control characters.
+fn strip_control(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                for n in chars.by_ref() {
+                    if n.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else if !c.is_control() || c == '\t' {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// One recorded task state transition event read from the database.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskEventRecord {
@@ -420,6 +470,10 @@ pub struct LeadQueueRecord {
     pub task: Option<String>,
     pub text: String,
     pub read_at: Option<i64>,
+    /// The blocked agent the entry names (schema 10, `blocked` entries only).
+    pub agent: Option<String>,
+    /// The pane's visible prompt text the blocked agent wants answered.
+    pub prompt: Option<String>,
 }
 
 /// Initialise max event id and max lead queue id from `state.db`.
@@ -499,7 +553,7 @@ pub fn poll_lead_queue_events(
     let _ = conn.busy_timeout(std::time::Duration::from_millis(200));
 
     let Ok(mut stmt) = conn.prepare(
-        "SELECT id, ts, kind, task_id, text, read_at
+        "SELECT id, ts, kind, task_id, text, read_at, agent, prompt
          FROM lead_queue WHERE id > ?1 ORDER BY id",
     ) else {
         return Vec::new();
@@ -513,6 +567,8 @@ pub fn poll_lead_queue_events(
             task: r.get(3)?,
             text: r.get(4)?,
             read_at: r.get(5)?,
+            agent: r.get(6)?,
+            prompt: r.get(7)?,
         })
     });
 
@@ -651,3 +707,118 @@ pub fn init_db_poll_state_all(
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::{Counter, NewTask, Store};
+
+    // §15A item 1: the visible prompt text is the pane's last non-empty line.
+    #[test]
+    fn the_prompt_is_the_last_visible_line() {
+        let out = "working...\n\nDo you want to allow `cargo test`? [y/n]\n".to_string();
+        assert_eq!(
+            prompt_from_output(Some(out)),
+            Some("Do you want to allow `cargo test`? [y/n]".to_string())
+        );
+        // escapes are removed
+        assert_eq!(prompt_from_output(Some("a\u{1b}[31mred\u{1b}[0m".into())), Some("ared".into()));
+        // the last non-empty line wins, and lines are capped to 160 characters
+        let out = format!("first line\n{}\n", "x".repeat(200));
+        let p = prompt_from_output(Some(out)).unwrap();
+        assert_eq!(p.chars().count(), 160);
+        assert_eq!(p, "x".repeat(160));
+        // nothing readable: None
+        assert_eq!(prompt_from_output(None), None);
+        assert_eq!(prompt_from_output(Some("\n \n".into())), None);
+    }
+
+    // §15A item 1: the BLOCKED event carries agent and prompt, and its line round-trips.
+    #[test]
+    fn the_blocked_event_carries_the_agent_and_the_prompt() {
+        let ev = RunEvent::Blocked {
+            task: "M1".into(),
+            agent: "codex-1".into(),
+            prompt: Some("cargo test --workspace".into()),
+        };
+        assert_eq!(ev.agent(), Some("codex-1"));
+        assert_eq!(ev.key(), "BLOCKED M1 codex-1");
+        let line = ev.line();
+        assert_eq!(line, "BLOCKED M1 agent=codex-1 (wants: cargo test --workspace)");
+        assert_eq!(RunEvent::parse(&line), Some(ev.clone()));
+        // without a prompt the line is the old one
+        let ev = RunEvent::Blocked { task: "M1".into(), agent: "w1".into(), prompt: None };
+        assert_eq!(ev.line(), "BLOCKED M1 agent=w1");
+        assert_eq!(RunEvent::parse(&ev.line()), Some(ev));
+    }
+
+    struct Rt {
+        st: Option<AgentState>,
+        out: Option<String>,
+    }
+    impl RuntimeView for Rt {
+        fn status(&self, _agent: &str) -> Option<AgentState> {
+            self.st
+        }
+        fn output(&self, _agent: &str, _lines: u32) -> Option<String> {
+            self.out.clone()
+        }
+    }
+
+    fn watch_all(_: &str) -> bool {
+        true
+    }
+
+    fn one_in_flight(dir: &std::path::Path, agent: &str) -> Store {
+        let mut s = Store::open_in(&dir.join(".orchestrate")).unwrap();
+        s.add_task(&NewTask { id: "M1".into(), title: "t".into(), deps: vec![] }).unwrap();
+        s.bump("M1", Counter::Attempt).unwrap();
+        s.claim("M1", agent, None).unwrap();
+        s.record_delivery(agent, "M1", 1, DeliveryKind::Coder, "go").unwrap();
+        let d = s.latest_delivery("M1", 1, DeliveryKind::Coder).unwrap().unwrap();
+        s.confirm_delivery(d.id).unwrap();
+        s
+    }
+
+    // §15A item 1: the poll reads the pane's prompt text into the event.
+    #[test]
+    fn the_scan_puts_the_panes_prompt_text_into_the_blocked_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = one_in_flight(dir.path(), "w1");
+        let rt = Rt {
+            st: Some(AgentState::Blocked),
+            out: Some("\nAllow? [y/n] cargo build\n".into()),
+        };
+        let poll = HerdrPoll {
+            root: dir.path().to_path_buf(),
+            adapter: &rt,
+            watchable: &watch_all,
+            tun: PollTunables {
+                step_s: 0.01,
+                idle_grace_s: 120,
+                confirm_s: 30,
+                coder_budget_s: 2700,
+                review_budget_s: 900,
+            },
+        };
+        let evs = poll.scan(&mut store);
+        assert!(
+            matches!(
+                evs.first(),
+                Some(RunEvent::Blocked { agent, prompt, .. })
+                    if agent == "w1" && prompt.as_deref() == Some("Allow? [y/n] cargo build")
+            ),
+            "{evs:?}"
+        );
+        // output herdr cannot read: the event still carries the agent, without a prompt
+        let rt = Rt { st: Some(AgentState::Blocked), out: None };
+        let poll = HerdrPoll { adapter: &rt, ..poll };
+        let evs = poll.scan(&mut store);
+        assert!(
+            matches!(
+                evs.first(),
+                Some(RunEvent::Blocked { agent, prompt: None, .. }) if agent == "w1"
+            ),
+            "{evs:?}"
+        );
+    }
+}

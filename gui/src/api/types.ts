@@ -236,6 +236,8 @@ export interface EventInfo {
   task: string | null;
   task_title: string | null;
   text: string;
+  agent?: string | null;
+  prompt?: string | null;
   read: boolean;
   open: boolean;
   help: string;
@@ -459,6 +461,8 @@ export interface LeadQueueEvent {
   task?: string;
   task_id?: string;
   text: string;
+  agent?: string;
+  prompt?: string;
   read_at?: number;
 }
 /** Payload of a `run-state` message (also sent as a "re-fetch" hint after a gap). */

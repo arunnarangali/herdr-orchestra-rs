@@ -552,6 +552,12 @@ pub struct EventInfo {
     pub task: Option<String>,
     pub task_title: Option<String>,
     pub text: String,
+    /// The agent the event is about (a blocked permission event names its agent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// What the agent's pane asks for (the visible prompt text, when read).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
     /// The lead has read it (`orch events`).
     pub read: bool,
     /// Its milestone is still in the state it announced.
@@ -588,6 +594,8 @@ fn event(e: view::EventView) -> EventInfo {
         task: e.entry.task,
         task_title: e.task_title,
         text: e.entry.text,
+        agent: e.agent,
+        prompt: e.prompt,
         read: e.entry.read_at.is_some(),
         open: e.open,
         help: e.help,

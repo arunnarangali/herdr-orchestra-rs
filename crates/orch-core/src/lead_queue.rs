@@ -5,8 +5,9 @@
 //! * [`enqueue`] writes one entry inside a transaction the caller already holds. The
 //!   transition path ([`Store::transition`]) calls it itself for the states the lead must
 //!   decide on and for `merged`, so callers never enqueue those by hand; `ready`,
-//!   `escalated`, `auto-dispatched`, `all_done`, `stopped` and `AnswerProvided` are enqueued
-//!   by the code that causes them ([`Store::enqueue_lead_event`], [`emit_answer_provided`]).
+//!   `escalated`, `auto-dispatched`, `all_done`, `stopped`, `AnswerProvided` and `blocked`
+//!   are enqueued by the code that causes them ([`Store::enqueue_lead_event`],
+//!   [`Store::enqueue_blocked_lead_event`], [`emit_answer_provided`]).
 //! * A queue only exists for a run with a lead (`Lead mode: events` and a lead agent).
 //! * A blocking entry is open while its milestone is still in that state; a `ready` entry is
 //!   stale once nothing it names is left to dispatch; every other entry is open until read.
@@ -33,10 +34,13 @@ pub enum LeadKind {
     Stopped,
     /// An answer was given (`orch answer`), by the lead or by the developer in their own terminal.
     AnswerProvided,
+    /// An agent sits at a permission prompt or question in its pane (§15A item 1); the
+    /// entry names the agent and, when herdr could read it, the prompt text.
+    Blocked,
 }
 
 impl LeadKind {
-    pub const ALL: [LeadKind; 11] = [
+    pub const ALL: [LeadKind; 12] = [
         LeadKind::Paused,
         LeadKind::Failed,
         LeadKind::Held,
@@ -48,6 +52,7 @@ impl LeadKind {
         LeadKind::AllDone,
         LeadKind::Stopped,
         LeadKind::AnswerProvided,
+        LeadKind::Blocked,
     ];
 
     /// The name stored in the queue (Python's kinds; `AnswerProvided` is new).
@@ -64,6 +69,7 @@ impl LeadKind {
             LeadKind::AllDone => "all_done",
             LeadKind::Stopped => "stopped",
             LeadKind::AnswerProvided => "AnswerProvided",
+            LeadKind::Blocked => "blocked",
         }
     }
 
@@ -82,11 +88,17 @@ impl LeadKind {
         }
     }
 
-    /// Blocking kinds stay open until their milestone leaves that state.
+    /// The entry is open while its milestone is still being worked: `blocked` closes
+    /// when the task leaves coding/reviewing, a blocking kind when it leaves its own
+    /// state, `ready` while something it names waits to be dispatched, others until read.
     pub fn is_blocking(self) -> bool {
         matches!(
             self,
-            LeadKind::Paused | LeadKind::Failed | LeadKind::Held | LeadKind::NeedsAnswer
+            LeadKind::Paused
+                | LeadKind::Failed
+                | LeadKind::Held
+                | LeadKind::NeedsAnswer
+                | LeadKind::Blocked
         )
     }
 
@@ -109,6 +121,11 @@ pub struct LeadEntry {
     pub text: String,
     /// When the lead read it (`orch events`); `None` while unread.
     pub read_at: Option<i64>,
+    /// The blocked agent this entry names (only `blocked` entries), when there is one.
+    pub agent: Option<String>,
+    /// The pane's visible prompt text the blocked agent wants answered, when herdr
+    /// could read it (only `blocked` entries).
+    pub prompt: Option<String>,
 }
 
 /// Does this run have a lead whose events are queued: `Lead mode: events` and a lead agent.
@@ -130,6 +147,32 @@ pub fn enqueue(
     task: Option<&str>,
     text: &str,
 ) -> Res<Option<i64>> {
+    enqueue_full(conn, kind, task, text, None, None)
+}
+
+/// [`enqueue`] with the blocked agent's name and its pane's prompt text (only
+/// [`LeadKind::Blocked`] entries carry them; the columns are NULL for every other kind).
+pub fn enqueue_blocked(
+    conn: &Connection,
+    task: &str,
+    agent: &str,
+    prompt: Option<&str>,
+) -> Res<Option<i64>> {
+    let text = match prompt {
+        Some(p) => format!("{agent} waits for a permission in its pane: wants: {p}"),
+        None => format!("{agent} waits for a permission or question in its pane"),
+    };
+    enqueue_full(conn, LeadKind::Blocked, Some(task), &text, Some(agent), prompt)
+}
+
+fn enqueue_full(
+    conn: &Connection,
+    kind: LeadKind,
+    task: Option<&str>,
+    text: &str,
+    agent: Option<&str>,
+    prompt: Option<&str>,
+) -> Res<Option<i64>> {
     if !lead_on(conn)? {
         return Ok(None);
     }
@@ -143,8 +186,8 @@ pub fn enqueue(
         return Ok(None);
     }
     conn.execute(
-        "INSERT INTO lead_queue (ts, kind, task_id, text) VALUES (?1,?2,?3,?4)",
-        params![now(), kind.as_str(), task, text],
+        "INSERT INTO lead_queue (ts, kind, task_id, text, agent, prompt) VALUES (?1,?2,?3,?4,?5,?6)",
+        params![now(), kind.as_str(), task, text, agent, prompt],
     )?;
     let id = conn.last_insert_rowid();
     conn.execute("DELETE FROM lead_queue WHERE id <= ?1", [id - QUEUE_KEEP])?;
@@ -196,6 +239,8 @@ fn row_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<LeadEntry> {
         task: r.get(3)?,
         text: r.get(4)?,
         read_at: r.get(5)?,
+        agent: r.get(6)?,
+        prompt: r.get(7)?,
     })
 }
 
@@ -225,11 +270,28 @@ impl Store {
         self.enqueue_lead_event(LeadKind::AnswerProvided, Some(task), text)
     }
 
+    /// Queue the `blocked` entry for a milestone: the agent waiting and, when herdr could
+    /// read it, the pane's prompt text (its own transaction).
+    pub fn enqueue_blocked_lead_event(
+        &mut self,
+        task: &str,
+        agent: &str,
+        prompt: Option<&str>,
+    ) -> Res<Option<i64>> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id = enqueue_blocked(&tx, task, agent, prompt)?;
+        tx.commit()?;
+        Ok(id)
+    }
+
     /// Every stored entry, oldest first.
     pub fn lead_entries(&self) -> Res<Vec<LeadEntry>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, ts, kind, task_id, text, read_at FROM lead_queue ORDER BY id")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, ts, kind, task_id, text, read_at, agent, prompt
+             FROM lead_queue ORDER BY id",
+        )?;
         Ok(stmt
             .query_map([], row_entry)?
             .collect::<rusqlite::Result<_>>()?)
@@ -238,6 +300,21 @@ impl Store {
     /// Is the entry still open? A blocking entry while its milestone is in that state, a
     /// `ready` entry while something it names waits to be dispatched, others until read.
     pub fn lead_entry_open(&self, e: &LeadEntry) -> Res<bool> {
+        if e.kind == LeadKind::Blocked {
+            // open while the milestone is still in flight: the agent sits at its prompt
+            // until the task moves on (a done file, a park, a lost attempt)
+            let status: Option<String> = match &e.task {
+                Some(t) => self
+                    .conn
+                    .query_row("SELECT status FROM tasks WHERE id=?1", [t], |r| r.get(0))
+                    .optional()?,
+                None => None,
+            };
+            return Ok(matches!(
+                status.as_deref(),
+                Some("coding") | Some("reviewing")
+            ));
+        }
         if e.kind.is_blocking() {
             let status: Option<String> = match &e.task {
                 Some(t) => self
@@ -634,6 +711,54 @@ pub(crate) mod tests {
         assert!(
             s.still_open_lead_events().unwrap().is_empty(),
             "not blocking"
+        );
+    }
+
+    // §15A item 1: a blocked entry names the agent and the prompt, and stays open while
+    // the milestone is in flight.
+    #[test]
+    fn a_blocked_entry_names_the_agent_and_stays_open_while_in_flight() {
+        let (_d, mut s) = store_with_run(true);
+        go(&mut s, "M1", Coding);
+        let id = s
+            .enqueue_blocked_lead_event("M1", "codex-1", Some("cargo test"))
+            .unwrap()
+            .unwrap();
+        let e = &s.unread_lead_events().unwrap()[0];
+        assert_eq!(
+            (e.kind, e.task.as_deref(), e.agent.as_deref(), e.prompt.as_deref()),
+            (LeadKind::Blocked, Some("M1"), Some("codex-1"), Some("cargo test"))
+        );
+        assert_eq!(
+            e.text, "codex-1 waits for a permission in its pane: wants: cargo test"
+        );
+        assert_eq!(s.mark_lead_read(&[id]).unwrap(), 1);
+        assert!(
+            !s.still_open_lead_events().unwrap().is_empty(),
+            "still open while the milestone is being coded"
+        );
+        go(&mut s, "M1", Coding);
+        go(&mut s, "M1", Verifying);
+        go(&mut s, "M1", Merged);
+        assert!(s.still_open_lead_events().unwrap().is_empty());
+        assert!(
+            !s.unread_lead_events().unwrap().iter().any(|e| e.kind == LeadKind::Blocked),
+            "the blocked entry closed with the milestone"
+        );
+    }
+
+    #[test]
+    fn a_blocked_entry_without_a_prompt_and_a_duplicate_are_handled() {
+        let (_d, mut s) = store_with_run(true);
+        go(&mut s, "M1", Coding);
+        s.enqueue_blocked_lead_event("M1", "codex-1", None).unwrap();
+        let e = &s.unread_lead_events().unwrap()[0];
+        assert_eq!(e.prompt, None);
+        assert_eq!(e.text, "codex-1 waits for a permission or question in its pane");
+        // the same blocked agent queues nothing new until the entry is gone
+        assert_eq!(
+            s.enqueue_blocked_lead_event("M1", "codex-1", None).unwrap(),
+            None
         );
     }
 

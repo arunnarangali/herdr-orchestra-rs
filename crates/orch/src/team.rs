@@ -696,6 +696,44 @@ rename <new pane> codex-2",
     }
 
     #[test]
+    fn team_up_pre_allows_the_kinds_commands() {
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("agents.toml");
+        std::fs::write(
+            &p,
+            "[claude]\nallow_commands = [\"cargo build\", \"cargo test --workspace\"]\n",
+        )
+        .unwrap();
+        let r0 = agents::registry(agents::DEFAULT_TOML, &p).unwrap();
+        let fake = FakeHerdr::new();
+        fake.add_pane(PaneInfo::new("w1:p1", "w1", "w1:t1"));
+        // an agent herdr already saw in the pane it will split, under the pane's name
+        fake.add_agent(AgentInfo::new(
+            "w1:p3",
+            "claude",
+            "w1:p3",
+            AgentStatus::Idle,
+        ));
+        let r = run_team_up(
+            &fake,
+            &r0,
+            &cat(),
+            &plan(vec![agent("claude-1", "claude", None, "/repo/wt")], false),
+            &mut no_sleep,
+        );
+        assert_eq!(r.failed, 0);
+        assert_eq!(
+            fake.sent(),
+            vec![orch_herdr::fake::Sent::Run {
+                pane: "w1:p3".into(),
+                command: "claude --permission-mode acceptEdits --allowedTools \
+'Bash(cargo build:*)' --allowedTools 'Bash(cargo test --workspace:*)'"
+                    .into(),
+            }]
+        );
+    }
+
+    #[test]
     fn the_later_agents_split_down_from_the_pane_before() {
         let fake = FakeHerdr::new();
         fake.add_pane(PaneInfo::new("w1:p1", "w1", "w1:t1"));
