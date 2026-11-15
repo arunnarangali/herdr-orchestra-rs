@@ -343,6 +343,16 @@ pub fn validate(plan: &Plan, text: &str, env: &Env, old_base: Option<&str>) -> V
         }
     }
     let workers = uniq(parse_agents(&get(&h.workers_raw)));
+    // an agent's name becomes a folder name and a git argument: `..`, `.`, a leading `-` or `.`
+    // would leave the worktrees folder or pass for an option
+    for w in &workers {
+        if w.name.starts_with(['-', '.']) {
+            errors.push(format!(
+                "{} is not a safe agent name (it must not start with '-' or '.')",
+                repr(&w.name)
+            ));
+        }
+    }
     if workers.is_empty() {
         errors.push("plan header needs `Workers: claude-1 (claude), codex-1 (codex)`".into());
     }
@@ -1143,6 +1153,20 @@ Acceptance criteria:
                     v.errors
                 );
             }
+        }
+    }
+
+    #[test]
+    fn an_agent_name_that_could_leave_its_folder_or_pass_for_an_option_is_an_error() {
+        // names become folder names (`.orchestrate/worktrees/<name>`) and git arguments
+        for bad in ["..", ".", "-rf", ".hidden"] {
+            let v = check(&edit(&[("claude-1 (claude", &format!("{bad} (claude"))]));
+            assert!(
+                v.errors.iter().any(|e| e.contains("not a safe agent name")),
+                "{bad:?}: {:?}",
+                v.errors
+            );
+            assert!(v.input.is_none());
         }
     }
 
