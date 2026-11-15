@@ -39,11 +39,13 @@ describe("registry and sidebar", () => {
   it("shows every screen, the unbuilt ones as placeholders", async () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
+    // Every nav screen has its milestone's content now; the loop stays as a smoke test
+    // and the placeholder assertion remains for any screen that loses its content.
+    const built = ["Overview", "Projects", "Agents", "Workflows", "Execution", "Reports", "Settings"];
     for (const name of NAMES) {
       await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: new RegExp(name) }));
       expect(await screen.findByRole("heading", { name })).toBeInTheDocument();
-      // Overview, Execution, Projects, Agents and Settings have real content now; the rest are still placeholders.
-      if (!["Overview", "Execution", "Projects", "Agents", "Settings"].includes(name)) expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+      if (!built.includes(name)) expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
     }
   });
 
