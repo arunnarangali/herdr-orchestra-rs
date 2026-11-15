@@ -166,3 +166,38 @@ fn the_token_is_reused_on_the_next_start() {
         200
     );
 }
+
+#[test]
+fn sigint_closes_an_open_event_stream_and_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    let mut srv = start(dir.path(), cfg.path());
+    let token = std::fs::read_to_string(cfg.path().join("herdr-orchestra/api-token"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let mut s = TcpStream::connect(&srv.addr).unwrap();
+    write!(
+        s,
+        "GET /api/v1/stream HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {token}\r\n\r\n",
+        srv.addr
+    )
+    .unwrap();
+    s.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    let mut head = [0u8; 12];
+    s.read_exact(&mut head).unwrap();
+    assert!(String::from_utf8_lossy(&head).contains("200"), "{head:?}");
+
+    let kill = Command::new("kill")
+        .args(["-INT", &srv.child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(kill.success());
+    // the stream ends (EOF) instead of holding the shutdown open
+    let mut rest = Vec::new();
+    let _ = s.read_to_end(&mut rest);
+    assert_eq!(srv.child.wait().unwrap().code(), Some(0));
+    let mut out = String::new();
+    srv.stdout.read_to_string(&mut out).unwrap();
+    assert!(out.contains("SIGINT received") && out.contains("stopped"), "{out}");
+}

@@ -29,6 +29,8 @@ use crate::wake::{wake_tick, Clock, LeadRuntime, Notifier, WakeEnv, WakeTunables
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Exit codes, Python's `cmd_autopilot`: 0 all done, 3 a stop, 2 usage (lease held).
 pub const EXIT_ALL_DONE: i32 = 0;
@@ -316,6 +318,41 @@ pub struct QueuedJob {
     pub body: String,
 }
 
+/// `.orchestrate/events.jsonl`: one JSON line per lifecycle event, for humans and tools.
+fn events_path(root: &Path) -> PathBuf {
+    root.join(crate::paths::ORCH_DIR).join("events.jsonl")
+}
+
+fn append_lifecycle_event(root: &Path, event: &str, ts: i64) {
+    append_lifecycle_event_with(root, event, ts, false);
+}
+
+/// Append `{"event", "ts"[, "resumed"]}` as one line (a single `write` of a whole line, so a
+/// kill never leaves half a line). Best effort: the log is not worth failing the run for.
+fn append_lifecycle_event_with(root: &Path, event: &str, ts: i64, resumed: bool) {
+    use std::io::Write as _;
+    let mut v = serde_json::json!({ "event": event, "ts": ts });
+    if event == "autopilot-started" {
+        v["resumed"] = serde_json::Value::Bool(resumed);
+    }
+    let line = format!("{v}\n");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(events_path(root)) {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// The newest `autopilot-*` event in `events.jsonl` (`autopilot-started` or
+/// `autopilot-shutdown`): a start that follows a shutdown is a resume.
+fn last_lifecycle_event(root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(events_path(root)).ok()?;
+    text.lines().rev().find_map(|l| {
+        let v: serde_json::Value = serde_json::from_str(l).ok()?;
+        let e = v.get("event")?.as_str()?;
+        e.starts_with("autopilot-").then(|| e.to_string())
+    })
+}
+
+
 /// The driver's own small state, in `.orchestrate/driver.json`. Progress that must
 /// survive a restart (the driven budget, kept jobs) lives here; the orchestration
 /// state itself stays in state.db.
@@ -421,6 +458,10 @@ pub struct Manager<'a> {
     /// also reaches the desktop notification (Python's `say`).
     pub say: &'a mut dyn FnMut(&str, bool),
     pub state: DriverState,
+    /// Set (from a signal handler's thread) when the process was asked to end. It is not the
+    /// developer's `orch stop`: nothing is written to `run_control`, the loop only finishes
+    /// the step in hand, starts nothing new and returns, so the next start carries on.
+    pub interrupt: Arc<AtomicBool>,
     last_tick: i64,
     /// Keys of events applied in this process; the durable dedup is the task
     /// states themselves.
@@ -459,6 +500,7 @@ impl<'a> Manager<'a> {
             deliveries,
             tun,
             say,
+            interrupt: Arc::new(AtomicBool::new(false)),
             last_tick: clock.now(),
             applied: HashSet::new(),
         })
@@ -470,6 +512,38 @@ impl<'a> Manager<'a> {
 
     fn now(&self) -> i64 {
         self.clock.now()
+    }
+
+    fn interrupted(&self) -> bool {
+        self.interrupt.load(Ordering::SeqCst)
+    }
+
+    /// Add the driving time since the last tick to the budget and save it. Waiting for an
+    /// answer and a pause do not count.
+    fn account_time(&mut self) -> Result<()> {
+        let now = self.now();
+        let mut el = (now - self.last_tick) as f64;
+        self.last_tick = now;
+        if self.state.waiting_since.is_some() || self.paused() {
+            el = 0.0;
+        }
+        self.state.driven_s += el;
+        self.state.save(&self.root.join(crate::paths::ORCH_DIR))
+    }
+
+    /// A stop signal ended the loop: the step in hand is finished, the time driven is
+    /// saved, and the shutdown is written to the log and `events.jsonl` so the next start
+    /// knows it is a resume. The run is kept as it is (no `run_control` write).
+    fn shutdown(&mut self) -> i32 {
+        if let Err(e) = self.account_time() {
+            self.log(&format!("could not save driver state: {e}"), true);
+        }
+        append_lifecycle_event(&self.root, "autopilot-shutdown", self.now());
+        self.log(
+            "shutdown on a stop signal — the step in hand is done, the run is kept; `orch autopilot` carries on where it stopped",
+            true,
+        );
+        EXIT_ALL_DONE
     }
 
     fn wake_env(&self) -> WakeEnv<'a> {
@@ -499,10 +573,16 @@ impl<'a> Manager<'a> {
     }
 
     /// Start the loop after reconciling whatever a crash left half-done. `stop` is
-    /// checked every cycle (`orch autopilot --once` stops after one). SIGTERM kills
-    /// the process; the OS then releases the driver lease, and every state write is
-    /// one transaction, so nothing is corrupted.
+    /// checked every cycle (`orch autopilot --once` stops after one). A stop signal sets
+    /// [`interrupt`](Self::interrupt): the step in hand finishes, nothing new starts, and `run`
+    /// returns 0 so the caller frees the lease. A hard kill is also safe: every state write is
+    /// one transaction, and the merge journal and reconcile bring back the rest on the next start.
     pub fn run(&mut self, stop: &dyn Fn() -> bool) -> i32 {
+        let resumed = last_lifecycle_event(&self.root).as_deref() == Some("autopilot-shutdown");
+        append_lifecycle_event_with(&self.root, "autopilot-started", self.now(), resumed);
+        if resumed {
+            self.log("resuming after a stop signal — carrying on where the run stopped", false);
+        }
         // a merge a crash interrupted is finished or undone before anything is scheduled
         match crate::merge::recover(self.store, &self.root) {
             Ok(Some(r)) => self.log(&r.to_string(), true),
@@ -557,6 +637,9 @@ impl<'a> Manager<'a> {
             return code;
         }
         loop {
+            if self.interrupted() {
+                return self.shutdown();
+            }
             if stop() {
                 self.log("stopped by request — the run is kept", false);
                 return EXIT_ALL_DONE;
@@ -567,6 +650,9 @@ impl<'a> Manager<'a> {
             match self.cycle() {
                 Cycle::Continue => {}
                 Cycle::Exit(code) => return code,
+            }
+            if self.interrupted() {
+                return self.shutdown();
             }
             // 4. wait for the next event: a bounded poll of herdr and the done files
             match self.poll.poll(self.store, 30) {
@@ -659,15 +745,7 @@ impl<'a> Manager<'a> {
     pub fn cycle(&mut self) -> Cycle {
         // 0. budget: driving time adds up across restarts; waiting for an answer
         //    does not count.
-        let now = self.now();
-        let mut el = (now - self.last_tick) as f64;
-        self.last_tick = now;
-        if self.state.waiting_since.is_some() || self.paused() {
-            el = 0.0;
-        }
-        self.state.driven_s += el;
-        let orch = self.root.join(crate::paths::ORCH_DIR);
-        if let Err(e) = self.state.save(&orch) {
+        if let Err(e) = self.account_time() {
             self.log(&format!("could not save driver state: {e}"), true);
             return Cycle::Exit(EXIT_STOPPED);
         }
@@ -699,9 +777,17 @@ impl<'a> Manager<'a> {
             }
         };
         for t in tasks {
+            // a stop signal: the step in hand (a check, a merge) was finished above; the
+            // next milestone's step waits for the next start
+            if self.interrupted() {
+                return Cycle::Continue;
+            }
             if let Err(e) = self.handle_in_flight(&t.id) {
                 self.log(&format!("{}: {e}", t.id), false);
             }
+        }
+        if self.interrupted() {
+            return Cycle::Continue; // no new prompt goes out after the signal
         }
 
         // Paused by the developer: running milestones finished their step above; nothing new

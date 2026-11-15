@@ -65,6 +65,9 @@ impl RuntimeView for Runtime {
 }
 
 thread_local! {
+    /// When set, the fake check raises this flag (the manager's `interrupt`) as it runs.
+    static CHECK_TRIPS: RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
+        const { RefCell::new(None) };
     /// What the fake Deliveries' recovery "sees" about each agent, set per test.
     static RECOVER_STATUS: RefCell<Option<AgentState>> = const { RefCell::new(None) };
 }
@@ -201,6 +204,12 @@ impl Work for FkWork {
     }
 
     fn check(&mut self, _task: &str) -> std::result::Result<CheckOutcome, String> {
+        // a stop signal arriving while the check runs
+        CHECK_TRIPS.with(|c| {
+            if let Some(flag) = c.borrow().as_ref() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
         self.check.clone()
     }
 
@@ -1574,4 +1583,114 @@ fn a_broken_run_carries_on_once_the_branch_is_green() {
     assert_eq!(one.store.integration_broken().unwrap(), None);
     let log = joined(&one.say_log);
     assert!(log.contains("feature/x passes its check again — carrying on"), "{log}");
+}
+
+// ---- graceful shutdown and resume (a stop signal is not `orch stop`)
+
+fn events_lines(root: &Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(root.join(".orchestrate/events.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+fn event_names(root: &Path) -> Vec<String> {
+    events_lines(root).iter().map(|v| v["event"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn a_stop_signal_keeps_the_run_and_the_next_start_resumes_without_resending() {
+    use orch_core::actions::RunControl;
+    use std::sync::atomic::Ordering;
+    let mut one = One::new();
+    one.cycle(); // M1 goes to w1: the prompt is recorded and confirmed
+    let sent = one.store.latest_delivery("M1", 1, DeliveryKind::Coder).unwrap().unwrap();
+    assert!(sent.confirmed);
+
+    // the signal arrives: the loop returns 0 without touching the run control
+    let code = one.with_manager(|m, _| {
+        m.interrupt.store(true, Ordering::SeqCst);
+        m.run(&|| false)
+    });
+    assert_eq!(code, 0);
+    assert_eq!(one.store.run_control().unwrap(), RunControl::Running, "a signal is not `orch stop`");
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Coding);
+    assert!(joined(&one.say_log).contains("shutdown on a stop signal"), "{}", joined(&one.say_log));
+    assert_eq!(event_names(one.dir.path()), ["autopilot-started", "autopilot-shutdown"]);
+
+    // next start, no `orch resume`: it resumes, and the confirmed prompt is not sent again
+    let code = one.with_manager(|m, _| m.run(&|| true));
+    assert_eq!(code, 0);
+    let after = one.store.latest_delivery("M1", 1, DeliveryKind::Coder).unwrap().unwrap();
+    assert_eq!(after.id, sent.id);
+    assert_eq!(one.deliver.resends.get(), 0);
+    assert_eq!(one.store.run_control().unwrap(), RunControl::Running);
+    assert!(joined(&one.say_log).contains("resuming after a stop signal"));
+    let ev = events_lines(one.dir.path());
+    let started = ev.iter().filter(|v| v["event"] == "autopilot-started").collect::<Vec<_>>();
+    assert_eq!(started.len(), 2);
+    assert_eq!(started[0]["resumed"], false);
+    assert_eq!(started[1]["resumed"], true);
+}
+
+#[test]
+fn a_prompt_that_was_not_confirmed_when_the_signal_came_goes_out_on_the_next_start() {
+    use std::sync::atomic::Ordering;
+    let mut one = One::new();
+    one.cycle();
+    let sent = one.store.latest_delivery("M1", 1, DeliveryKind::Coder).unwrap().unwrap();
+    // killed between the send and the confirm
+    unconfirm(one.dir.path(), sent.id);
+    backdate(one.dir.path(), sent.id, now() - 3600);
+    let _ = one.with_manager(|m, _| {
+        m.interrupt.store(true, Ordering::SeqCst);
+        m.run(&|| false)
+    });
+    // the idle agent never saw it: the next start sends it again (to the same agent), once
+    RECOVER_STATUS.with(|c| *c.borrow_mut() = Some(AgentState::Idle));
+    one.clock.0.set(now() + 3600);
+    let code = one.with_manager(|m, _| m.run(&|| true));
+    assert_eq!(code, 0);
+    assert_eq!(one.deliver.resends.get(), 1);
+    let d = one.store.latest_delivery("M1", 1, DeliveryKind::Coder).unwrap().unwrap();
+    assert_eq!((d.id, d.confirmed, d.agent.as_str()), (sent.id, true, "w1"));
+    RECOVER_STATUS.with(|c| *c.borrow_mut() = None);
+}
+
+#[test]
+fn a_signal_during_a_check_lets_the_step_finish_and_starts_nothing_new() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open_in(&dir.path().join(".orchestrate")).unwrap();
+    let mut m2 = plan_task("M2", Some("medium"));
+    m2.deps = vec!["M1".into()];
+    sync(&mut store, false, &[plan_task("M1", Some("medium")), m2]);
+    let mut one = One::new();
+    one.dir = dir;
+    one.store = store;
+    one.cycle(); // M1 dispatched; M2 waits on it
+    one.with_manager(|m, _| {
+        m.apply_event(&RunEvent::Done { task: "M1".into(), agent: "w1".into() }).unwrap()
+    });
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Verifying);
+
+    // the signal lands while M1's check runs
+    let code = one.with_manager(|m, _| {
+        CHECK_TRIPS.with(|c| *c.borrow_mut() = Some(m.interrupt.clone()));
+        m.run(&|| false)
+    });
+    CHECK_TRIPS.with(|c| *c.borrow_mut() = None);
+    assert_eq!(code, 0);
+
+    // the check and the landing finished (nothing half-done) ...
+    let m1 = one.store.get_task("M1").unwrap().status;
+    assert_eq!(m1, State::Merged);
+    // ... and the dependent milestone was not started after the signal
+    assert_eq!(one.store.get_task("M2").unwrap().status, State::Pending);
+    assert!(one.store.latest_delivery("M2", 1, DeliveryKind::Coder).unwrap().is_none());
+    assert!(event_names(one.dir.path()).contains(&"autopilot-shutdown".to_string()));
+
+    // the next start picks M2 up
+    one.with_manager(|m, _| m.cycle());
+    assert_eq!(one.store.get_task("M2").unwrap().status, State::Coding);
 }
