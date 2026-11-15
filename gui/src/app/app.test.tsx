@@ -36,13 +36,14 @@ describe("registry and sidebar", () => {
     expect(within(nav).getByRole("link", { name: /Overview/ })).not.toHaveAttribute("aria-current");
   });
 
-  it("shows every screen as a placeholder", async () => {
+  it("shows every screen, the unbuilt ones as placeholders", async () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
     for (const name of NAMES) {
       await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: new RegExp(name) }));
       expect(await screen.findByRole("heading", { name })).toBeInTheDocument();
-      expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+      // Overview and Execution have real content now; the rest are still placeholders.
+      if (!["Overview", "Execution"].includes(name)) expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
     }
   });
 
