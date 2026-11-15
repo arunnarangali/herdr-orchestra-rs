@@ -1,0 +1,65 @@
+.ob-indicator {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 var(--gap);
+  padding: 0;
+}
+.ob-step-btn {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.ob-step-btn[aria-current="step"] {
+  border-color: var(--accent);
+  background: var(--info-bg);
+  font-weight: 600;
+}
+.ob-card {
+  max-width: 44rem;
+}
+.ob-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: var(--gap);
+}
+.ob-spacer {
+  flex: 1;
+}
+.ob-command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.3rem 0;
+}
+.ob-command code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.2rem 0.5rem;
+  overflow-wrap: anywhere;
+}
+.ob-found {
+  margin: 0.4rem 0;
+}
+.ob-msg {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+}
+.ob-list {
+  margin: 0.4rem 0;
+  padding-left: 1.2rem;
+}
