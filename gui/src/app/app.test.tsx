@@ -12,10 +12,10 @@ beforeEach(async () => {
 });
 afterEach(() => server.close());
 
-const NAMES = ["Overview", "Projects", "Agents", "Workflows", "Execution", "Reports", "Settings"];
+const NAMES = ["Overview", "Chat", "Projects", "Agents", "Workflows", "Execution", "Reports", "Settings"];
 
 describe("registry and sidebar", () => {
-  it("registers the seven screens and onboarding in one list", () => {
+  it("registers the eight screens and onboarding in one list", () => {
     expect(screens.filter((s) => s.nav).map((s) => s.label)).toEqual(NAMES);
     expect(screens.find((s) => s.id === "onboarding")?.nav).toBe(false);
     expect(new Set(screens.map((s) => s.path)).size).toBe(screens.length);
@@ -41,7 +41,7 @@ describe("registry and sidebar", () => {
     renderApp({ route: "/overview", initial: server });
     // Every nav screen has its milestone's content now; the loop stays as a smoke test
     // and the placeholder assertion remains for any screen that loses its content.
-    const built = ["Overview", "Projects", "Agents", "Workflows", "Execution", "Reports", "Settings"];
+    const built = ["Overview", "Chat", "Projects", "Agents", "Workflows", "Execution", "Reports", "Settings"];
     for (const name of NAMES) {
       await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: new RegExp(name) }));
       expect(await screen.findByRole("heading", { name })).toBeInTheDocument();

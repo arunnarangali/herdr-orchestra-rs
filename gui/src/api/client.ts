@@ -3,6 +3,9 @@ import type {
   ActionResponse,
   AgentsResponse,
   AnswerBody,
+  ChatBody,
+  ChatListResponse,
+  ChatMessage,
   DispatchBody,
   EscalateBody,
   EventsResponse,
@@ -114,6 +117,10 @@ export function createApiClient(options: ClientOptions) {
     models: (o?: RequestOptions) => get<ModelsResponse>("/models", o),
     logs: (q: { lines?: number; milestone?: string; agent?: string } = {}, o?: RequestOptions) =>
       get<LogsResponse>("/logs", o, q),
+
+    // -- chat with the lead (stored by the server; the event manager delivers it)
+    chat: (q: { after?: number } = {}, o?: RequestOptions) => get<ChatListResponse>("/chat", o, q),
+    sendChat: (body: ChatBody, o?: RequestOptions) => post<ChatMessage>("/chat", body, o),
 
     // -- actions (the event manager carries them out; the answer says whether it is running)
     dispatch: (body: DispatchBody, o?: RequestOptions) =>
