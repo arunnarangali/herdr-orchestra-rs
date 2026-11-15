@@ -13,6 +13,9 @@ Load the `herdr` skill for exact CLI syntax if you have it (otherwise `herdr --s
 
 Feature request = the user's message that asked you to run this playbook.
 
+## Messages from the GUI chat
+When the prompt that woke you starts `orch chat #<n>`, the developer is using the desktop GUI, not a terminal, and cannot see your pane. The engine typed their message into your pane; it is stored in the same conversation the GUI shows. So **answer the developer with `orch say "<text>"`** (add `--about Mn` when the answer concerns one milestone), not only in your pane: a reply you do not `orch say` never reaches them. Every question, every open question with its 2–3 options, and the finished plan summary (step 10) go through `orch say`. Keep each reply short and plain. A `FEATURE REQUEST` chat message carries the fields Feature, Why, Must, Must not, Already decided, Done when and Mode: they are the feature request; do not ask again for what they already state. The developer's "go" arrives as a chat message too (`the developer approved the plan from the GUI`): then run `orch lead run`. If the same `#<n>` arrives twice, handle it once.
+
 ## 1. Preflight (stop and report if any check fails)
 - `orch lead check` prints `OK`. If it fails, show the user its message (it says how to fix it), then stop. Do not test `$HERDR_ENV` yourself: some agents (Hermes) run their shell tool outside the pane's environment, so it can be empty inside a real Herdr pane.
 - Inside a git repo, and `git status --porcelain` is empty. If not, ask the user to commit or stash first.
@@ -174,4 +177,5 @@ Rules for every milestone:
   - **the team and model table**: each milestone, its tier, which coder and model it will go to, and the `Model why`;
   - the research facts that shaped the plan, and all open questions.
 - Then say: "Plan written to .orchestrate/plan.md. Edit it if you like: untick `[x]` to skip a milestone, change `Tier` / `Depends on` / `Prefer`, answer open questions under 'Notes from user' and set 'Open questions: - none'. Say **go** (or `/orch-run`, "use the orch-run skill", "Run `orch lead run` and follow it") and I will start the run: I dispatch the milestones, the event manager runs them, and I come back when one finishes, asks a question or needs a decision."
+- When the request came from the GUI chat, send that summary (the breakdown, the team table and the open questions, condensed) with `orch say` as well, and ask them to approve it from the GUI.
 - STOP and wait for the developer. Do not dispatch before they say so.

@@ -28,6 +28,15 @@ impl Token {
         Token(secret.into())
     }
 
+    /// `text` with every occurrence of the secret replaced by `[redacted]`: what is stored or
+    /// logged on a client's behalf never carries the token.
+    pub fn redact(&self, text: &str) -> String {
+        if self.0.is_empty() {
+            return text.to_string();
+        }
+        text.replace(&self.0, "[redacted]")
+    }
+
     /// Constant-time comparison with a presented value.
     pub fn matches(&self, presented: &str) -> bool {
         let (a, b) = (self.0.as_bytes(), presented.as_bytes());

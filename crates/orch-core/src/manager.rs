@@ -25,6 +25,7 @@ use crate::scheduler::{self, Assignment, Escalation, Job};
 use crate::actions::{RunControl, Source};
 use crate::store::{Counter, Delivery, DeliveryKind, Res, Store, TransitionRequest};
 use crate::task::{check_transition, Mode, State};
+use crate::chat::chat_tick;
 use crate::wake::{wake_tick, Clock, LeadRuntime, Notifier, WakeEnv, WakeTunables};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -817,8 +818,14 @@ impl<'a> Manager<'a> {
             let store = &mut *self.store;
             let say = &mut *self.say;
             let say = &mut move |m: &str| say(m, false);
-            if let Err(e) = wake_tick(store, &env, say) {
+            let woke = wake_tick(store, &env, say);
+            // the developer's chat messages reach the lead through the same pane checks
+            let chatted = chat_tick(store, &env, say);
+            if let Err(e) = woke {
                 self.log(&format!("wake tick failed: {e}"), false);
+            }
+            if let Err(e) = chatted {
+                self.log(&format!("chat delivery failed: {e}"), false);
             }
         }
 

@@ -13,6 +13,7 @@ use orch_api::routes::actions::{
     ActionResponse, AnswerBody, DispatchBody, EscalateBody, FixBody, RunControlResponse,
     SetStatusBody, TaskAfter,
 };
+use orch_api::routes::chat::{ChatBody, ChatListResponse, ChatMessageView, ChatRequest};
 use orch_api::routes::stream::{
     LeadQueueEvent, LogEvent, RunStateEvent, StreamMessage, TaskStateEvent,
 };
@@ -423,6 +424,46 @@ fn run_control() -> RunControlResponse {
     }
 }
 
+fn chat_request() -> ChatRequest {
+    ChatRequest {
+        feature: s("Dark mode"),
+        why: s("easier on the eyes at night"),
+        must: s("remember the choice"),
+        must_not: s("change the API"),
+        decided: s("CSS variables"),
+        done_when: s("the toggle works and persists"),
+        mode: s("worktree"),
+    }
+}
+
+fn chat_message() -> ChatMessageView {
+    ChatMessageView {
+        id: 3,
+        ts: s("2023-11-14T22:13:20Z"),
+        sender: s("developer"),
+        kind: s("feature_request"),
+        text: s("Feature request: Dark mode"),
+        request: Some(chat_request()),
+        about: None,
+        delivery: some("sent"),
+        delivery_note: some("typed into the lead's pane"),
+    }
+}
+
+fn chat_reply() -> ChatMessageView {
+    ChatMessageView {
+        id: 4,
+        ts: s("2023-11-14T22:14:00Z"),
+        sender: s("lead"),
+        kind: s("message"),
+        text: s("M1 is running"),
+        request: None,
+        about: some("M1"),
+        delivery: None,
+        delivery_note: None,
+    }
+}
+
 fn error_body() -> ErrorBody {
     ErrorBody {
         error: orch_api::error::ErrorDetail {
@@ -513,6 +554,8 @@ fn responses() -> Vec<(&'static str, Value)> {
         ("LogsResponse", to_value(&logs())),
         ("ActionResponse", to_value(&action())),
         ("RunControlResponse", to_value(&run_control())),
+        ("ChatMessageView", to_value(&chat_message())),
+        ("ChatListResponse", to_value(&ChatListResponse { messages: vec![chat_message(), chat_reply()] })),
         ("StreamMessage", to_value(&stream_message())),
         ("TaskStateEvent", to_value(&task_state_event())),
         ("LeadQueueEvent", to_value(&lead_event())),
@@ -547,7 +590,12 @@ fn check_requests() -> Vec<&'static str> {
         (st.status.as_str(), st.reason.as_deref()),
         ("paused", Some("waiting for the API"))
     );
+    let c: ChatBody = serde_json::from_str(&read("ChatBody")).unwrap();
+    assert_eq!(c.kind, "feature_request");
+    assert_eq!(c.text, "");
+    assert_eq!(c.request.unwrap().must_not, "change the API");
     vec![
+        "ChatBody",
         "AnswerBody",
         "DispatchBody",
         "FixBody",
@@ -651,6 +699,7 @@ fn every_documented_body_has_a_sample() {
         // of the stream's messages.
         let stream_part = [
             "ErrorBody",
+            "ChatMessageView",
             "TaskStateEvent",
             "LeadQueueEvent",
             "RunStateEvent",

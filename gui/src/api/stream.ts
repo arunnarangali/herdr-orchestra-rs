@@ -147,7 +147,7 @@ export type MessagesByEvent = {
 };
 
 function emptyMessages(): MessagesByEvent {
-  return { "task-state": [], "lead-event": [], "run-state": [], log: [] };
+  return { "task-state": [], "lead-event": [], "run-state": [], chat: [], log: [] };
 }
 
 export interface EventStream {

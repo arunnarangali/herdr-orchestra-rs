@@ -96,7 +96,7 @@ impl From<Task> for TaskAfter {
 /// The JSON body of a request, read by hand so that every problem with it (not JSON, wrong
 /// types) is the shared 400 `bad_request`, never a framework-specific status. An empty body is
 /// the type's default.
-fn body<T: serde::de::DeserializeOwned + Default>(bytes: &Bytes) -> Result<T, ApiError> {
+pub(crate) fn body<T: serde::de::DeserializeOwned + Default>(bytes: &Bytes) -> Result<T, ApiError> {
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return Ok(T::default());
     }
@@ -138,7 +138,7 @@ fn api_error(e: ActionError) -> ApiError {
 }
 
 /// Run blocking work (SQLite, files) off the async threads.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(f)
@@ -155,7 +155,7 @@ fn open(state: &AppState) -> Result<Store, ApiError> {
     }
 }
 
-fn manager_running(state: &AppState) -> bool {
+pub(crate) fn manager_running(state: &AppState) -> bool {
     driver_alive(&driver_lock_path(&state.orchestrate_dir()))
 }
 

@@ -17,7 +17,7 @@ use utoipa::ToSchema;
 pub struct StreamMessage {
     /// Monotonically increasing event ID.
     pub id: u64,
-    /// Event name: `task-state`, `lead-event`, `run-state`, or `log`.
+    /// Event name: `task-state`, `lead-event`, `run-state`, `chat`, or `log`.
     pub event: String,
     /// Event data payload (JSON object).
     pub data: serde_json::Value,
@@ -354,6 +354,7 @@ struct PollState {
     last_event_id: i64,
     last_lead_queue_id: i64,
     last_action_id: i64,
+    last_chat_seq: i64,
     last_run_control_state: Option<String>,
     last_run_control_source: Option<String>,
     events_jsonl_offset: u64,
@@ -395,6 +396,7 @@ impl PollState {
             last_event_id,
             last_lead_queue_id,
             last_action_id,
+            last_chat_seq: orch_core::chat::init_chat_poll_state(&db_path),
             last_run_control_state,
             last_run_control_source,
             events_jsonl_offset,
@@ -491,6 +493,12 @@ fn poll_once(
             read_at: row.read_at,
         };
         hub.publish("lead-event", serde_json::to_value(ev).unwrap_or_default());
+    }
+
+    // 1b. The chat: every stored message and every change of its delivery state
+    for m in orch_core::chat::poll_chat_changes(db_path, &mut state.last_chat_seq) {
+        let view = crate::routes::chat::ChatMessageView::from(m);
+        hub.publish("chat", serde_json::to_value(view).unwrap_or_default());
     }
 
     // 1c. Read run actions (audit trail) and run_control changes

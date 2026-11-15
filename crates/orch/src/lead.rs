@@ -158,9 +158,9 @@ Write `Lead: lead (<your kind>)` in the plan header, and never prompt this pane.
     fn the_playbooks_are_shipped_whole() {
         assert!(PLAYBOOK_PLAN.starts_with("You are the LEAD of a Herdr agent team"));
         assert!(PLAYBOOK_PLAN.ends_with("Do not dispatch before they say so.\n"));
-        assert_eq!(PLAYBOOK_PLAN.lines().count(), 177);
+        assert_eq!(PLAYBOOK_PLAN.lines().count(), 181);
         assert!(PLAYBOOK_RUN.starts_with("You are the LEAD, whatever agent you are"));
         assert!(PLAYBOOK_RUN.ends_with("tell the developer to run `orch autopilot` again.\n"));
-        assert_eq!(PLAYBOOK_RUN.lines().count(), 61);
+        assert_eq!(PLAYBOOK_RUN.lines().count(), 64);
     }
 }
