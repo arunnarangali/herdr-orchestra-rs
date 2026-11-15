@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection } from "../../app/connection";
+import { projectState } from "../../app/ProjectBar";
+import { useProjects } from "../../app/projects";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { ErrorPanel } from "../../ui/ResourceView";
 import { useResource } from "../../ui/useResource";
@@ -11,6 +13,7 @@ import "./projects.css";
 export function ProjectsScreen() {
   const backend = useMemo(() => getBackend(), []);
   const { connect, health, client } = useConnection();
+  const pj = useProjects();
   const [list, setList] = useState<ProjectList | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -36,6 +39,7 @@ export function ProjectsScreen() {
   const act = async (what: () => Promise<void>) => {
     setBusy(true);
     setMessage(null);
+    pj.clearNotice();
     try {
       await what();
     } catch (e) {
@@ -49,8 +53,31 @@ export function ProjectsScreen() {
     act(async () => {
       const folder = await backend?.chooseFolder();
       if (!folder || !backend) return;
+      if (pj.multi) {
+        await pj.openFolder(folder);
+        setList(await backend.listProjects());
+        return;
+      }
       setList(await backend.addProject(folder));
       setMessage({ kind: "ok", text: `Added ${folder}.` });
+    });
+  // A new project: the app makes the git repository and prepares the folder, then opens it.
+  const create = () =>
+    act(async () => {
+      const folder = await backend?.chooseFolder();
+      if (!folder || !backend) return;
+      await pj.create(folder);
+      setList(await backend.listProjects());
+    });
+  const openIt = (p: ProjectInfo) =>
+    act(async () => {
+      await pj.openListed(p.path);
+      if (backend) setList(await backend.listProjects());
+    });
+  const closeIt = (p: ProjectInfo) =>
+    act(async () => {
+      await pj.close(p.path);
+      if (backend) setList(await backend.listProjects());
     });
   const remove = (p: ProjectInfo) =>
     act(async () => {
@@ -67,7 +94,9 @@ export function ProjectsScreen() {
     });
 
   const served = health?.project ?? null;
-  const activePath = list?.active ?? (list?.projects.find((p) => p.path === served)?.path ?? null);
+  const activePath = pj.multi
+    ? pj.selected
+    : (list?.active ?? (list?.projects.find((p) => p.path === served)?.path ?? null));
 
   return (
     <section className="screen projects" aria-labelledby="screen-title">
@@ -78,13 +107,23 @@ export function ProjectsScreen() {
             Add project…
           </button>
         )}
+        {backend && pj.multi && (
+          <button type="button" className="button" onClick={() => void create()} disabled={busy}>
+            New project…
+          </button>
+        )}
       </div>
 
-      {message && (
-        <p className={message.kind === "ok" ? "pj-msg pj-msg--ok" : "pj-msg pj-msg--error"} role={message.kind === "ok" ? "status" : "alert"}>
-          {message.text}
-        </p>
-      )}
+      {(() => {
+        const shown = message ?? pj.notice;
+        return (
+          shown && (
+            <p className={shown.kind === "ok" ? "pj-msg pj-msg--ok" : "pj-msg pj-msg--error"} role={shown.kind === "ok" ? "status" : "alert"}>
+              {shown.text}
+            </p>
+          )
+        );
+      })()}
 
       {!backend && (
         <div className="panel" role="status">
@@ -123,7 +162,9 @@ export function ProjectsScreen() {
       {list && list.projects.length === 0 && (
         <div className="panel" role="status">
           <p className="panel-title">No projects yet</p>
-          <p className="muted">Choose “Add project…” and pick a folder that contains a git repository.</p>
+          <p className="muted">
+            Choose “Add project…” and pick a folder that contains a git repository{pj.multi ? ", or “New project…” to start one in an empty or new folder" : ""}.
+          </p>
         </div>
       )}
 
@@ -136,6 +177,20 @@ export function ProjectsScreen() {
                 active={p.path === activePath}
                 busy={busy}
                 run={p.path === activePath ? { status: status.data, statusError: status.error, report: report.data } : null}
+                controls={
+                  pj.multi
+                    ? (() => {
+                        const o = pj.projects.find((x) => x.path === p.path);
+                        return {
+                          open: o !== undefined,
+                          state: o ? projectState(o, pj.runtimes[o.path]) : null,
+                          onOpen: () => void openIt(p),
+                          onShow: () => pj.select(p.path),
+                          onClose: () => void closeIt(p),
+                        };
+                      })()
+                    : undefined
+                }
                 onSwitch={() => void switchTo(p)}
                 onRemove={() => setRemoving(p)}
               />

@@ -298,10 +298,17 @@ describe("Desktop notifications", () => {
   it("respects desktop notifications setting being off", async () => {
     const fakeBackend: AppBackend = {
       chooseFolder: async () => null,
-      listProjects: async () => ({ projects: [], active: null, warning: null }),
-      addProject: async () => ({ projects: [], active: null, warning: null }),
-      removeProject: async () => ({ projects: [], active: null, warning: null }),
+      listProjects: async () => ({ projects: [], active: null, open: [], warning: null }),
+      addProject: async () => ({ projects: [], active: null, open: [], warning: null }),
+      removeProject: async () => ({ projects: [], active: null, open: [], warning: null }),
       switchProject: async () => ({ url: "", token: "" }),
+      openProject: async () => ({ url: "", token: "" }),
+      retryProject: async () => ({ url: "", token: "" }),
+      closeProject: async () => ({ projects: [], active: null, open: [], warning: null }),
+      restoreProjects: async () => [],
+      createProject: async () => {
+        throw new Error("x");
+      },
       getSettings: async () => ({
         value: { theme: "system", notifications: false, orch_path: "" },
         warning: null,
@@ -329,10 +336,17 @@ describe("Desktop notifications", () => {
   it("sends notification when desktop notification setting is on", async () => {
     const fakeBackend: AppBackend = {
       chooseFolder: async () => null,
-      listProjects: async () => ({ projects: [], active: null, warning: null }),
-      addProject: async () => ({ projects: [], active: null, warning: null }),
-      removeProject: async () => ({ projects: [], active: null, warning: null }),
+      listProjects: async () => ({ projects: [], active: null, open: [], warning: null }),
+      addProject: async () => ({ projects: [], active: null, open: [], warning: null }),
+      removeProject: async () => ({ projects: [], active: null, open: [], warning: null }),
       switchProject: async () => ({ url: "", token: "" }),
+      openProject: async () => ({ url: "", token: "" }),
+      retryProject: async () => ({ url: "", token: "" }),
+      closeProject: async () => ({ projects: [], active: null, open: [], warning: null }),
+      restoreProjects: async () => [],
+      createProject: async () => {
+        throw new Error("x");
+      },
       getSettings: async () => ({
         value: { theme: "system", notifications: true, orch_path: "" },
         warning: null,

@@ -9,6 +9,16 @@ export interface RunInfo {
   report: ReportResponse | null;
 }
 
+/** What the card offers when several projects can be open at once. */
+export interface OpenControls {
+  open: boolean;
+  /** Where its run stands, from the background watcher (any open project, not only the shown one). */
+  state: { text: string; tone: string } | null;
+  onOpen: () => void;
+  onShow: () => void;
+  onClose: () => void;
+}
+
 export interface ProjectCardProps {
   project: ProjectInfo;
   active: boolean;
@@ -17,6 +27,8 @@ export interface ProjectCardProps {
   run: RunInfo | null;
   onSwitch: () => void;
   onRemove: () => void;
+  /** Set in the desktop app: open, show and close instead of switch. */
+  controls?: OpenControls;
 }
 
 function runLine(project: ProjectInfo, run: RunInfo | null) {
@@ -33,13 +45,14 @@ function runLine(project: ProjectInfo, run: RunInfo | null) {
 }
 
 /** One project: path, branch, base, run state and the history of earlier runs. */
-export function ProjectCard({ project, active, busy, run, onSwitch, onRemove }: ProjectCardProps) {
+export function ProjectCard({ project, active, busy, run, onSwitch, onRemove, controls }: ProjectCardProps) {
   const missing = !project.exists;
   return (
     <article className={active ? "panel project project--active" : "panel project"} aria-label={project.name}>
       <header className="project-head">
         <h2 className="panel-title">{project.name}</h2>
-        {active && <span className="badge badge--info">Active</span>}
+        {active && <span className="badge badge--info">{controls ? "On screen" : "Active"}</span>}
+        {controls?.open && !active && <span className="badge badge--neutral">Open</span>}
         {missing && <span className="badge badge--danger">Folder not found</span>}
         {project.exists && !project.is_git && <span className="badge badge--warning">Not a git repository</span>}
       </header>
@@ -60,7 +73,15 @@ export function ProjectCard({ project, active, busy, run, onSwitch, onRemove }: 
         </div>
         <div>
           <dt>Run state</dt>
-          <dd>{runLine(project, run)}</dd>
+          <dd>
+            {run || !controls ? (
+              runLine(project, run)
+            ) : controls.state ? (
+              <span className={`badge badge--${controls.state.tone}`}>{controls.state.text}</span>
+            ) : (
+              <span className="muted">Open this project to see its run.</span>
+            )}
+          </dd>
         </div>
         {run?.report && (
           <div>
@@ -90,16 +111,36 @@ export function ProjectCard({ project, active, busy, run, onSwitch, onRemove }: 
       )}
 
       <div className="pj-actions">
-        {!active && (
-          <button type="button" className="button button--primary" disabled={busy || missing} onClick={onSwitch}>
-            Switch to this project
-          </button>
+        {controls ? (
+          <>
+            {!controls.open && (
+              <button type="button" className="button button--primary" disabled={busy || missing} onClick={controls.onOpen}>
+                Open project
+              </button>
+            )}
+            {controls.open && !active && (
+              <button type="button" className="button button--primary" disabled={busy} onClick={controls.onShow}>
+                Show this project
+              </button>
+            )}
+            {controls.open && (
+              <button type="button" className="button" disabled={busy} onClick={controls.onClose} aria-label={`Close ${project.name}`}>
+                Close project
+              </button>
+            )}
+          </>
+        ) : (
+          !active && (
+            <button type="button" className="button button--primary" disabled={busy || missing} onClick={onSwitch}>
+              Switch to this project
+            </button>
+          )
         )}
         <button type="button" className="button" disabled={busy} onClick={onRemove} aria-label={`Remove ${project.name} from the list`}>
           Remove from list
         </button>
       </div>
-      {missing && !active && <p className="muted">Switching is disabled: the folder is not there.</p>}
+      {missing && !active && <p className="muted">{controls ? "Opening" : "Switching"} is disabled: the folder is not there.</p>}
     </article>
   );
 }

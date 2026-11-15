@@ -6,12 +6,13 @@
 
 mod app_commands;
 mod app_settings;
+mod create;
 mod projects;
 mod serve;
 mod server;
 mod store;
 
-use server::{Connection, ServerState};
+use server::{Connection, Servers};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -30,25 +31,37 @@ async fn choose_project_folder(app: AppHandle) -> Result<Option<String>, String>
     .map_err(|e| e.to_string())?
 }
 
-/// Start `orch serve` in `project` and return its address and token.
+/// Start `orch serve` in `project` (or return the one already running for it) and return its
+/// address and token.
 #[tauri::command]
 async fn start_server(app: AppHandle, project: String) -> Result<Connection, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<ServerState>().start(&PathBuf::from(project))
+        app.state::<Servers>().start(&PathBuf::from(project))
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
+/// Stop the server of `project`; with no project, every server.
 #[tauri::command]
-fn stop_server(state: State<'_, ServerState>) {
-    state.stop();
+fn stop_server(state: State<'_, Servers>, project: Option<String>) {
+    match project {
+        Some(p) => state.stop(&PathBuf::from(p)),
+        None => state.stop_all(),
+    }
 }
 
-/// The running server's address and token, or `None`.
+/// The running server's address and token for `project`; with no project, the first running
+/// server (what a reloaded window picks up). `None` when there is none.
 #[tauri::command]
-fn get_connection(state: State<'_, ServerState>) -> Option<Connection> {
-    state.current()
+fn get_connection(state: State<'_, Servers>, project: Option<String>) -> Option<Connection> {
+    match project {
+        Some(p) => state.current(&PathBuf::from(p)),
+        None => state
+            .open_paths()
+            .first()
+            .and_then(|p| state.current(&PathBuf::from(p))),
+    }
 }
 
 /// Path of the `orch` binary (`ORCH_BIN`, else the PATH), or why it was not found.
@@ -66,7 +79,7 @@ fn find_herdr() -> Result<String, String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(ServerState::default())
+        .manage(Servers::default())
         .invoke_handler(tauri::generate_handler![
             choose_project_folder,
             start_server,
@@ -78,20 +91,25 @@ fn main() {
             app_commands::add_project,
             app_commands::remove_project,
             app_commands::switch_project,
+            app_commands::open_project,
+            app_commands::retry_project,
+            app_commands::close_project,
+            app_commands::restore_projects,
+            app_commands::create_project,
             app_commands::get_app_settings,
             app_commands::save_app_settings
         ])
         .on_window_event(|window, event| {
-            // Closing the window ends the server it started.
+            // Closing the window ends every server the app started.
             if let WindowEvent::Destroyed = event {
-                window.app_handle().state::<ServerState>().stop();
+                window.app_handle().state::<Servers>().stop_all();
             }
         })
         .build(tauri::generate_context!())
         .expect("cannot build the desktop shell")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                app.state::<ServerState>().stop();
+                app.state::<Servers>().stop_all();
             }
         });
 }

@@ -12,6 +12,7 @@ import { createApiClient, normalizeUrl, type ApiClient, type Credentials } from 
 import { isApiError } from "../api/errors";
 import { useEventStream, type EventStream } from "../api/stream";
 import type { Health } from "../api/types";
+import { ProjectsProvider } from "./projects";
 import { detectShell, type Shell } from "./shell";
 
 /**
@@ -66,6 +67,10 @@ export interface ConnectionProviderProps {
   retryDelaysMs?: readonly number[];
   /** How often to ask again while not connected; default 3000. */
   pollMs?: number;
+  /** Pick up a server the shell already started (a reloaded window); off when projects are managed. */
+  pickup?: boolean;
+  /** The project this connection is for: `disconnect` stops only that project's server. */
+  projectPath?: string;
 }
 
 /**
@@ -73,13 +78,15 @@ export interface ConnectionProviderProps {
  * health check and the live stream. Screens read them through `useConnection`, `useApi` and
  * `useStream`; none opens its own.
  */
-export function ConnectionProvider({
+function SingleConnection({
   children,
   shell: shellProp,
   initial,
   fetch: fetchImpl,
   retryDelaysMs,
   pollMs = 3000,
+  pickup = true,
+  projectPath,
 }: ConnectionProviderProps) {
   const shell = useMemo(() => (shellProp === undefined ? detectShell() : shellProp), [shellProp]);
   const [credentials, setCredentials] = useState<Credentials | null>(initial ?? null);
@@ -89,7 +96,7 @@ export function ConnectionProvider({
 
   // A server the shell already started (the window was reloaded): pick it up.
   useEffect(() => {
-    if (!shell || initial) return;
+    if (!shell || initial || !pickup) return;
     let cancelled = false;
     shell
       .getConnection()
@@ -100,7 +107,7 @@ export function ConnectionProvider({
     return () => {
       cancelled = true;
     };
-  }, [shell, initial]);
+  }, [shell, initial, pickup]);
 
   const client = useMemo(
     () => (credentials ? createApiClient({ ...credentials, fetch: fetchImpl }) : null),
@@ -171,8 +178,8 @@ export function ConnectionProvider({
   }, []);
   const disconnect = useCallback(() => {
     setCredentials(null);
-    void shell?.stopServer().catch(() => {});
-  }, [shell]);
+    void shell?.stopServer(projectPath).catch(() => {});
+  }, [shell, projectPath]);
   const recheck = useCallback(() => setTick((t) => t + 1), []);
 
   const value = useMemo<Connection>(
@@ -180,6 +187,35 @@ export function ConnectionProvider({
     [kind, credentials, client, health, stream, shell, connect, disconnect, recheck],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/**
+ * The connection of the app. With one server (a browser, or fixed credentials) it is that
+ * server's. In the desktop app with several open projects it is the connection of the project
+ * on screen, rebuilt from nothing (new client, new health check, new stream) whenever another
+ * project is selected or that project's server restarts: nothing of one project's connection
+ * can outlive the switch.
+ */
+export function ConnectionProvider(props: ConnectionProviderProps) {
+  const { children, ...rest } = props;
+  return (
+    <ProjectsProvider initial={props.initial} fetch={props.fetch} retryDelaysMs={props.retryDelaysMs} pollMs={props.pollMs}>
+      {({ projectKey, credentials, projectPath }) => {
+        const multi = projectPath !== undefined || projectKey !== "single";
+        return (
+          <SingleConnection
+            key={projectKey}
+            {...rest}
+            initial={multi ? credentials : props.initial}
+            pickup={!multi}
+            projectPath={projectPath}
+          >
+            {children}
+          </SingleConnection>
+        );
+      }}
+    </ProjectsProvider>
+  );
 }
 
 export function useConnection(): Connection {

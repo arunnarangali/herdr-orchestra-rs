@@ -10,10 +10,17 @@ const settings = (o: Partial<AppSettings> = {}): AppSettings => ({ theme: "syste
 function backend(o: Partial<AppBackend> = {}): AppBackend {
   return {
     chooseFolder: async () => null,
-    listProjects: async () => ({ projects: [], active: null, warning: null }),
-    addProject: async () => ({ projects: [], active: null, warning: null }),
-    removeProject: async () => ({ projects: [], active: null, warning: null }),
+    listProjects: async () => ({ projects: [], active: null, open: [], warning: null }),
+    addProject: async () => ({ projects: [], active: null, open: [], warning: null }),
+    removeProject: async () => ({ projects: [], active: null, open: [], warning: null }),
     switchProject: async () => {
+      throw new Error("x");
+    },
+    openProject: async () => ({ url: "", token: "" }),
+    retryProject: async () => ({ url: "", token: "" }),
+    closeProject: async () => ({ projects: [], active: null, open: [], warning: null }),
+    restoreProjects: async () => [],
+    createProject: async () => {
       throw new Error("x");
     },
     getSettings: async () => ({ value: settings(), warning: null }),

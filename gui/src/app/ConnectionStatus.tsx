@@ -1,4 +1,5 @@
 import { useConnection, type ConnectionKind } from "./connection";
+import { useProjects } from "./projects";
 
 const LABEL: Record<ConnectionKind, string> = {
   unconfigured: "Not connected",
@@ -56,6 +57,7 @@ export function ConnectionPill() {
 /** Explains a problem with the connection under the top bar. */
 export function ConnectionBanner() {
   const { kind, credentials, recheck, disconnect } = useConnection();
+  const { multi, selected, retry } = useProjects();
   const info = advice(kind, credentials?.url ?? null);
   if (!info || kind === "unconfigured") return null;
   return (
@@ -67,9 +69,15 @@ export function ConnectionBanner() {
         <button type="button" className="button" onClick={recheck}>
           Check again
         </button>
-        <button type="button" className="button" onClick={disconnect}>
-          Change connection
-        </button>
+        {multi && selected ? (
+          <button type="button" className="button" onClick={() => void retry(selected)}>
+            Restart this project's server
+          </button>
+        ) : (
+          <button type="button" className="button" onClick={disconnect}>
+            Change connection
+          </button>
+        )}
       </div>
     </div>
   );

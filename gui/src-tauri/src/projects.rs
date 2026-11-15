@@ -7,12 +7,14 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 const FILE: &str = "projects.txt";
-const KEYS: &[&str] = &["project", "active"];
+const KEYS: &[&str] = &["project", "active", "open"];
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct ProjectFile {
     pub projects: Vec<String>,
     pub active: Option<String>,
+    /// The projects that were open (each with its own server) when the app last ran, in order.
+    pub open: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -43,6 +45,7 @@ pub struct ProjectInfo {
 pub struct ProjectList {
     pub projects: Vec<ProjectInfo>,
     pub active: Option<String>,
+    pub open: Vec<String>,
     pub warning: Option<String>,
 }
 
@@ -66,6 +69,7 @@ impl ProjectStore {
             match k.as_str() {
                 "project" if !out.projects.contains(&v) => out.projects.push(v),
                 "active" => out.active = Some(v),
+                "open" if !out.open.contains(&v) => out.open.push(v),
                 _ => {}
             }
         }
@@ -77,6 +81,9 @@ impl ProjectStore {
         {
             out.active = None;
         }
+        // Only listed projects can be open.
+        let listed = out.projects.clone();
+        out.open.retain(|o| listed.contains(o));
         Loaded {
             value: out,
             warning,
@@ -89,6 +96,7 @@ impl ProjectStore {
         if let Some(a) = &f.active {
             entries.push(("active", a));
         }
+        entries.extend(f.open.iter().map(|o| ("open", o.as_str())));
         store::write_atomic(&self.file(), &store::render(&entries))
     }
 
@@ -120,6 +128,7 @@ impl ProjectStore {
     pub fn remove(&self, path: &str) -> Result<ProjectFile, String> {
         let mut f = self.load().value;
         f.projects.retain(|p| p != path);
+        f.open.retain(|p| p != path);
         if f.active.as_deref() == Some(path) {
             f.active = None;
         }
@@ -143,6 +152,24 @@ impl ProjectStore {
         Ok(f)
     }
 
+    /// Remember that `path` is open (or no longer). It must be in the list; the order of the
+    /// open projects is the order they were opened in.
+    pub fn set_open(&self, path: &str, open: bool) -> Result<ProjectFile, String> {
+        let mut f = self.load().value;
+        if open {
+            if !f.projects.iter().any(|p| p == path) {
+                return Err(format!("{path} is not in the project list"));
+            }
+            if !f.open.iter().any(|p| p == path) {
+                f.open.push(path.to_string());
+            }
+        } else {
+            f.open.retain(|p| p != path);
+        }
+        self.save(&f)?;
+        Ok(f)
+    }
+
     pub fn list(&self) -> ProjectList {
         let Loaded { value, warning } = self.load();
         ProjectList {
@@ -152,6 +179,7 @@ impl ProjectStore {
                 .map(|p| inspect(Path::new(p)))
                 .collect(),
             active: value.active,
+            open: value.open,
             warning,
         }
     }
@@ -362,6 +390,40 @@ mod tests {
             (l.value.projects, l.value.active),
             (vec!["/a".to_string()], None)
         );
+    }
+
+    #[test]
+    fn the_open_projects_are_remembered_in_order_and_forgotten_with_the_project() {
+        let s = store("open");
+        let (a, b, c) = (repo("op-a", "main"), repo("op-b", "main"), repo("op-c", "main"));
+        for r in [&a, &b, &c] {
+            s.add(r.to_str().unwrap()).unwrap();
+        }
+        s.set_open(b.to_str().unwrap(), true).unwrap();
+        s.set_open(a.to_str().unwrap(), true).unwrap();
+        s.set_open(b.to_str().unwrap(), true).unwrap(); // twice is fine
+        let reloaded = ProjectStore::new(s.dir.clone()).list();
+        assert_eq!(
+            reloaded.open,
+            vec![b.display().to_string(), a.display().to_string()]
+        );
+        s.set_open(b.to_str().unwrap(), false).unwrap();
+        assert_eq!(s.list().open, vec![a.display().to_string()]);
+        s.remove(a.to_str().unwrap()).unwrap();
+        assert!(s.list().open.is_empty(), "a removed project is no longer open");
+        assert!(s.set_open("/not/listed", true).is_err());
+    }
+
+    #[test]
+    fn a_stray_open_entry_is_dropped_on_load() {
+        let s = store("stray-open");
+        std::fs::create_dir_all(&s.dir).unwrap();
+        std::fs::write(
+            s.file(),
+            format!("{}\nproject=/a\nopen=/a\nopen=/gone\n", store::HEADER),
+        )
+        .unwrap();
+        assert_eq!(s.load().value.open, vec!["/a".to_string()]);
     }
 
     #[test]
