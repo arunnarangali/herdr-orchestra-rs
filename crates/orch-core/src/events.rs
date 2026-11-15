@@ -395,3 +395,136 @@ pub fn latest_delivery(
         .ok()
         .flatten()
 }
+
+/// One recorded task state transition event read from the database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskEventRecord {
+    pub id: i64,
+    pub ts: i64,
+    pub task: String,
+    pub from: String,
+    pub to: String,
+    pub why: String,
+    pub agent: Option<String>,
+    pub model: Option<String>,
+    pub attempt: u32,
+    pub forced: bool,
+}
+
+/// One lead queue record read from the database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeadQueueRecord {
+    pub id: i64,
+    pub ts: i64,
+    pub kind: String,
+    pub task: Option<String>,
+    pub text: String,
+    pub read_at: Option<i64>,
+}
+
+/// Initialise max event id and max lead queue id from `state.db`.
+pub fn init_db_poll_state(db_path: &std::path::Path) -> (i64, i64) {
+    if !db_path.exists() {
+        return (0, 0);
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else {
+        return (0, 0);
+    };
+    let last_event: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM events", [], |r| r.get(0))
+        .unwrap_or(0);
+    let last_queue: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM lead_queue", [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(0);
+    (last_event, last_queue)
+}
+
+/// Poll newly added events from `state.db` (read-only mode).
+pub fn poll_db_events(db_path: &std::path::Path, last_id: &mut i64) -> Vec<TaskEventRecord> {
+    if !db_path.exists() {
+        return Vec::new();
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else {
+        return Vec::new();
+    };
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(200));
+
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, ts, task_id, from_state, to_state, why, agent, model, attempt, forced
+         FROM events WHERE id > ?1 ORDER BY id",
+    ) else {
+        return Vec::new();
+    };
+
+    let rows = stmt.query_map([*last_id], |r| {
+        Ok(TaskEventRecord {
+            id: r.get(0)?,
+            ts: r.get(1)?,
+            task: r.get(2)?,
+            from: r.get(3)?,
+            to: r.get(4)?,
+            why: r.get(5)?,
+            agent: r.get(6)?,
+            model: r.get(7)?,
+            attempt: r.get(8)?,
+            forced: r.get(9)?,
+        })
+    });
+
+    let mut out = Vec::new();
+    if let Ok(rows) = rows {
+        for row in rows.flatten() {
+            if row.id > *last_id {
+                *last_id = row.id;
+            }
+            out.push(row);
+        }
+    }
+    out
+}
+
+/// Poll newly added lead queue entries from `state.db` (read-only mode).
+pub fn poll_lead_queue_events(
+    db_path: &std::path::Path,
+    last_id: &mut i64,
+) -> Vec<LeadQueueRecord> {
+    if !db_path.exists() {
+        return Vec::new();
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else {
+        return Vec::new();
+    };
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(200));
+
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, ts, kind, task_id, text, read_at
+         FROM lead_queue WHERE id > ?1 ORDER BY id",
+    ) else {
+        return Vec::new();
+    };
+
+    let rows = stmt.query_map([*last_id], |r| {
+        Ok(LeadQueueRecord {
+            id: r.get(0)?,
+            ts: r.get(1)?,
+            kind: r.get(2)?,
+            task: r.get(3)?,
+            text: r.get(4)?,
+            read_at: r.get(5)?,
+        })
+    });
+
+    let mut out = Vec::new();
+    if let Ok(rows) = rows {
+        for row in rows.flatten() {
+            if row.id > *last_id {
+                *last_id = row.id;
+            }
+            out.push(row);
+        }
+    }
+    out
+}
+

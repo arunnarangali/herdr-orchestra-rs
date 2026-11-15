@@ -394,8 +394,12 @@ async fn openapi_lists_every_registered_route() {
     assert!(doc["components"]["schemas"]["ErrorBody"].is_object());
     assert!(doc["components"]["schemas"]["Health"].is_object());
     assert!(doc["components"]["securitySchemes"]["bearer"].is_object());
-    // Every documented route is actually served (not a 404 route-not-found).
-    for route in api.routes.iter().filter(|r| !r.path.contains('{')) {
+    // Every documented non-stream route is actually served (not a 404 route-not-found).
+    for route in api
+        .routes
+        .iter()
+        .filter(|r| !r.path.contains('{') && r.path != "/api/v1/stream")
+    {
         let resp = get_auth(srv.addr, &route.path).await;
         let unrouted = resp.status == 404 && resp.json()["error"]["code"] == "not_found";
         assert!(!unrouted, "{} is documented but not served", route.path);
