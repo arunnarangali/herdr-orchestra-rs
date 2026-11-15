@@ -13,9 +13,11 @@ path = "src/main.rs"
 orch-core.workspace = true
 orch-config.workspace = true
 orch-herdr.workspace = true
+orch-api.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

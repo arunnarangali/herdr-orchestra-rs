@@ -2,7 +2,7 @@
 
 use crate::{
     autopilot, dispatch_cmds, doctor, events_cmd, finish_cmd, git_cmds, listing, merge_cmds,
-    plan_cmds, review_cmds, send_cmds, task_cmds, team,
+    plan_cmds, review_cmds, send_cmds, serve_cmd, task_cmds, team,
 };
 use orch_config::tunables::Tunables;
 use orch_herdr::RuntimeAdapter;
@@ -45,6 +45,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "approve",
     "report",
     "events",
+    "serve",
     "dispatch",
     "retry",
     "answer",
@@ -81,6 +82,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("report", _) => plan_cmds::report(&args[1..]),
         ("write-task", _) => task_cmds::write_task(&args[1..]),
         ("events", _) => events_cmd::events(&args[1..]),
+        ("serve", _) => Some(serve_cmd::serve(&args[1..])),
         ("dispatch" | "retry", _) => Some(dispatch_cmds::dispatch(&args[1..])),
         ("answer", _) => Some(dispatch_cmds::answer(&args[1..])),
         ("fix", _) => Some(dispatch_cmds::fix(&args[1..])),
@@ -207,6 +209,10 @@ pub const HELP: &[(&str, &str)] = &[
     (
         "events [--peek]",
         "(lead) what you were woken for; reading acknowledges it",
+    ),
+    (
+        "serve [--host <addr>] [--port <n>]",
+        "the local REST API on loopback, behind the install's token",
     ),
     (
         "dispatch <Mn>... [--to <worker>] [--tier <tier>]",
@@ -398,6 +404,7 @@ mod tests {
             "approve",
             "report",
             "events",
+            "serve",
             "dispatch",
             "retry",
             "answer",

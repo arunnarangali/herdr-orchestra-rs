@@ -40,6 +40,7 @@ const NAMES: &[&str] = &[
     "approve",
     "report",
     "events",
+    "serve",
     "dispatch",
     "answer",
     "escalate",
@@ -92,7 +93,7 @@ fn every_command_is_accepted_and_not_implemented() {
     // milestone (tests/autopilot_cmd.rs). `start`, `prepare`, `setup-done`, `park` and `cleanup`
     // are real (tests/git_cmds.rs). `commit` and `merge` are real too (tests/merge_cmds.rs).
     // `send-job`, `handoff` and `needs-fix` are real (tests/send_cmds.rs); `review`, `review-ok`
-    // and `requeue-review` too (tests/review_cmds.rs).
+    // and `requeue-review` too (tests/review_cmds.rs). `serve` is real (tests/serve_cmd.rs).
     for n in NAMES.iter().filter(|n| {
         ![
             "agents",
@@ -105,6 +106,7 @@ fn every_command_is_accepted_and_not_implemented() {
             "set",
             "write-task",
             "events",
+            "serve",
             "autopilot",
             "dispatch",
             "answer",
