@@ -1,11 +1,10 @@
 //! `orch status` and `orch set`: read and override the run `orch sync` stored. Both read only
 //! the SQLite store (no git, no herdr).
 
-use orch_config::launch::repr;
+use orch_core::actions::{self, Source};
 use orch_core::paths;
 use orch_core::run_store::Run;
 use orch_core::store::{DB_FILE, Store};
-use orch_core::task::State;
 use orch_core::view;
 use std::io::Write;
 use std::path::Path;
@@ -54,6 +53,12 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
     );
     if let Some(b) = &v.broken {
         let _ = writeln!(out, "  {}", orch_core::integration::status_line(&s.branch, &b.reason));
+    }
+    match store.run_control() {
+        Ok(c) if c != actions::RunControl::Running => {
+            let _ = writeln!(out, "  run: {} — {}", c.as_str(), crate::run_ctl_cmds::explain(c));
+        }
+        _ => {}
     }
     for w in &v.workers {
         let model = w.model.as_ref().map_or(String::new(), |m| {
@@ -162,49 +167,20 @@ pub fn run_set(start: &Path, args: &[String], out: &mut dyn Write) -> i32 {
         return die("usage: orch set <Mn> <status> [reason] [--force]");
     }
     let (tid, status) = (args[0].as_str(), args[1].as_str());
-    let mut reason = args[2..]
+    let reason = args[2..]
         .iter()
         .map(|s| s.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    let Ok(to) = status.parse::<State>() else {
-        let mut all: Vec<&str> = State::ALL.iter().map(|s| s.as_str()).collect();
-        all.sort_unstable();
-        return die(format!(
-            "unknown status {} — one of {}",
-            repr(status),
-            all.join(", ")
-        ));
+    let to = match actions::manual_status(status, force) {
+        Ok(to) => to,
+        Err(e) => return die(e),
     };
-    if !State::MANUAL_OK.contains(&to) && !force {
-        let mut ok: Vec<&str> = State::MANUAL_OK.iter().map(|s| s.as_str()).collect();
-        ok.sort_unstable();
-        return die(format!(
-            "`orch set` only moves a task to {}; setting {} by hand skips the steps that make it true — add --force if you really mean it",
-            ok.join(", "),
-            repr(status)
-        ));
-    }
-    let (mut store, run) = match open_run(start) {
+    let (mut store, _run) = match open_run(start) {
         Ok(x) => x,
         Err(e) => return die(e),
     };
-    if !run.plan.iter().any(|p| p.id == tid) {
-        let known: Vec<&str> = run.plan.iter().map(|p| p.id.as_str()).collect();
-        return die(format!(
-            "unknown task {} — known: {}",
-            repr(tid),
-            if known.is_empty() {
-                "none".to_string()
-            } else {
-                known.join(", ")
-            }
-        ));
-    }
-    if force {
-        reason = format!("manual override: {reason}").trim().to_string();
-    }
-    match store.manual_set(tid, to, &reason, force) {
+    match actions::set_status(&mut store, tid, to, &reason, force, Source::Cli) {
         Ok(_) => {
             let _ = writeln!(out, "OK");
             0

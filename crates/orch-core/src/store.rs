@@ -27,6 +27,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (6, include_str!("../migrations/0006_setup_fingerprints.sql")),
     (7, include_str!("../migrations/0007_merge_journal.sql")),
     (8, include_str!("../migrations/0008_integration_broken.sql")),
+    (9, include_str!("../migrations/0009_run_control.sql")),
 ];
 
 /// The schema version this build writes: the last migration in the list (the list stays
@@ -1006,7 +1007,7 @@ mod tests {
         }
         let mut s = Store::open(&path).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 8);
+        assert_eq!(SCHEMA_VERSION, 9);
         add(&mut s, "M1", &[]);
         let id = s
             .record_delivery("claude-1", "M1", 1, DeliveryKind::Coder, "go")

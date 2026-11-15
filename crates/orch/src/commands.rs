@@ -2,7 +2,7 @@
 
 use crate::{
     autopilot, dispatch_cmds, doctor, events_cmd, finish_cmd, git_cmds, listing, merge_cmds,
-    plan_cmds, review_cmds, send_cmds, serve_cmd, task_cmds, team,
+    plan_cmds, review_cmds, run_ctl_cmds, send_cmds, serve_cmd, task_cmds, team,
 };
 use orch_config::tunables::Tunables;
 use orch_herdr::RuntimeAdapter;
@@ -46,6 +46,9 @@ pub const COMMAND_NAMES: &[&str] = &[
     "report",
     "events",
     "serve",
+    "pause",
+    "resume",
+    "stop",
     "dispatch",
     "retry",
     "answer",
@@ -82,6 +85,9 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("report", _) => plan_cmds::report(&args[1..]),
         ("write-task", _) => task_cmds::write_task(&args[1..]),
         ("events", _) => events_cmd::events(&args[1..]),
+        ("pause", _) => Some(run_ctl_cmds::pause(&args[1..])),
+        ("resume", _) => Some(run_ctl_cmds::resume(&args[1..])),
+        ("stop", _) => Some(run_ctl_cmds::stop(&args[1..])),
         ("serve", _) => Some(serve_cmd::serve(&args[1..])),
         ("dispatch" | "retry", _) => Some(dispatch_cmds::dispatch(&args[1..])),
         ("answer", _) => Some(dispatch_cmds::answer(&args[1..])),
@@ -213,6 +219,18 @@ pub const HELP: &[(&str, &str)] = &[
     (
         "serve [--host <addr>] [--port <n>]",
         "the local REST API on loopback, behind the install's token",
+    ),
+    (
+        "pause",
+        "(developer) the event manager starts no new work; running milestones finish their step",
+    ),
+    (
+        "resume",
+        "(developer) carry on after `orch pause`",
+    ),
+    (
+        "stop",
+        "(developer) save each running coder's work and end the event manager",
     ),
     (
         "dispatch <Mn>... [--to <worker>] [--tier <tier>]",
@@ -405,6 +423,9 @@ mod tests {
             "report",
             "events",
             "serve",
+            "pause",
+            "resume",
+            "stop",
             "dispatch",
             "retry",
             "answer",
