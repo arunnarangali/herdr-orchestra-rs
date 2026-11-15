@@ -15,6 +15,8 @@ pub struct Created {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    #[cfg(test)]
+    let _spawning = crate::server::SPAWN.lock().unwrap_or_else(|e| e.into_inner());
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)

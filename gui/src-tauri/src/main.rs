@@ -25,7 +25,8 @@ async fn choose_project_folder(app: AppHandle) -> Result<Option<String>, String>
             return Ok(None);
         };
         let path = folder.into_path().map_err(|e| e.to_string())?;
-        Ok(Some(path.display().to_string()))
+        // the page only ever sees the one spelling the project list stores
+        Ok(Some(projects::canonical(&path.display().to_string())))
     })
     .await
     .map_err(|e| e.to_string())?
