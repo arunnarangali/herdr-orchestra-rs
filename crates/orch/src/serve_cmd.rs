@@ -73,16 +73,28 @@ fn project_root() -> Result<PathBuf, String> {
     Ok(paths::main_root(&cwd).unwrap_or(cwd))
 }
 
+/// Resolves on the first SIGTERM or SIGINT. The handlers stay installed afterwards: a second
+/// signal while the server is closing its streams and finishing requests ends the process at
+/// once instead of being swallowed.
 async fn wait_for_stop() {
     use tokio::signal::unix::{SignalKind, signal};
     let term = signal(SignalKind::terminate());
     let int = signal(SignalKind::interrupt());
     match (term, int) {
         (Ok(mut term), Ok(mut int)) => {
-            tokio::select! {
-                _ = term.recv() => {}
-                _ = int.recv() => {}
-            }
+            let which = tokio::select! {
+                _ = term.recv() => "SIGTERM",
+                _ = int.recv() => "SIGINT",
+            };
+            println!("orch serve: {which} received — closing streams and stopping (send it again to exit now)");
+            tokio::spawn(async move {
+                tokio::select! {
+                    _ = term.recv() => {}
+                    _ = int.recv() => {}
+                }
+                eprintln!("orch serve: second signal — exiting now");
+                std::process::exit(130);
+            });
         }
         // Without signal handlers the only stop is the default (kill), so wait forever.
         _ => std::future::pending::<()>().await,

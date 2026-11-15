@@ -14,7 +14,9 @@
 use crate::events_cmd::HerdrLead;
 use crate::run_work::RunWork;
 use orch_config::tunables::Tunables;
-use orch_core::events::{AgentState, HerdrPoll, PollTunables, RuntimeView};
+use orch_core::events::{
+    AgentState, HerdrPoll, PollOutcome, PollSource, PollTunables, RuntimeView,
+};
 use orch_core::lease::{driver_lock_path, hhmmss, take_lease};
 use orch_core::manager::{
     Deliveries, DeliveryOutcome, LoopTunables, Manager, NewDelivery, Recovered,
@@ -30,6 +32,8 @@ use orch_herdr::status::AgentStatus;
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type DeliveryRes<T> = std::result::Result<T, StoreError>;
@@ -62,10 +66,15 @@ pub fn run(args: &[String]) -> i32 {
     };
     // AC1: the single driver. A second `orch autopilot` refuses with the holder line;
     // dropping the lease (or dying) frees the run.
-    let _lease = match take_lease(&driver_lock_path(&orch)) {
+    let lease = match take_lease(&driver_lock_path(&orch)) {
         Ok(l) => l,
         Err(e) => return fail(e),
     };
+    let interrupt = Arc::new(AtomicBool::new(false));
+    if let Err(e) = watch_signals(Arc::clone(&interrupt)) {
+        eprintln!("ERROR: cannot install the stop-signal handlers: {e}");
+        return 1;
+    }
 
     let herdr = CliHerdr::from_tunables(&tun);
     // The agents herdr can watch (the synced run's `detect` flags), read once.
@@ -88,7 +97,7 @@ pub fn run(args: &[String]) -> i32 {
     let lead = HerdrLead(&herdr);
     let notifier = &NotifySend;
     let clock = SystemClock;
-    let mut poll = HerdrPoll {
+    let mut inner_poll = HerdrPoll {
         root: root.clone(),
         adapter: &view,
         watchable: &watchable,
@@ -99,6 +108,11 @@ pub fn run(args: &[String]) -> i32 {
             coder_budget_s: tun.coder_budget_min * 60,
             review_budget_s: tun.review_budget_min * 60,
         },
+    };
+    let mut poll = SignalAwarePoll {
+        inner: &mut inner_poll,
+        interrupt: Arc::clone(&interrupt),
+        step_s: tun.poll_step_s,
     };
     let mut work = RunWork::new(root.clone());
 
@@ -154,19 +168,95 @@ pub fn run(args: &[String]) -> i32 {
         Ok(m) => m,
         Err(e) => return fail(e),
     };
-    // the lease is held until the process ends (SIGTERM included); the OS frees it
+    // SIGTERM/SIGINT end the loop after the step in hand (never `orch stop`'s run control):
+    // the manager returns, the lease below is dropped, the process exits 0. A second signal
+    // exits at once.
+    manager.interrupt = interrupt;
     // `--once`: the closure is false for the first cycle's check, true afterwards, so
     // exactly one cycle runs.
     let flag = Cell::new(0u32);
     let stop = move || {
         if !once {
-            return false;
+            return false; // a signal is the manager's `interrupt`, not this closure
         }
         let n = flag.get();
         flag.set(n + 1);
         n > 0
     };
-    manager.run(&stop)
+    let code = manager.run(&stop);
+    drop(manager);
+    // free the lease explicitly, after the last write, so the next start never meets it
+    drop(lease);
+    code
+}
+
+/// Catch SIGTERM and SIGINT on a helper thread. The first sets `flag` (the manager finishes
+/// its step and returns); a second one while shutting down ends the process at once: every
+/// state write is a transaction and the OS frees the lease, so that is safe, just not tidy.
+/// Handlers are installed before this returns, so no signal is lost to the default action.
+pub fn watch_signals(flag: Arc<AtomicBool>) -> std::io::Result<()> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<()>>();
+    std::thread::Builder::new().name("orch-signals".into()).spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => return drop(tx.send(Err(e))),
+        };
+        rt.block_on(async move {
+            let (mut term, mut int) = match (
+                signal(SignalKind::terminate()),
+                signal(SignalKind::interrupt()),
+            ) {
+                (Ok(t), Ok(i)) => (t, i),
+                (Err(e), _) | (_, Err(e)) => return drop(tx.send(Err(e))),
+            };
+            let _ = tx.send(Ok(()));
+            let which = tokio::select! {
+                _ = term.recv() => "SIGTERM",
+                _ = int.recv() => "SIGINT",
+            };
+            eprintln!("orch: {which} received — finishing the step in hand (send it again to exit now)");
+            flag.store(true, Ordering::SeqCst);
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = int.recv() => {}
+            }
+            eprintln!("orch: second signal — exiting now; the next start reconciles what was in flight");
+            std::process::exit(130);
+        });
+    })?;
+    rx.recv().unwrap_or_else(|_| Err(std::io::Error::other("signal thread ended")))
+}
+
+/// The manager's poll, cut short by a stop signal: the real poll sleeps `ORCH_POLL_STEP_S`
+/// (10 s) between scans, which would delay the shutdown, so the waiting is done here in short
+/// slices that look at the flag. One scan per step, exactly as before.
+struct SignalAwarePoll<'p, 'a> {
+    inner: &'p mut HerdrPoll<'a>,
+    interrupt: Arc<AtomicBool>,
+    step_s: f64,
+}
+
+impl PollSource for SignalAwarePoll<'_, '_> {
+    fn poll(&mut self, store: &mut Store, secs: u64) -> PollOutcome {
+        let mut left = secs as f64;
+        loop {
+            // `0` = scan once and report; the sleeping is ours
+            match self.inner.poll(store, 0) {
+                PollOutcome::Waiting { nothing_running: false } => {}
+                other => return other,
+            }
+            let wait = self.step_s.min(left);
+            if left <= self.step_s || self.interrupt.load(Ordering::SeqCst) {
+                return PollOutcome::Waiting { nothing_running: false };
+            }
+            left -= wait;
+            let end = std::time::Instant::now() + std::time::Duration::from_secs_f64(wait);
+            while std::time::Instant::now() < end && !self.interrupt.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
 }
 
 fn fail(e: Error) -> i32 {
