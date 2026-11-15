@@ -73,11 +73,29 @@ impl ServerState {
     /// Start `orch serve` in `project` (stopping a previous one first). The `orch` binary is
     /// `ORCH_BIN`, else the first one on the PATH.
     pub fn start(&self, project: &Path) -> Result<Connection, String> {
+        self.start_using(project, None)
+    }
+
+    /// [`start`](Self::start) with the `orch` path from the app's settings: when it is set
+    /// it wins over `ORCH_BIN` and the PATH.
+    pub fn start_using(
+        &self,
+        project: &Path,
+        orch_setting: Option<String>,
+    ) -> Result<Connection, String> {
         self.stop();
         if !project.is_dir() {
             return Err(format!("{} is not a folder", project.display()));
         }
-        let orch = find_in_environment("orch", "ORCH_BIN")?;
+        let orch = match orch_setting.filter(|s| !s.is_empty()) {
+            Some(path) => crate::serve::find_binary(
+                "orch",
+                "the orch path in Settings",
+                Some(path.into()),
+                None,
+            )?,
+            None => find_in_environment("orch", "ORCH_BIN")?,
+        };
         self.start_with(&orch, project)
     }
 

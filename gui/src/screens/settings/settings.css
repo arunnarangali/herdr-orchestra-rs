@@ -1,0 +1,43 @@
+.st-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.6rem 2rem;
+  margin: 0.5rem 0;
+}
+.st-facts dt {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.st-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.st-hint {
+  font-size: 0.85rem;
+}
+.st-sub {
+  font-size: 1rem;
+  margin: 0.75rem 0 0.4rem;
+}
+.st-form {
+  display: grid;
+  gap: 1rem;
+  max-width: 36rem;
+}
+.st-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.st-msg {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+}
+.st-msg--ok {
+  background: var(--success-bg);
+}
+.st-msg--error {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+}

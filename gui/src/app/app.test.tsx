@@ -42,8 +42,8 @@ describe("registry and sidebar", () => {
     for (const name of NAMES) {
       await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: new RegExp(name) }));
       expect(await screen.findByRole("heading", { name })).toBeInTheDocument();
-      // Overview and Execution have real content now; the rest are still placeholders.
-      if (!["Overview", "Execution"].includes(name)) expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+      // Overview, Execution, Projects, Agents and Settings have real content now; the rest are still placeholders.
+      if (!["Overview", "Execution", "Projects", "Agents", "Settings"].includes(name)) expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
     }
   });
 

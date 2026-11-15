@@ -1,0 +1,74 @@
+.project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--gap);
+}
+.project--active {
+  border-color: var(--accent);
+}
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.project-head .panel-title {
+  margin: 0;
+}
+.project-sub {
+  font-size: 1rem;
+  margin: 0.75rem 0 0.4rem;
+}
+.project code {
+  overflow-wrap: anywhere;
+}
+.pj-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.pj-head h1 {
+  margin: 0;
+}
+.pj-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin: 0.5rem 0;
+}
+.pj-facts dt {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.pj-facts dd {
+  margin: 0;
+}
+.pj-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.pj-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.75rem 0 0;
+}
+.pj-msg {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+}
+.pj-msg--ok {
+  background: var(--success-bg);
+}
+.pj-msg--error {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+}
