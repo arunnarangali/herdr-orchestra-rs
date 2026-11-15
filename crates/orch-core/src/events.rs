@@ -528,3 +528,126 @@ pub fn poll_lead_queue_events(
     out
 }
 
+/// One run-control record read from the database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunControlRecord {
+    pub state: String,
+    pub source: String,
+    pub since: i64,
+}
+
+/// One run action record read from the database audit trail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunActionRecord {
+    pub id: i64,
+    pub ts: i64,
+    pub source: String,
+    pub action: String,
+    pub task_id: Option<String>,
+    pub detail: String,
+}
+
+/// Read current `run_control` row from `state.db` (read-only mode).
+pub fn get_run_control(db_path: &std::path::Path) -> Option<RunControlRecord> {
+    if !db_path.exists() {
+        return None;
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else {
+        return None;
+    };
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(200));
+
+    conn.query_row(
+        "SELECT state, source, since FROM run_control WHERE id=1",
+        [],
+        |r| {
+            Ok(RunControlRecord {
+                state: r.get(0)?,
+                source: r.get(1)?,
+                since: r.get(2)?,
+            })
+        },
+    )
+    .ok()
+}
+
+/// Poll newly added run actions from `state.db` (read-only mode).
+pub fn poll_run_actions(db_path: &std::path::Path, last_id: &mut i64) -> Vec<RunActionRecord> {
+    if !db_path.exists() {
+        return Vec::new();
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else {
+        return Vec::new();
+    };
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(200));
+
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, ts, source, action, task_id, detail
+         FROM run_actions WHERE id > ?1 ORDER BY id",
+    ) else {
+        return Vec::new();
+    };
+
+    let rows = stmt.query_map([*last_id], |r| {
+        Ok(RunActionRecord {
+            id: r.get(0)?,
+            ts: r.get(1)?,
+            source: r.get(2)?,
+            action: r.get(3)?,
+            task_id: r.get(4)?,
+            detail: r.get(5)?,
+        })
+    });
+
+    let mut out = Vec::new();
+    if let Ok(rows) = rows {
+        for row in rows.flatten() {
+            if row.id > *last_id {
+                *last_id = row.id;
+            }
+            out.push(row);
+        }
+    }
+    out
+}
+
+/// Initialise max event id, max lead queue id, max action id, and current run control from `state.db`.
+pub fn init_db_poll_state_all(
+    db_path: &std::path::Path,
+) -> (i64, i64, i64, Option<RunControlRecord>) {
+    if !db_path.exists() {
+        return (0, 0, 0, None);
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else {
+        return (0, 0, 0, None);
+    };
+    let last_event: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM events", [], |r| r.get(0))
+        .unwrap_or(0);
+    let last_queue: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM lead_queue", [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(0);
+    let last_action: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM run_actions", [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(0);
+    let run_control = conn
+        .query_row(
+            "SELECT state, source, since FROM run_control WHERE id=1",
+            [],
+            |r| {
+                Ok(RunControlRecord {
+                    state: r.get(0)?,
+                    source: r.get(1)?,
+                    since: r.get(2)?,
+                })
+            },
+        )
+        .ok();
+    (last_event, last_queue, last_action, run_control)
+}
+
+
