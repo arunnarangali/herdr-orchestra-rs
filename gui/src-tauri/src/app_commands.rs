@@ -1,11 +1,14 @@
 //! Tauri commands for the project list and the app's settings. Thin wrappers over
-//! `projects.rs` and `app_settings.rs`: they store paths and preferences and start the server
-//! for a chosen project, nothing more.
+//! `projects.rs`, `create.rs` and `app_settings.rs`: they store paths and preferences and start
+//! or stop the server of a chosen project, nothing more. Every server belongs to one project;
+//! no command here touches the server of another project.
 
 use crate::app_settings::{AppSettings, SettingsStore};
+use crate::create::{self, Created};
 use crate::projects::{ProjectList, ProjectStore};
-use crate::server::{Connection, ServerState};
+use crate::server::{Connection, Servers};
 use crate::store::Loaded;
+use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -23,6 +26,10 @@ fn settings(app: &AppHandle) -> Result<SettingsStore, String> {
     config_dir(app).map(SettingsStore::new)
 }
 
+fn orch_setting(app: &AppHandle) -> Option<String> {
+    settings(app).ok().map(|s| s.load().value.orch_path)
+}
+
 #[tauri::command]
 pub fn list_projects(app: AppHandle) -> Result<ProjectList, String> {
     Ok(projects(&app)?.list())
@@ -35,21 +42,136 @@ pub fn add_project(app: AppHandle, path: String) -> Result<ProjectList, String> 
     Ok(store.list())
 }
 
+/// Forget a project: its server (if open) is stopped first.
 #[tauri::command]
 pub fn remove_project(app: AppHandle, path: String) -> Result<ProjectList, String> {
+    app.state::<Servers>().stop(&PathBuf::from(&path));
     let store = projects(&app)?;
     store.remove(&path)?;
     Ok(store.list())
 }
 
-/// Make `path` the active project and restart the server for it.
+/// Make `path` the active project and make sure its server runs (an already running one is
+/// kept; other projects' servers are not touched).
 #[tauri::command]
 pub async fn switch_project(app: AppHandle, path: String) -> Result<Connection, String> {
     tauri::async_runtime::spawn_blocking(move || {
         projects(&app)?.set_active(&path)?;
-        let orch = settings(&app)?.load().value.orch_path;
-        app.state::<ServerState>()
-            .start_using(&PathBuf::from(&path), Some(orch))
+        let orch = orch_setting(&app);
+        app.state::<Servers>().start_using(&PathBuf::from(&path), orch)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Open a listed project: remember it as open and start its server. The project stays open
+/// (and is retried by the next `open_project` or at the next start) when the server fails.
+#[tauri::command]
+pub async fn open_project(app: AppHandle, path: String) -> Result<Connection, String> {
+    tauri::async_runtime::spawn_blocking(move || open(&app, &path, false))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Start the server of a project whose server failed or died: a retry that never touches the
+/// other projects.
+#[tauri::command]
+pub async fn retry_project(app: AppHandle, path: String) -> Result<Connection, String> {
+    tauri::async_runtime::spawn_blocking(move || open(&app, &path, true))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn open(app: &AppHandle, path: &str, restart: bool) -> Result<Connection, String> {
+    projects(app)?.set_open(path, true)?;
+    let orch = orch_setting(app);
+    let servers = app.state::<Servers>();
+    let p = PathBuf::from(path);
+    if restart {
+        servers.restart_using(&p, orch)
+    } else {
+        servers.start_using(&p, orch)
+    }
+}
+
+/// Close a project: forget that it is open and stop its server (and only its).
+#[tauri::command]
+pub fn close_project(app: AppHandle, path: String) -> Result<ProjectList, String> {
+    let store = projects(&app)?;
+    store.set_open(&path, false)?;
+    app.state::<Servers>().stop(&PathBuf::from(&path));
+    Ok(store.list())
+}
+
+/// One project of the restored set: its connection, or why its server did not start.
+#[derive(Debug, Clone, Serialize)]
+pub struct Restored {
+    pub path: String,
+    pub name: String,
+    pub connection: Option<Connection>,
+    pub error: Option<String>,
+}
+
+/// Start the server of every project that was open when the app last ran. They start at the
+/// same time; one that fails is reported with its reason and does not stop the others.
+#[tauri::command]
+pub async fn restore_projects(app: AppHandle) -> Result<Vec<Restored>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = projects(&app)?.list();
+        let orch = orch_setting(&app);
+        let handles: Vec<_> = list
+            .open
+            .iter()
+            .map(|path| {
+                let app = app.clone();
+                let orch = orch.clone();
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let servers = app.state::<Servers>();
+                    let result = servers.start_using(&PathBuf::from(&path), orch);
+                    restored(&path, result)
+                })
+            })
+            .collect();
+        Ok(handles
+            .into_iter()
+            .zip(&list.open)
+            .map(|(h, path)| {
+                h.join()
+                    .unwrap_or_else(|_| restored(path, Err("the start-up crashed".into())))
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+pub fn restored(path: &str, result: Result<Connection, String>) -> Restored {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string());
+    match result {
+        Ok(c) => Restored { path: path.into(), name, connection: Some(c), error: None },
+        Err(e) => Restored { path: path.into(), name, connection: None, error: Some(e) },
+    }
+}
+
+/// What creating a project did, and how to reach its server.
+#[derive(Debug, Clone, Serialize)]
+pub struct CreatedProject {
+    pub created: Created,
+    pub connection: Connection,
+}
+
+/// Create a project in `path` (see `create.rs`), add it to the list and open it.
+#[tauri::command]
+pub async fn create_project(app: AppHandle, path: String) -> Result<CreatedProject, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let created = create::create_project(&path)?;
+        projects(&app)?.add(&created.path)?;
+        let connection = open(&app, &created.path, false)?;
+        Ok(CreatedProject { created, connection })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -63,4 +185,19 @@ pub fn get_app_settings(app: AppHandle) -> Result<Loaded<AppSettings>, String> {
 #[tauri::command]
 pub fn save_app_settings(app: AppHandle, settings_in: AppSettings) -> Result<AppSettings, String> {
     settings(&app)?.save(&settings_in)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_restored_project_carries_its_connection_or_its_reason() {
+        let ok = restored("/p/a", Ok(Connection { url: "http://127.0.0.1:1".into(), token: "t".into() }));
+        assert_eq!((ok.name.as_str(), ok.error.is_none()), ("a", true));
+        assert!(ok.connection.is_some());
+        let bad = restored("/p/b", Err("orch serve did not start: address in use".into()));
+        assert!(bad.connection.is_none());
+        assert!(bad.error.unwrap().contains("address in use"));
+    }
 }

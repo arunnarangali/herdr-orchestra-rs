@@ -1,4 +1,5 @@
 import { HashRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useProjects } from "./projects";
 import { ConnectionProvider, useConnection, type ConnectionProviderProps } from "./connection";
 import { Frame } from "./Frame";
 import { DEFAULT_PATH, ONBOARDING_PATH, screens, type ScreenDef } from "./routes";
@@ -8,6 +9,8 @@ import { ThemeProvider } from "./theme";
 function Guarded({ screen }: { screen: ScreenDef }) {
   const { kind } = useConnection();
   const { pathname } = useLocation();
+  const { restoring } = useProjects();
+  if (restoring) return null; // the frame says "Opening your projects…"
   if (kind === "unconfigured" && pathname !== ONBOARDING_PATH) {
     return <Navigate to={ONBOARDING_PATH} replace />;
   }

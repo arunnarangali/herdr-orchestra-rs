@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { AttentionIndicator, AttentionProvider } from "../components/Attention";
 import { ConnectPanel } from "./ConnectPanel";
+import { ProjectBar, ProjectProblem } from "./ProjectBar";
+import { useProjects } from "./projects";
 import { ConnectionBanner, ConnectionPill } from "./ConnectionStatus";
 import { useConnection } from "./connection";
 import { HelpMenu } from "./HelpMenu";
@@ -15,6 +17,8 @@ import { THEME_CHOICES, useTheme, type ThemePreference } from "./theme";
  */
 export function Frame() {
   const { kind } = useConnection();
+  const { multi, projects, selected, restoring } = useProjects();
+  const current = projects.find((p) => p.path === selected);
   const { preference, setPreference } = useTheme();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -40,6 +44,8 @@ export function Frame() {
   }, [kind, navigate]);
 
   const showConnect = kind === "unconfigured";
+  // With several projects, the screens wait for the selected project's server.
+  const waiting = multi && (restoring || (current !== undefined && current.status !== "ready"));
 
   return (
     <AttentionProvider>
@@ -69,7 +75,13 @@ export function Frame() {
           </nav>
         </aside>
         <div className="content">
+          <ProjectBar />
           <header className="topbar">
+            {multi && current && (
+              <span className="current-project" title={current.path}>
+                {current.name}
+              </span>
+            )}
             <ConnectionPill />
             <span className="spacer" />
             <div className="chat-entry-wrap">
@@ -89,8 +101,14 @@ export function Frame() {
           </header>
           <ConnectionBanner />
           <main id="main" ref={main} tabIndex={-1} className="main">
-            {showConnect && <ConnectPanel />}
-            <Outlet />
+            {multi && restoring && (
+              <p role="status" className="muted">
+                Opening your projects…
+              </p>
+            )}
+            {waiting && !restoring && <ProjectProblem />}
+            {!waiting && showConnect && <ConnectPanel />}
+            {!waiting && <Outlet />}
           </main>
         </div>
         <ShortcutList open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />

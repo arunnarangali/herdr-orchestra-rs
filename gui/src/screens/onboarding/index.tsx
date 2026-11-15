@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConnection } from "../../app/connection";
+import { useProjects } from "../../app/projects";
 import type { AgentsResponse } from "../../api/types";
 import { CopyCommand } from "./CopyCommand";
 import { checkGitRepository } from "./git";
@@ -74,6 +75,7 @@ export function OnboardingScreen() {
 
 function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }) {
   const { shell, health, client, kind, connect, recheck } = useConnection();
+  const { multi, openFolder } = useProjects();
   const navigate = useNavigate();
   const [index, setIndex] = useState(takeResumeStep);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -194,7 +196,8 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
       }
       setUnverified(git.kind === "unknown");
       fromGuide.current = true;
-      connect(await shell.startServer(folder));
+      if (multi) await openFolder(folder);
+      else connect(await shell.startServer(folder));
     } catch (e) {
       setIssue(messageOf(e));
     } finally {

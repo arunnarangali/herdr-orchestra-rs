@@ -237,3 +237,81 @@
   font-size: 0.85rem;
 }
 
+
+/* ---- project bar: the open projects, one tab each ------------------------------------------ */
+.project-bar {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem var(--gap) 0;
+}
+.project-tabs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  align-items: flex-end;
+}
+.project-tab {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  flex: 0 0 auto;
+}
+.project-tab--active {
+  border-top: 3px solid var(--accent);
+  font-weight: 650;
+  background: var(--bg);
+  margin-bottom: -1px;
+  padding-bottom: 1px;
+}
+.project-tab-open,
+.project-tab-close {
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.project-tab-open {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.7rem;
+  max-width: 16rem;
+}
+.project-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-tab-close {
+  padding: 0 0.55rem;
+  color: var(--text-muted);
+}
+.project-tab-close:hover {
+  color: var(--danger);
+}
+.project-tab-add {
+  margin-left: 0.25rem;
+  padding-bottom: 0.2rem;
+}
+.project-tab-add .button {
+  padding: 0.15rem 0.6rem;
+  text-decoration: none;
+  display: inline-block;
+}
+.current-project {
+  font-weight: 650;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-problem {
+  max-width: 40rem;
+}

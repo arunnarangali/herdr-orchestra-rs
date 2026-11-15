@@ -1,28 +1,12 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConnection } from "../app/connection";
-import type { AttentionAction, AttentionItem } from "../api/types";
-import { getBackend } from "../screens/projects/backend";
+import type { AttentionAction } from "../api/types";
+import { useProjects } from "../app/projects";
+import { useAttentionStore, type AttentionSource, type AttentionStore, type TaggedItem } from "./attentionStore";
 import { Modal } from "../ui/Modal";
 
-interface AttentionContextValue {
-  waitingItems: AttentionItem[];
-  currentItem: AttentionItem | null;
-  dismissCurrent: () => void;
-  openItem: (item: AttentionItem) => void;
-  isListOpen: boolean;
-  openList: () => void;
-  closeList: () => void;
-}
+type AttentionContextValue = Omit<AttentionStore, "watchers">;
 
 const AttentionContext = createContext<AttentionContextValue | null>(null);
 
@@ -34,126 +18,24 @@ export function useAttention() {
   return ctx;
 }
 
-async function notifyDesktop(item: AttentionItem) {
-  const backend = getBackend();
-  let enabled = false;
-  if (backend) {
-    try {
-      const { value } = await backend.getSettings();
-      enabled = value.notifications;
-    } catch {
-      enabled = false;
-    }
-  }
-  if (!enabled) return;
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  const body = item.prompt || item.detail || item.title;
-  new Notification(item.title, { body });
-}
-
+/**
+ * The attention popup, indicator and list. With several open projects the items of every one
+ * of them come from the project list's own store (they must survive switching projects);
+ * with one server this reads that server.
+ */
 export function AttentionProvider({ children }: { children: ReactNode }) {
   const { client, stream } = useConnection();
-  const [waitingItems, setWaitingItems] = useState<AttentionItem[]>([]);
-  const [popupQueue, setPopupQueue] = useState<AttentionItem[]>([]);
-  const [isListOpen, setIsListOpen] = useState(false);
-
-  const seenRef = useRef<Set<string>>(new Set());
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
-  // Load initial attention items from server
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client.attention().then(
-      (res) => {
-        if (cancelled) return;
-        setWaitingItems(res.items);
-        for (const it of res.items) {
-          seenRef.current.add(it.id);
-        }
-      },
-      () => {
-        // Run may not be running yet or route 404
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
-
-  // Subscribe to live stream attention events
-  useEffect(() => {
-    const off = stream.subscribe((m) => {
-      if (m.event !== "attention") return;
-      const { op, item } = m.data;
-      if (op === "add") {
-        setWaitingItems((prev) => {
-          if (prev.some((x) => x.id === item.id)) return prev;
-          return [...prev, item];
-        });
-        // If not seen yet, enqueue for modal popup and notify
-        if (!seenRef.current.has(item.id)) {
-          seenRef.current.add(item.id);
-          // Capture current focus if queue is currently empty
-          if (document.activeElement instanceof HTMLElement && !previousFocusRef.current) {
-            previousFocusRef.current = document.activeElement;
-          }
-          setPopupQueue((q) => {
-            if (q.some((x) => x.id === item.id)) return q;
-            return [...q, item];
-          });
-          void notifyDesktop(item);
-        }
-      } else if (op === "remove") {
-        setWaitingItems((prev) => prev.filter((x) => x.id !== item.id));
-        setPopupQueue((q) => q.filter((x) => x.id !== item.id));
-      }
-    });
-    return off;
-  }, [stream]);
-
-  // When queue becomes empty, return focus where it was
-  const prevQueueLengthRef = useRef(popupQueue.length);
-  useEffect(() => {
-    if (prevQueueLengthRef.current > 0 && popupQueue.length === 0) {
-      if (previousFocusRef.current) {
-        previousFocusRef.current.focus();
-        previousFocusRef.current = null;
-      }
-    }
-    prevQueueLengthRef.current = popupQueue.length;
-  }, [popupQueue.length]);
-
-  const dismissCurrent = useCallback(() => {
-    setPopupQueue((q) => q.slice(1));
-  }, []);
-
-  const openItem = useCallback((item: AttentionItem) => {
-    if (document.activeElement instanceof HTMLElement && !previousFocusRef.current) {
-      previousFocusRef.current = document.activeElement;
-    }
-    setPopupQueue((q) => {
-      // Put this item at the front of the queue
-      const rest = q.filter((x) => x.id !== item.id);
-      return [item, ...rest];
-    });
-    setIsListOpen(false);
-  }, []);
-
-  const currentItem = popupQueue[0] ?? null;
-
+  const { multi, attention } = useProjects();
+  const own = useMemo<AttentionSource[]>(
+    () => (!multi && client ? [{ key: "", name: null, client, subscribe: stream.subscribe }] : []),
+    [multi, client, stream.subscribe],
+  );
+  const local = useAttentionStore(own);
+  const store = multi && attention ? attention : local;
+  const { watchers, ...value } = store;
   return (
-    <AttentionContext.Provider
-      value={{
-        waitingItems,
-        currentItem,
-        dismissCurrent,
-        openItem,
-        isListOpen,
-        openList: () => setIsListOpen(true),
-        closeList: () => setIsListOpen(false),
-      }}
-    >
+    <AttentionContext.Provider value={value}>
+      {!multi && watchers}
       {children}
       <AttentionPopup />
       <AttentionListModal />
@@ -162,8 +44,8 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
 }
 
 export function AttentionPopup() {
-  const { currentItem, dismissCurrent } = useAttention();
-  const { client } = useConnection();
+  const { currentItem, dismissCurrent, clientFor } = useAttention();
+  const { select } = useProjects();
   const navigate = useNavigate();
 
   const answerId = useId();
@@ -180,11 +62,13 @@ export function AttentionPopup() {
     setFix("");
     setError(null);
     setPending(false);
-  }, [currentItem?.id]);
+  }, [currentItem?.uid]);
 
+  // The only client that may act on an item is its own project's.
+  const client = currentItem ? clientFor(currentItem.sourceKey) : null;
   if (!currentItem || !client) return null;
 
-  const item = currentItem;
+  const item: TaggedItem = currentItem;
   const actions: AttentionAction[] = (item.actions ?? []) as AttentionAction[];
 
   const runAction = async (fn: () => Promise<unknown>) => {
@@ -230,6 +114,7 @@ export function AttentionPopup() {
 
   const handleOpenChat = () => {
     dismissCurrent();
+    if (item.sourceKey) select(item.sourceKey);
     navigate("/chat");
   };
 
@@ -242,6 +127,9 @@ export function AttentionPopup() {
     >
       <div className="attention-dialog">
         <div className="attention-meta">
+          {item.projectName && (
+            <span className="badge badge--neutral attention-project">Project: {item.projectName}</span>
+          )}
           {item.agent && (
             <span className="badge badge--info">Agent: {item.agent}</span>
           )}
@@ -403,10 +291,13 @@ export function AttentionListModal() {
         ) : (
           <ul className="attention-items-list" aria-label="Waiting items">
             {waitingItems.map((item) => (
-              <li key={item.id} className="attention-item-row">
+              <li key={item.uid} className="attention-item-row">
                 <div className="attention-item-info">
                   <strong>{item.title}</strong>
                   <div className="attention-item-badges">
+                    {item.projectName && (
+                      <span className="badge badge--neutral attention-project">{item.projectName}</span>
+                    )}
                     {item.agent && (
                       <span className="badge badge--info">{item.agent}</span>
                     )}
