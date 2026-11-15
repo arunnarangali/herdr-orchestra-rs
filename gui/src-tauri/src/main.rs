@@ -4,8 +4,12 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_commands;
+mod app_settings;
+mod projects;
 mod serve;
 mod server;
+mod store;
 
 use server::{Connection, ServerState};
 use std::path::PathBuf;
@@ -69,7 +73,13 @@ fn main() {
             stop_server,
             get_connection,
             find_orch,
-            find_herdr
+            find_herdr,
+            app_commands::list_projects,
+            app_commands::add_project,
+            app_commands::remove_project,
+            app_commands::switch_project,
+            app_commands::get_app_settings,
+            app_commands::save_app_settings
         ])
         .on_window_event(|window, event| {
             // Closing the window ends the server it started.
