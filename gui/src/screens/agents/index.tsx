@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ErrorPanel } from "../../ui/ResourceView";
 import { useResource } from "../../ui/useResource";
+import { AgentOutputModal } from "./AgentOutputModal";
 import { AgentsTab } from "./AgentsTab";
 import { ModelsTab } from "./ModelsTab";
 import "./agents.css";
@@ -10,10 +11,15 @@ type Tab = "agents" | "models";
 /** The agents installed on this machine, the run's team, and the model catalog with its policy. */
 export function AgentsScreen() {
   const [tab, setTab] = useState<Tab>("agents");
-  const agents = useResource((api, signal) => api.agents({ signal }), []);
+  const [outputAgent, setOutputAgent] = useState<string | null>(null);
+  const agents = useResource((api, signal) => api.agents({ signal }), [], {
+    refreshOn: ["task-state", "lead-event", "run-state", "attention"],
+  });
   const models = useResource((api, signal) => api.models({ signal }), []);
   // These two only exist when there is a run; their absence is a normal state, not an error.
-  const status = useResource((api, signal) => api.status({ signal }), []);
+  const status = useResource((api, signal) => api.status({ signal }), [], {
+    refreshOn: ["task-state", "run-state"],
+  });
   const plan = useResource((api, signal) => api.plan({ signal }), []);
   const noRun = (r: { error: { isNoRun: boolean } | null }) => r.error?.isNoRun === true;
 
@@ -57,12 +63,20 @@ export function AgentsScreen() {
         )}
         {current.state === "error" && current.error && <ErrorPanel error={current.error} onRetry={current.reload} />}
         {tab === "agents" && agents.data && (
-          <AgentsTab data={agents.data} status={noRun(status) ? null : status.data} />
+          <AgentsTab
+            data={agents.data}
+            status={noRun(status) ? null : status.data}
+            onOpenOutput={(name) => setOutputAgent(name)}
+          />
         )}
         {tab === "models" && models.data && plan.state !== "loading" && (
           <ModelsTab models={models.data} plan={noRun(plan) ? null : plan.data} agents={agents.data} />
         )}
       </div>
+
+      {outputAgent && (
+        <AgentOutputModal agentName={outputAgent} onClose={() => setOutputAgent(null)} />
+      )}
     </section>
   );
 }

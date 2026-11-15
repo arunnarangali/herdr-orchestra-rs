@@ -1,8 +1,10 @@
 import { ApiError, errorFromResponse } from "./errors";
 import type {
   ActionResponse,
+  AgentOutputResponse,
   AgentsResponse,
   AnswerBody,
+  AttentionResponse,
   ChatBody,
   ChatListResponse,
   ChatMessage,
@@ -114,9 +116,12 @@ export function createApiClient(options: ClientOptions) {
       get<EventsResponse>("/events", o, q),
     report: (o?: RequestOptions) => get<ReportResponse>("/report", o),
     agents: (o?: RequestOptions) => get<AgentsResponse>("/agents", o),
+    agentOutput: (name: string, q: { lines?: number } = {}, o?: RequestOptions) =>
+      get<AgentOutputResponse>(`/agents/${encodeURIComponent(name)}/output`, o, q),
     models: (o?: RequestOptions) => get<ModelsResponse>("/models", o),
     logs: (q: { lines?: number; milestone?: string; agent?: string } = {}, o?: RequestOptions) =>
       get<LogsResponse>("/logs", o, q),
+    attention: (o?: RequestOptions) => get<AttentionResponse>("/attention", o),
 
     // -- chat with the lead (stored by the server; the event manager delivers it)
     chat: (q: { after?: number } = {}, o?: RequestOptions) => get<ChatListResponse>("/chat", o, q),
