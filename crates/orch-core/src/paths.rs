@@ -31,6 +31,20 @@ pub fn orchestrate_dir(start: &Path) -> Result<PathBuf> {
     Ok(main_root(start)?.join(ORCH_DIR))
 }
 
+/// Folder under the user's config directory that holds `orch`'s per-install files.
+const CONFIG_SUBDIR: &str = "herdr-orchestra";
+
+/// The user's `orch` config directory: `$XDG_CONFIG_HOME/herdr-orchestra`, else
+/// `$HOME/.config/herdr-orchestra` (not created). `None` when neither variable is set.
+pub fn config_dir() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    let base = match var("XDG_CONFIG_HOME") {
+        Some(x) if Path::new(&x).is_absolute() => PathBuf::from(x),
+        _ => PathBuf::from(var("HOME")?).join(".config"),
+    };
+    Some(base.join(CONFIG_SUBDIR))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

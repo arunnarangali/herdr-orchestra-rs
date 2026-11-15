@@ -13,6 +13,7 @@ mod plan_cmds;
 mod review_cmds;
 mod run_work;
 mod send_cmds;
+mod serve_cmd;
 mod task_cmds;
 mod team;
 
