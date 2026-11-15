@@ -12,8 +12,8 @@ use crate::api_router::ApiRouter;
 use crate::doc;
 use crate::error::ApiError;
 use crate::models::{
-    AgentsResponse, EventsResponse, LogsResponse, ModelsResponse, PlanResponse, ReportResponse,
-    StatusResponse, TaskDetailResponse, TasksResponse,
+    AgentOutputResponse, AgentsResponse, AttentionResponse, EventsResponse, LogsResponse,
+    ModelsResponse, PlanResponse, ReportResponse, StatusResponse, TaskDetailResponse, TasksResponse,
 };
 use crate::state::AppState;
 use axum::Json;
@@ -145,12 +145,100 @@ async fn agents(State(state): State<AppState>) -> Result<Json<AgentsResponse>, A
     blocking(move || {
         let reg = orch_config::agents::load(None)
             .map_err(|e| ApiError::internal(format!("agents registry: {e}")))?;
-        let run = if state.has_run() {
-            load(&state).ok().map(|(_, r)| r)
+        let (run, tasks) = if state.has_run() {
+            if let Ok((store, r)) = load(&state) {
+                let tasks = store.list_tasks().ok();
+                (Some(r), tasks)
+            } else {
+                (None, None)
+            }
         } else {
-            None
+            (None, None)
         };
-        Ok(Json(crate::models::agents_response(&reg, run.as_ref())))
+        Ok(Json(crate::models::agents_response(
+            &reg,
+            run.as_ref(),
+            tasks.as_deref(),
+        )))
+    })
+    .await
+}
+
+async fn attention(State(state): State<AppState>) -> Result<Json<AttentionResponse>, ApiError> {
+    blocking(move || {
+        let (store, run) = load(&state)?;
+        let items = orch_core::attention::attention_items(&store, Some(&run))
+            .map_err(ApiError::internal)?;
+        Ok(Json(AttentionResponse {
+            items: items.into_iter().map(Into::into).collect(),
+        }))
+    })
+    .await
+}
+
+/// Default and largest `lines` of `GET /agents/{name}/output`.
+const AGENT_OUTPUT_LINES_DEFAULT: usize = 200;
+const AGENT_OUTPUT_LINES_MAX: usize = 5000;
+
+#[derive(Debug, Deserialize)]
+struct AgentOutputQuery {
+    lines: Option<usize>,
+}
+
+async fn agent_output(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(q): Query<AgentOutputQuery>,
+) -> Result<Json<AgentOutputResponse>, ApiError> {
+    let lines = q.lines.unwrap_or(AGENT_OUTPUT_LINES_DEFAULT);
+    if lines == 0 || lines > AGENT_OUTPUT_LINES_MAX {
+        return Err(ApiError::bad_request(format!(
+            "lines must be 1 to {AGENT_OUTPUT_LINES_MAX}"
+        )));
+    }
+    if name.is_empty() || name.len() > 100 {
+        return Err(ApiError::bad_request("name must be 1 to 100 characters"));
+    }
+    blocking(move || {
+        let (_, run) = load(&state)?;
+        if !run.agents.iter().any(|a| a.name == name) {
+            return Err(ApiError::new(
+                axum::http::StatusCode::NOT_FOUND,
+                "agent_not_found",
+                format!("no agent named {name:?} in this run"),
+            ));
+        }
+
+        let raw = state.herdr().read_output(&name, lines as u32).map_err(|e| {
+            match e {
+                orch_herdr::HerdrError::AgentNotFound { .. } => ApiError::new(
+                    axum::http::StatusCode::NOT_FOUND,
+                    "agent_not_found",
+                    format!("agent {name:?} not found in herdr"),
+                ),
+                other => ApiError::new(
+                    axum::http::StatusCode::BAD_GATEWAY,
+                    "herdr_read_failed",
+                    format!("cannot read output for agent {name:?}: {other}"),
+                ),
+            }
+        })?;
+
+        let text = orch_core::attention::strip_escapes(&raw);
+        let ts = orch_core::attention::format_rfc3339(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
+        );
+        let count = if text.is_empty() { 0 } else { text.lines().count() };
+
+        Ok(Json(AgentOutputResponse {
+            agent: name,
+            lines: count,
+            text,
+            ts,
+        }))
     })
     .await
 }
@@ -240,6 +328,8 @@ pub fn register(api: ApiRouter) -> ApiRouter {
         .schema::<AgentsResponse>()
         .schema::<ModelsResponse>()
         .schema::<LogsResponse>()
+        .schema::<AttentionResponse>()
+        .schema::<AgentOutputResponse>()
         .route(
             "/status",
             get(status),
@@ -278,6 +368,30 @@ pub fn register(api: ApiRouter) -> ApiRouter {
                     param("lines", ParameterIn::Query, false, Type::Integer, "How many lines (1 to 5000, default 200)"),
                     param("milestone", ParameterIn::Query, false, Type::String, "Only lines naming this milestone"),
                     param("agent", ParameterIn::Query, false, Type::String, "Only lines naming this agent"),
+                ],
+            ),
+        )
+        .route(
+            "/attention",
+            get(attention),
+            doc::get(
+                "attention",
+                "Open items that need the developer: blocked agents, questions, held/failed milestones, wake-ups, plan approval",
+                "AttentionResponse",
+            ),
+        )
+        .route(
+            "/agents/{name}/output",
+            get(agent_output),
+            with_params(
+                doc::get(
+                    "agent_output",
+                    "Recent output of one agent as plain text with ANSI escapes removed",
+                    "AgentOutputResponse",
+                ),
+                vec![
+                    param("name", ParameterIn::Path, true, Type::String, "Agent name on the team, e.g. coder-1"),
+                    param("lines", ParameterIn::Query, false, Type::Integer, "How many recent lines (1 to 5000, default 200)"),
                 ],
             ),
         )

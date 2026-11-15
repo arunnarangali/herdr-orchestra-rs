@@ -926,24 +926,7 @@ pub fn task_detail(store: &Store, run: &Run, root: &Path, id: &str) -> Result<Op
 /// Most of the log file that is read (the tail).
 const LOG_WINDOW: u64 = 2 * 1024 * 1024;
 
-fn strip_escapes(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut chars = line.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                for n in chars.by_ref() {
-                    if n.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-        } else if !c.is_control() || c == '\t' {
-            out.push(c);
-        }
-    }
-    out
-}
+pub use crate::attention::strip_escapes;
 
 /// `word` appears in `line` as a whole token (not inside a longer name).
 fn has_token(line: &str, word: &str) -> bool {

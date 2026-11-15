@@ -15,7 +15,8 @@ use orch_api::routes::actions::{
 };
 use orch_api::routes::chat::{ChatBody, ChatListResponse, ChatMessageView, ChatRequest};
 use orch_api::routes::stream::{
-    LeadQueueEvent, LogEvent, RunStateEvent, StreamMessage, TaskStateEvent,
+    AttentionEvent, AttentionOp, LeadQueueEvent, LogEvent, RunStateEvent, StreamMessage,
+    TaskStateEvent,
 };
 use orch_api::routes::system::Health;
 use orch_api::{AppState, ErrorBody, Token, build};
@@ -349,6 +350,10 @@ fn agents() -> AgentsResponse {
             model: some("claude-sonnet-5-5"),
             tier: some("medium"),
             detect: true,
+            working_on: Some(WorkingOn {
+                task: s("M1"),
+                state: s("coding"),
+            }),
         }],
     }
 }
@@ -538,6 +543,48 @@ fn log_event() -> LogEvent {
     }
 }
 
+fn attention() -> AttentionResponse {
+    AttentionResponse {
+        items: vec![AttentionItem {
+            id: s("blocked:1"),
+            kind: AttentionKind::Blocked,
+            task: some("M1"),
+            agent: some("rs-claude-1"),
+            title: s("rs-claude-1 is blocked on permission"),
+            detail: some("needs bash permission"),
+            prompt: some("May I run `cargo test`?"),
+            since: s("2023-11-14T22:13:20Z"),
+            actions: vec![AttentionAction::OpenChat],
+        }],
+    }
+}
+
+fn agent_output() -> AgentOutputResponse {
+    AgentOutputResponse {
+        agent: s("rs-claude-1"),
+        lines: 2,
+        text: s("line 1\nline 2"),
+        ts: s("2023-11-14T22:13:20Z"),
+    }
+}
+
+fn attention_event() -> AttentionEvent {
+    AttentionEvent {
+        op: AttentionOp::Add,
+        item: AttentionItem {
+            id: s("blocked:1"),
+            kind: AttentionKind::Blocked,
+            task: some("M1"),
+            agent: some("rs-claude-1"),
+            title: s("rs-claude-1 is blocked on permission"),
+            detail: some("needs bash permission"),
+            prompt: some("May I run `cargo test`?"),
+            since: s("2023-11-14T22:13:20Z"),
+            actions: vec![AttentionAction::OpenChat],
+        },
+    }
+}
+
 /// Response shapes, by file name.
 fn responses() -> Vec<(&'static str, Value)> {
     vec![
@@ -561,6 +608,9 @@ fn responses() -> Vec<(&'static str, Value)> {
         ("LeadQueueEvent", to_value(&lead_event())),
         ("RunStateEvent", to_value(&run_state_event())),
         ("LogEvent", to_value(&log_event())),
+        ("AttentionResponse", to_value(&attention())),
+        ("AgentOutputResponse", to_value(&agent_output())),
+        ("AttentionEvent", to_value(&attention_event())),
     ]
 }
 
@@ -704,6 +754,7 @@ fn every_documented_body_has_a_sample() {
             "LeadQueueEvent",
             "RunStateEvent",
             "LogEvent",
+            "AttentionEvent",
         ];
         assert!(
             used.contains(name) || stream_part.contains(&name),

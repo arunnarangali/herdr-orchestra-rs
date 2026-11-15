@@ -6,8 +6,12 @@ use orch_core::check::Records;
 use orch_core::run_store::{AgentRole, PlanTask, RunAgent, RunSettings, SyncInput};
 use orch_core::store::{Counter, Store, TransitionRequest};
 use orch_core::task::State;
+use orch_herdr::fake::{CallKind, FakeHerdr};
+use orch_herdr::model::{AgentInfo, PaneInfo};
+use orch_herdr::{AgentStatus, HerdrError, RuntimeAdapter};
 use serde_json::Value;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
@@ -256,6 +260,26 @@ impl Drop for Server {
 
 async fn start(root: &Path) -> Server {
     let state = AppState::new(root.to_path_buf(), Token::new(SECRET));
+    let listener = orch_api::bind("127.0.0.1", 0).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel::<()>();
+    let Api { router, .. } = build(state);
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async move {
+                let _ = rx.await;
+            })
+            .await
+    });
+    Server {
+        addr,
+        stop: Some(tx),
+        task,
+    }
+}
+
+async fn start_with_herdr(root: &Path, herdr: Arc<dyn RuntimeAdapter + Send + Sync>) -> Server {
+    let state = AppState::with_herdr(root.to_path_buf(), Token::new(SECRET), herdr);
     let listener = orch_api::bind("127.0.0.1", 0).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (tx, rx) = oneshot::channel::<()>();
@@ -900,6 +924,8 @@ async fn every_read_endpoint_is_in_the_openapi_document_with_its_shape() {
         ("/api/v1/agents", "AgentsResponse"),
         ("/api/v1/models", "ModelsResponse"),
         ("/api/v1/logs", "LogsResponse"),
+        ("/api/v1/attention", "AttentionResponse"),
+        ("/api/v1/agents/{name}/output", "AgentOutputResponse"),
     ];
     for (path, schema) in expect {
         let ok = &paths[path]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"];
@@ -921,6 +947,7 @@ async fn every_read_endpoint_is_in_the_openapi_document_with_its_shape() {
     assert_eq!(names("/api/v1/events"), ["since", "limit"]);
     assert_eq!(names("/api/v1/logs"), ["lines", "milestone", "agent"]);
     assert_eq!(names("/api/v1/tasks/{id}"), ["id"]);
+    assert_eq!(names("/api/v1/agents/{name}/output"), ["name", "lines"]);
     // Nested shapes are in the document too, so a client can generate types for them.
     for nested in [
         "PlanMilestone",
@@ -929,7 +956,237 @@ async fn every_read_endpoint_is_in_the_openapi_document_with_its_shape() {
         "ReviewInfo",
         "AgentKindInfo",
         "ModelInfo",
+        "AttentionItem",
+        "WorkingOn",
     ] {
         assert!(doc["components"]["schemas"][nested].is_object(), "{nested}");
     }
+}
+
+#[tokio::test]
+async fn agent_output_endpoint_reads_bounded_and_strips_ansi() {
+    let dir = tempfile::tempdir().unwrap();
+    let _store = fresh_run(dir.path());
+    let fake = Arc::new(FakeHerdr::new());
+    fake.add_pane(PaneInfo::new("w1:p1", "w1", "w1:t1"));
+    fake.add_agent(AgentInfo {
+        name: "claude-1".into(),
+        kind: "claude".into(),
+        pane_id: "w1:p1".into(),
+        tab_id: "w1:t1".into(),
+        workspace_id: "w1".into(),
+        cwd: None,
+        status: AgentStatus::Working,
+        focused: false,
+    });
+    fake.set_output(
+        "claude-1",
+        "\x1b[32mPASS\x1b[0m test_foo (0.01s)\nAll 1 tests passed\n",
+    );
+
+    let srv = start_with_herdr(dir.path(), fake).await;
+
+    // Default lines query
+    let (status, body) = get(&srv, "/api/v1/agents/claude-1/output").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["agent"], "claude-1");
+    assert_eq!(body["lines"], 2);
+    assert_eq!(body["text"], "PASS test_foo (0.01s)\nAll 1 tests passed\n");
+    assert!(body["ts"].is_string());
+
+    // Explicit lines query
+    let (status, body) = get(&srv, "/api/v1/agents/claude-1/output?lines=50").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["lines"], 2);
+
+    // Bounds: 0 is rejected
+    let (status, err) = get(&srv, "/api/v1/agents/claude-1/output?lines=0").await;
+    assert_eq!(status, 400);
+    assert_eq!(err["error"]["code"], "bad_request");
+
+    // Bounds: > 5000 is rejected
+    let (status, err) = get(&srv, "/api/v1/agents/claude-1/output?lines=5001").await;
+    assert_eq!(status, 400);
+    assert_eq!(err["error"]["code"], "bad_request");
+}
+
+#[tokio::test]
+async fn agent_output_endpoint_errors_on_unknown_agent_and_herdr_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let _store = fresh_run(dir.path());
+    let fake = Arc::new(FakeHerdr::new());
+    fake.add_pane(PaneInfo::new("w1:p1", "w1", "w1:t1"));
+    fake.add_agent(AgentInfo {
+        name: "claude-1".into(),
+        kind: "claude".into(),
+        pane_id: "w1:p1".into(),
+        tab_id: "w1:t1".into(),
+        workspace_id: "w1".into(),
+        cwd: None,
+        status: AgentStatus::Working,
+        focused: false,
+    });
+    fake.set_output("claude-1", "output\n");
+
+    let srv = start_with_herdr(dir.path(), fake.clone()).await;
+
+    // Unknown agent: not on team in the run -> 404 agent_not_found
+    let (status, err) = get(&srv, "/api/v1/agents/unknown-agent/output").await;
+    assert_eq!(status, 404);
+    assert_eq!(err["error"]["code"], "agent_not_found");
+
+    // Herdr cannot read -> clear error (502 herdr_read_failed, not 200 or empty page)
+    fake.fail_next(
+        CallKind::AgentRead,
+        1,
+        HerdrError::other("herdr daemon timed out"),
+    );
+    let (status, err) = get(&srv, "/api/v1/agents/claude-1/output").await;
+    assert_eq!(status, 502);
+    assert_eq!(err["error"]["code"], "herdr_read_failed");
+    assert!(err["error"]["message"].as_str().unwrap().contains("herdr daemon timed out"));
+}
+
+#[tokio::test]
+async fn agents_endpoint_reports_working_on_per_team_member() {
+    let dir = tempfile::tempdir().unwrap();
+    let _store = busy_run(dir.path());
+    let srv = start(dir.path()).await;
+
+    let body = ok(&srv, "/api/v1/agents").await;
+    let team = body["team"].as_array().unwrap();
+
+    // claude-1 is coding M5 in busy_run
+    let claude = team.iter().find(|m| m["name"] == "claude-1").unwrap();
+    assert_eq!(
+        claude["working_on"],
+        serde_json::json!({
+            "task": "M5",
+            "state": "coding"
+        })
+    );
+
+    // codex-1 is held on M2 in busy_run
+    let codex = team.iter().find(|m| m["name"] == "codex-1").unwrap();
+    assert_eq!(
+        codex["working_on"],
+        serde_json::json!({
+            "task": "M2",
+            "state": "held"
+        })
+    );
+
+    // lead is not assigned a milestone
+    let lead = team.iter().find(|m| m["name"] == "lead").unwrap();
+    assert!(lead["working_on"].is_null());
+}
+
+#[tokio::test]
+async fn attention_lists_all_open_kinds_and_they_disappear_when_resolved() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = fresh_run(dir.path());
+    let srv = start(dir.path()).await;
+
+    // 1. Plan approval: fresh run has plan_approval item
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    assert!(items.iter().any(|i| i["kind"] == "plan_approval" && i["actions"] == serde_json::json!(["approve"])));
+
+    // Resolve plan approval: record a task_go row via mark_dispatched
+    store.mark_dispatched("M1").unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.iter().any(|i| i["kind"] == "plan_approval"));
+
+    // 2. Blocked agent: milestone in Coding has a blocked lead queue item
+    store.transition("M1", &TransitionRequest::auto(State::Coding, Some("start"))).unwrap();
+    let _q_id = store.enqueue_blocked_lead_event(
+        "M1",
+        "claude-1",
+        Some("May I run `cargo test`?"),
+    ).unwrap().unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    let blocked = items.iter().find(|i| i["kind"] == "blocked").unwrap();
+    assert_eq!(blocked["agent"], "claude-1");
+    assert_eq!(blocked["prompt"], "May I run `cargo test`?");
+    assert_eq!(blocked["actions"], serde_json::json!(["open_chat"]));
+
+    // Resolve blocked agent: milestone moves on (e.g. finishes coding into verifying)
+    store.transition("M1", &TransitionRequest::auto(State::Verifying, Some("done"))).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.iter().any(|i| i["kind"] == "blocked"));
+
+    // 3. Question: milestone M2 in needs-answer
+    store.transition("M2", &TransitionRequest::auto(State::NeedsAnswer, Some("which port?"))).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    let question = items.iter().find(|i| i["kind"] == "question").unwrap();
+    assert_eq!(question["task"], "M2");
+    assert_eq!(question["actions"], serde_json::json!(["answer"]));
+
+    // Resolve question: transition back to pending (answered/dispatched)
+    store.transition("M2", &TransitionRequest::auto(State::Pending, Some("answered"))).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.iter().any(|i| i["kind"] == "question"));
+
+    // 4. Held milestone: milestone M3 in held (via Coding -> Verifying -> Held)
+    store.transition("M3", &TransitionRequest::auto(State::Coding, Some("start"))).unwrap();
+    store.transition("M3", &TransitionRequest::auto(State::Verifying, Some("check"))).unwrap();
+    store.transition("M3", &TransitionRequest::auto(State::Held, Some("high risk diff"))).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    let held = items.iter().find(|i| i["kind"] == "held").unwrap();
+    assert_eq!(held["task"], "M3");
+    assert_eq!(held["detail"], "high risk diff");
+    assert_eq!(held["actions"], serde_json::json!(["approve"]));
+
+    // Resolve held: approve/resume (e.g. to pending for commit/dispatch)
+    store.transition("M3", &TransitionRequest::auto(State::Pending, Some("approved"))).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.iter().any(|i| i["kind"] == "held"));
+
+    // 5. Failed milestone: milestone M4 in failed
+    store.transition("M4", &TransitionRequest::auto(State::Coding, Some("start"))).unwrap();
+    store.transition("M4", &TransitionRequest::auto(State::Failed, Some("check failed 3 times"))).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    let failed = items.iter().find(|i| i["kind"] == "failed").unwrap();
+    assert_eq!(failed["task"], "M4");
+    assert_eq!(failed["actions"], serde_json::json!(["dispatch"]));
+
+    // Resolve failed: dispatch back to coding
+    store.transition("M4", &TransitionRequest::auto(State::Pending, Some("retried"))).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.iter().any(|i| i["kind"] == "failed"));
+
+    // 6. Wake unread: unacknowledged wake-up
+    store.transition("M5", &TransitionRequest::auto(State::Coding, Some("start"))).unwrap();
+    let wake_qid = store.enqueue_blocked_lead_event("M5", "claude-1", None).unwrap().unwrap();
+    store.save_wake_state(&orch_core::wake::WakeState {
+        upto: wake_qid,
+        since: 1_700_000_000,
+        round_at: 1_700_000_000,
+        sent_at: 1_700_000_000,
+        sends: 1,
+        confirm_n: 0,
+        awaiting: true,
+        notified: false,
+        held: false,
+        gone_told: false,
+    }).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    let wake = items.iter().find(|i| i["kind"] == "wake_unread").unwrap();
+    assert_eq!(wake["actions"], serde_json::json!(["open_chat"]));
+
+    // Resolve wake unread: mark event read
+    store.mark_lead_read(&[wake_qid]).unwrap();
+    let body = ok(&srv, "/api/v1/attention").await;
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.iter().any(|i| i["kind"] == "wake_unread"));
 }

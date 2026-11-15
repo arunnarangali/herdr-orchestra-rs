@@ -101,6 +101,20 @@ pub struct LogEvent {
     pub ts: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionOp {
+    Add,
+    Remove,
+}
+
+/// Payload for `attention` events.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AttentionEvent {
+    pub op: AttentionOp,
+    pub item: crate::models::AttentionItem,
+}
+
 /// Polling interval for disk checks.
 pub fn poll_interval() -> Duration {
     let ms = std::env::var("ORCH_STREAM_POLL_MS")
@@ -357,6 +371,7 @@ struct PollState {
     last_chat_seq: i64,
     last_run_control_state: Option<String>,
     last_run_control_source: Option<String>,
+    last_attention_items: Option<Vec<orch_core::attention::AttentionItem>>,
     events_jsonl_offset: u64,
     log_offset: u64,
 }
@@ -374,6 +389,20 @@ impl PollState {
         let (last_run_control_state, last_run_control_source) = match initial_control {
             Some(rc) => (Some(rc.state), Some(rc.source)),
             None => (Some("running".to_string()), None),
+        };
+
+        let last_attention_items = if db_path.exists() {
+            if let Ok(store) = orch_core::store::Store::open(&db_path) {
+                if let Ok(Some(run)) = store.load_run() {
+                    orch_core::attention::attention_items(&store, Some(&run)).ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
         };
 
         let events_jsonl_offset = if events_jsonl_path.exists() {
@@ -399,6 +428,7 @@ impl PollState {
             last_chat_seq: orch_core::chat::init_chat_poll_state(&db_path),
             last_run_control_state,
             last_run_control_source,
+            last_attention_items: Some(last_attention_items.unwrap_or_default()),
             events_jsonl_offset,
             log_offset,
         }
@@ -669,5 +699,34 @@ fn poll_once(
                 }
             }
         }
+    }
+
+    // 4. Attention items
+    if db_path.exists()
+        && let Ok(store) = orch_core::store::Store::open(db_path)
+        && let Ok(Some(run)) = store.load_run()
+        && let Ok(current_items) = orch_core::attention::attention_items(&store, Some(&run))
+    {
+        if let Some(prev_items) = state.last_attention_items.take() {
+            for old in &prev_items {
+                if !current_items.iter().any(|cur| cur.id == old.id) {
+                    let ev = AttentionEvent {
+                        op: AttentionOp::Remove,
+                        item: old.clone().into(),
+                    };
+                    hub.publish("attention", serde_json::to_value(ev).unwrap_or_default());
+                }
+            }
+            for cur in &current_items {
+                if !prev_items.iter().any(|old| old.id == cur.id) {
+                    let ev = AttentionEvent {
+                        op: AttentionOp::Add,
+                        item: cur.clone().into(),
+                    };
+                    hub.publish("attention", serde_json::to_value(ev).unwrap_or_default());
+                }
+            }
+        }
+        state.last_attention_items = Some(current_items);
     }
 }

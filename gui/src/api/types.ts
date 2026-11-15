@@ -332,6 +332,10 @@ export interface AgentKindInfo {
   skills: SkillsInfo;
   login: LoginInfo;
 }
+export interface WorkingOn {
+  task: string;
+  state: string;
+}
 export interface TeamMember {
   name: string;
   /** `worker`, `reviewer` or `lead`. */
@@ -340,6 +344,7 @@ export interface TeamMember {
   model: string | null;
   tier: string | null;
   detect: boolean;
+  working_on: WorkingOn | null;
 }
 export interface AgentsResponse {
   agents: AgentKindInfo[];
@@ -532,6 +537,51 @@ export interface LogEvent {
   ts: number;
 }
 
+export type AttentionKind =
+  | "blocked"
+  | "question"
+  | "held"
+  | "failed"
+  | "wake_unread"
+  | "plan_approval";
+
+export type AttentionAction =
+  | "answer"
+  | "approve"
+  | "fix"
+  | "dispatch"
+  | "open_chat";
+
+export interface AttentionItem {
+  id: string;
+  kind: AttentionKind | (string & {});
+  task: string | null;
+  agent: string | null;
+  title: string;
+  detail: string | null;
+  prompt: string | null;
+  since: string;
+  actions: (AttentionAction | (string & {}))[];
+}
+
+export interface AttentionResponse {
+  items: AttentionItem[];
+}
+
+export interface AgentOutputResponse {
+  agent: string;
+  lines: number;
+  text: string;
+  ts: string;
+}
+
+export type AttentionOp = "add" | "remove";
+
+export interface AttentionEvent {
+  op: AttentionOp | (string & {});
+  item: AttentionItem;
+}
+
 /**
  * The server's own record of a message. On the wire `id` and `event` are SSE fields and
  * `data` is the JSON payload; see `StreamMessage` for what the app receives.
@@ -548,6 +598,7 @@ export interface StreamPayloads {
   "run-state": RunStateEvent;
   chat: ChatMessage;
   log: LogEvent;
+  attention: AttentionEvent;
 }
 export type StreamEventName = keyof StreamPayloads;
 export const STREAM_EVENT_NAMES: readonly StreamEventName[] = [
@@ -556,6 +607,7 @@ export const STREAM_EVENT_NAMES: readonly StreamEventName[] = [
   "run-state",
   "chat",
   "log",
+  "attention",
 ];
 
 /** One message from the live stream, typed by its event name. */
