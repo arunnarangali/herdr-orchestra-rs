@@ -1,0 +1,14 @@
+{
+  "action": "dispatch",
+  "event_manager_running": false,
+  "message": "recorded; the event manager is not running",
+  "tasks": [
+    {
+      "id": "M1",
+      "state": "pending",
+      "title": "Foundation",
+      "worker": "rs-claude-1"
+    }
+  ],
+  "waiting": true
+}

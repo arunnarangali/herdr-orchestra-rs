@@ -1,0 +1,28 @@
+{
+  "tasks": [
+    {
+      "attempt": 2,
+      "conflict_rounds": 0,
+      "deps": [
+        "M0"
+      ],
+      "escalated": false,
+      "fix_rounds": 1,
+      "id": "M1",
+      "last_worker": "rs-claude-1",
+      "lost": 0,
+      "model": "claude-sonnet-5-5",
+      "needs": [
+        "coding",
+        "reasoning"
+      ],
+      "ready": false,
+      "reason": "check passed",
+      "review_rounds": 1,
+      "state": "awaiting-review",
+      "tier": "medium",
+      "title": "Foundation",
+      "worker": "rs-claude-1"
+    }
+  ]
+}

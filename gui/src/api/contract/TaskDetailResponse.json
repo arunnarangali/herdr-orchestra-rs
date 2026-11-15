@@ -1,0 +1,110 @@
+{
+  "checks": [
+    {
+      "ok": true,
+      "secs": 12.5,
+      "ts": 1700000050,
+      "where": "worktree"
+    }
+  ],
+  "files_changed": [
+    "gui/package.json"
+  ],
+  "files_outside_likely": [
+    "docs/x.md"
+  ],
+  "history": [
+    {
+      "attempt": 1,
+      "forced": false,
+      "from": "pending",
+      "model": "claude-sonnet-5-5",
+      "to": "coding",
+      "ts": 1700000000,
+      "why": "dispatched",
+      "worker": "rs-claude-1"
+    }
+  ],
+  "results": [
+    {
+      "attempt": 1,
+      "check": {
+        "passed": true,
+        "ran": true,
+        "summary": "42 tests pass"
+      },
+      "commit": "feat(gui): add the app",
+      "criteria": [
+        {
+          "evidence": "test passes",
+          "id": "AC1",
+          "met": true
+        }
+      ],
+      "error": null,
+      "files_changed": [
+        "gui/package.json"
+      ],
+      "questions": [
+        "which port?"
+      ],
+      "status": "done"
+    }
+  ],
+  "reviews": [
+    {
+      "blockers": [
+        {
+          "criterion": "AC4",
+          "file": "src/lib.rs",
+          "line": "12-14",
+          "problem": "the token is logged",
+          "why": "secrets must never reach a log"
+        }
+      ],
+      "criteria": [
+        {
+          "id": "AC1",
+          "met": false,
+          "note": "missing a test"
+        }
+      ],
+      "error": null,
+      "outcome": "changes-requested",
+      "round": 1,
+      "suggestions": [
+        {
+          "criterion": "AC4",
+          "file": "src/lib.rs",
+          "line": "12-14",
+          "problem": "the token is logged",
+          "why": "secrets must never reach a log"
+        }
+      ]
+    }
+  ],
+  "task": {
+    "attempt": 2,
+    "conflict_rounds": 0,
+    "deps": [
+      "M0"
+    ],
+    "escalated": false,
+    "fix_rounds": 1,
+    "id": "M1",
+    "last_worker": "rs-claude-1",
+    "lost": 0,
+    "model": "claude-sonnet-5-5",
+    "needs": [
+      "coding",
+      "reasoning"
+    ],
+    "ready": false,
+    "reason": "check passed",
+    "review_rounds": 1,
+    "state": "awaiting-review",
+    "tier": "medium",
+    "title": "Foundation",
+    "worker": "rs-claude-1"
+  }
+}

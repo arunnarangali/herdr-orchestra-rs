@@ -1,0 +1,69 @@
+{
+  "feature_breakdown": "1. the app",
+  "header": {
+    "base": "main",
+    "branch": "orch/desktop",
+    "budget": "none",
+    "check_command": "cargo test",
+    "commits": "per-milestone",
+    "extra": [
+      [
+        "Owner",
+        "the team"
+      ]
+    ],
+    "isolation": "worktree",
+    "lead": "claude",
+    "lead_mode": "manual",
+    "max_parallel": "2",
+    "reviewer": "rs-codex-1",
+    "risk_hold": "on",
+    "scope": "warn",
+    "setup_command": "npm ci",
+    "setup_inputs": "package-lock.json",
+    "workers": "rs-claude-1"
+  },
+  "milestones": [
+    {
+      "acceptance_criteria": [
+        {
+          "id": "AC1",
+          "text": "it builds"
+        }
+      ],
+      "constraints": "no remote fonts",
+      "context": "see the plan",
+      "depends_on": [
+        {
+          "id": "M0",
+          "reason": "needs the API"
+        }
+      ],
+      "enabled": true,
+      "estimate": "75m",
+      "goal": "an app that starts",
+      "has_open_questions": false,
+      "id": "M1",
+      "interfaces": "gui/src/api",
+      "likely_files": [
+        "gui/"
+      ],
+      "model_why": "sets the structure",
+      "needs": [
+        "coding"
+      ],
+      "notes_from_user": "be careful",
+      "open_questions": "none",
+      "out_of_scope": "screens",
+      "parallel": false,
+      "prefer": "rs-claude-1",
+      "review": "yes",
+      "role": "front-end engineer",
+      "tier": "medium",
+      "title": "Foundation",
+      "why": "every screen needs it",
+      "why_separate": "it is the foundation"
+    }
+  ],
+  "title": "Desktop app"
+}

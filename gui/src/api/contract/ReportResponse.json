@@ -1,0 +1,55 @@
+{
+  "branch": "orch/desktop",
+  "broken_branch": {
+    "reason": "the run branch fails its check",
+    "since": 1700000300
+  },
+  "conflicts": 0,
+  "elapsed_s": 3600,
+  "failed": 0,
+  "finished": 1700003600,
+  "first_pass": 1,
+  "first_pass_rate": 0.5,
+  "fix_rounds": 1,
+  "lost": 0,
+  "merged": 1,
+  "models": [
+    {
+      "conflict_rounds": 0,
+      "fix_rounds": 1,
+      "lost": 0,
+      "merged": 1,
+      "model": "claude-sonnet-5-5",
+      "review_rounds": 1,
+      "tasks": 1,
+      "tier": "medium",
+      "tries": 2
+    }
+  ],
+  "started": 1700000000,
+  "tasks": [
+    {
+      "actual_tier": "medium",
+      "below_planned_tier": false,
+      "conflict_rounds": 0,
+      "finished": 1700001800,
+      "fix_rounds": 1,
+      "id": "M1",
+      "lost": 0,
+      "model": "claude-sonnet-5-5",
+      "planned_tier": "medium",
+      "review_rounds": 1,
+      "seconds": 1800,
+      "started": 1700000000,
+      "state": "merged",
+      "tries": 2
+    }
+  ],
+  "total": 2,
+  "wasted": {
+    "conflict_rounds": 0,
+    "extra_attempts": 1,
+    "fix_rounds": 1,
+    "lost_attempts": 0
+  }
+}

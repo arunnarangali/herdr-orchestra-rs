@@ -1,0 +1,16 @@
+{
+  "agent": "rs-claude-1",
+  "attempt": 1,
+  "forced": false,
+  "from": "pending",
+  "id": "M1",
+  "model": "claude-sonnet-5-5",
+  "reason": "dispatched",
+  "status": "coding",
+  "task": "M1",
+  "task_id": "M1",
+  "to": "coding",
+  "ts": 1700000000,
+  "why": "dispatched",
+  "worker": "rs-claude-1"
+}

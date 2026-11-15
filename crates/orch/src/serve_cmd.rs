@@ -1,23 +1,37 @@
-//! `orch serve [--host <loopback address>] [--port <n>]`: the local REST API (`orch-api`).
-//! It listens on loopback only, answers only requests with the install's token, and only
-//! serves the run that exists: it never creates or edits one.
+//! `orch serve [--host <loopback address>] [--port <n>] [--allow-origin <origin>]…`: the local
+//! REST API (`orch-api`). It listens on loopback only, answers only requests with the
+//! install's token, and only serves the run that exists: it never creates or edits one.
+//! `--allow-origin` lets one more web page origin (the desktop app's window) call it.
 
 use crate::listing::die;
 use orch_api::{AppState, BindError};
 use orch_core::paths;
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: orch serve [--host <127.0.0.1|localhost|::1>] [--port <n>]";
+const USAGE: &str = "usage: orch serve [--host <127.0.0.1|localhost|::1>] [--port <n>] \
+[--allow-origin <scheme://host[:port]>]…";
 
 struct Opts {
     host: String,
     port: u16,
+    origins: Vec<String>,
+}
+
+/// An origin is `scheme://host[:port]`: no path, no wildcard.
+fn valid_origin(o: &str) -> bool {
+    o.split_once("://").is_some_and(|(scheme, rest)| {
+        !scheme.is_empty()
+            && !rest.is_empty()
+            && !o.contains('*')
+            && !rest.contains(['/', '?', '#', ' '])
+    })
 }
 
 fn parse(args: &[String]) -> Result<Opts, String> {
     let mut opts = Opts {
         host: "127.0.0.1".into(),
         port: 0,
+        origins: Vec::new(),
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -25,7 +39,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
             Some((f, v)) => (f, Some(v.to_string())),
             None => (a.as_str(), None),
         };
-        if flag != "--host" && flag != "--port" {
+        if !["--host", "--port", "--allow-origin"].contains(&flag) {
             return Err(format!("unknown argument `{a}`\n{USAGE}"));
         }
         let value = match inline.or_else(|| it.next().cloned()) {
@@ -34,6 +48,14 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         };
         if flag == "--host" {
             opts.host = value;
+        } else if flag == "--allow-origin" {
+            if !valid_origin(&value) {
+                return Err(format!(
+                    "--allow-origin must look like http://localhost:5173 (scheme://host[:port], \
+no path or wildcard), got `{value}`"
+                ));
+            }
+            opts.origins.push(value);
         } else {
             opts.port = value
                 .parse()
@@ -107,7 +129,7 @@ pub fn serve(args: &[String]) -> i32 {
             orch_api::token::token_path(&cfg).display()
         );
         let state = AppState::new(root, token);
-        match orch_api::serve(listener, state, wait_for_stop()).await {
+        match orch_api::serve_with(listener, state, opts.origins, wait_for_stop()).await {
             Ok(()) => {
                 println!("orch serve: stopped");
                 0
@@ -131,6 +153,28 @@ mod tests {
         assert_eq!((o.host.as_str(), o.port), ("localhost", 8080));
         let d = parse(&[]).unwrap();
         assert_eq!((d.host.as_str(), d.port), ("127.0.0.1", 0));
+        assert!(d.origins.is_empty());
+    }
+
+    #[test]
+    fn collects_allowed_origins() {
+        let o = parse(&v(&[
+            "--allow-origin",
+            "tauri://localhost",
+            "--allow-origin=http://localhost:5173",
+        ]))
+        .unwrap();
+        assert_eq!(o.origins, ["tauri://localhost", "http://localhost:5173"]);
+        for bad in [
+            "*",
+            "localhost",
+            "http://x/",
+            "http://*.x",
+            "://x",
+            "http://",
+        ] {
+            assert!(parse(&v(&["--allow-origin", bad])).is_err(), "{bad}");
+        }
     }
 
     #[test]

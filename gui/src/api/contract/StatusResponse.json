@@ -1,0 +1,53 @@
+{
+  "all_done": false,
+  "base": "main",
+  "branch": "orch/desktop",
+  "broken_branch": {
+    "reason": "the run branch fails its check",
+    "since": 1700000300
+  },
+  "event_manager": {
+    "holder": "orch autopilot (pid 42, started 1700000000)",
+    "running": true
+  },
+  "events": {
+    "open": 2,
+    "unread": 1
+  },
+  "isolation": "worktree",
+  "lead_mode": "manual",
+  "max_parallel": 2,
+  "progress": [
+    {
+      "count": 3,
+      "state": "pending"
+    }
+  ],
+  "reviewer": "rs-codex-1",
+  "run_state": "running",
+  "stuck": false,
+  "tasks": [
+    {
+      "deps": [
+        "M0"
+      ],
+      "id": "M1",
+      "reason": "dispatched",
+      "state": "coding",
+      "tier": "medium",
+      "title": "Foundation",
+      "worker": "rs-claude-1"
+    }
+  ],
+  "title": "Desktop app",
+  "workers": [
+    {
+      "detect": true,
+      "kind": "claude",
+      "model": "claude-sonnet-5-5",
+      "name": "rs-claude-1",
+      "task": "M1",
+      "tier": "medium"
+    }
+  ]
+}

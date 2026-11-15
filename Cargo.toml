@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/orch", "crates/orch-api", "crates/orch-core", "crates/orch-config", "crates/orch-herdr"]
+# The desktop shell needs the system's webview libraries; it is built on its own
+# (`cargo check --manifest-path gui/src-tauri/Cargo.toml`), so the workspace stays light.
+exclude = ["gui/src-tauri"]
 
 [workspace.package]
 version = "5.0.0-dev"
