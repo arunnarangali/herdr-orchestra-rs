@@ -3,9 +3,10 @@
 
 use orch_config::launch::repr;
 use orch_core::paths;
-use orch_core::run_store::{Run, is_active};
+use orch_core::run_store::Run;
 use orch_core::store::{DB_FILE, Store};
-use orch_core::task::{State, Task};
+use orch_core::task::State;
+use orch_core::view;
 use std::io::Write;
 use std::path::Path;
 
@@ -36,11 +37,12 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
         Ok(x) => x,
         Err(e) => return die(e),
     };
-    let tasks = match store.list_tasks() {
-        Ok(t) => t,
+    let orch_dir = store.path().parent().map(Path::to_path_buf).unwrap_or_default();
+    let v = match view::status_view(&store, &run, &orch_dir) {
+        Ok(v) => v,
         Err(e) => return die(e),
     };
-    let s = &run.settings;
+    let s = &v.settings;
     let _ = writeln!(
         out,
         "branch={} base={} isolation={} max_parallel={} reviewer={} (busy: None)",
@@ -50,18 +52,10 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
         s.max_parallel,
         s.reviewer.as_deref().unwrap_or("None")
     );
-    if let Ok(Some(b)) = store.integration_broken() {
+    if let Some(b) = &v.broken {
         let _ = writeln!(out, "  {}", orch_core::integration::status_line(&s.branch, &b.reason));
     }
-    for w in run
-        .agents
-        .iter()
-        .filter(|a| a.role == orch_core::run_store::AgentRole::Worker)
-    {
-        let held = tasks
-            .iter()
-            .find(|t| t.worker.as_deref() == Some(w.name.as_str()))
-            .map_or("-", |t| t.id.as_str());
+    for w in &v.workers {
         let model = w.model.as_ref().map_or(String::new(), |m| {
             format!("model={m} ({}) ", w.tier.as_deref().unwrap_or("unrated"))
         });
@@ -70,15 +64,12 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
             "  worker {:<12} {:<8} task={:<5} {}{}",
             w.name,
             w.kind,
-            held,
+            w.task.as_deref().unwrap_or("-"),
             model,
             if w.detect { "" } else { " detect:off" }
         );
     }
-    let find = |id: &str| tasks.iter().find(|t| t.id == id);
-    let mut shown: Vec<(&Task, &orch_core::run_store::PlannedTask)> = Vec::new();
-    for p in &run.plan {
-        let Some(t) = find(&p.id) else { continue };
+    for t in &v.tasks {
         let _ = writeln!(
             out,
             "  {:<4} {:<15} deps={:<10} worker={:<10} {}{}{}",
@@ -90,7 +81,7 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
                 t.deps.join(",")
             },
             t.worker.as_deref().unwrap_or("-"),
-            p.tier
+            t.tier
                 .as_ref()
                 .map_or(String::new(), |x| format!("tier={x} ")),
             t.title,
@@ -100,24 +91,15 @@ pub fn run_status(start: &Path, out: &mut dyn Write) -> i32 {
                 format!("  [{}]", t.reason)
             }
         );
-        shown.push((t, p));
     }
-    let merged = |id: &str| find(id).is_some_and(|t| t.status == State::Merged);
-    if shown
-        .iter()
-        .all(|(t, _)| matches!(t.status, State::Merged | State::Skipped))
-    {
+    if v.all_done {
         let _ = writeln!(
             out,
             "ALL_DONE — run `orch finish` to push {} and open a PR into {}",
             s.branch,
             s.base.as_deref().unwrap_or("None")
         );
-    } else if !shown.iter().any(|(t, _)| is_active(t.status))
-        && !shown
-            .iter()
-            .any(|(t, _)| t.status == State::Pending && t.deps.iter().all(|d| merged(d)))
-    {
+    } else if v.stuck {
         let _ = writeln!(
             out,
             "STUCK — nothing running and nothing ready; resolve paused/needs-answer/failed tasks with the developer"
@@ -134,22 +116,16 @@ pub fn run_report(start: &Path, out: &mut dyn Write) -> i32 {
         Ok(x) => x,
         Err(e) => return die(e),
     };
-    let tasks = match store.list_tasks() {
-        Ok(t) => t,
+    let v = match view::report_view(&store, &run) {
+        Ok(v) => v,
         Err(e) => return die(e),
     };
-    let broken = store.integration_broken().ok().flatten();
-    let branch = run.settings.branch.as_str();
-    let rows: Vec<&Task> = run.plan.iter().filter_map(|p| tasks.iter().find(|t| t.id == p.id)).collect();
-    let merged = rows.iter().filter(|t| t.status == State::Merged).count();
-    let failed = rows.iter().filter(|t| t.status == State::Failed).count();
-    let sum = |f: fn(&Task) -> u32| rows.iter().map(|t| f(t)).sum::<u32>();
     let _ = writeln!(
         out,
         "{:<5} {:<15} {:>5} {:>4} {:>6} {:>5} {:>4}",
         "task", "status", "tries", "fix", "review", "confl", "lost"
     );
-    for t in &rows {
+    for t in &v.rows {
         let _ = writeln!(
             out,
             "{:<5} {:<15} {:>5} {:>4} {:>6} {:>5} {:>4}",
@@ -164,14 +140,16 @@ pub fn run_report(start: &Path, out: &mut dyn Write) -> i32 {
     }
     let _ = writeln!(
         out,
-        "\nmerged {merged}/{}, failed {failed}; conflicts {}; lost attempts {}; fix rounds {}",
-        rows.len(),
-        sum(|t| t.conflict_rounds),
-        sum(|t| t.lost),
-        sum(|t| t.fix_rounds)
+        "\nmerged {}/{}, failed {}; conflicts {}; lost attempts {}; fix rounds {}",
+        v.merged,
+        v.rows.len(),
+        v.failed,
+        v.conflicts,
+        v.lost,
+        v.fix_rounds
     );
-    if let Some(b) = broken {
-        let _ = writeln!(out, "{}", orch_core::integration::status_line(branch, &b.reason));
+    if let Some(b) = &v.broken {
+        let _ = writeln!(out, "{}", orch_core::integration::status_line(&v.branch, &b.reason));
     }
     0
 }

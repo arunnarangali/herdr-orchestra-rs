@@ -31,6 +31,7 @@ pub mod store;
 pub mod task;
 pub mod task_contract;
 pub mod wake;
+pub mod view;
 pub mod worktree;
 
 pub use error::{Error, Result};
