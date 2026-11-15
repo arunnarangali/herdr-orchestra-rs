@@ -65,6 +65,8 @@ impl RuntimeView for Runtime {
 }
 
 thread_local! {
+    /// The next send dies after the prompt is recorded, like a killed process.
+    static CRASH_SEND: Cell<bool> = const { Cell::new(false) };
     /// When set, the fake check raises this flag (the manager's `interrupt`) as it runs.
     static CHECK_TRIPS: RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> =
         const { RefCell::new(None) };
@@ -87,6 +89,9 @@ impl Deliveries for Deliver {
         req: NewDelivery<'_>,
     ) -> Result<DeliveryOutcome, StoreError> {
         let id = store.record_delivery(req.agent, req.task, req.attempt, req.kind, req.prompt)?;
+        if CRASH_SEND.with(|c| c.replace(false)) {
+            panic!("simulated crash between recording and sending the prompt");
+        }
         self.outcome(store, id, req.agent)
     }
 
@@ -164,6 +169,13 @@ struct FkWork {
     commits: RefCell<Vec<CommitOutcome>>,
     /// What the check on the run branch before work answers (`None`: passes).
     baseline: RefCell<Option<(bool, String)>>,
+    /// How many times the check and the landing ran (a crash is a panic, a restart a new
+    /// manager over the same store).
+    check_log: RefCell<Vec<String>>,
+    commit_log: RefCell<Vec<String>>,
+    /// The next check / landing dies like a killed process would, once.
+    crash_check: Cell<bool>,
+    crash_commit: Cell<bool>,
 }
 
 impl Work for FkWork {
@@ -203,7 +215,11 @@ impl Work for FkWork {
         Ok(self.strays.borrow().clone())
     }
 
-    fn check(&mut self, _task: &str) -> std::result::Result<CheckOutcome, String> {
+    fn check(&mut self, task: &str) -> std::result::Result<CheckOutcome, String> {
+        self.check_log.borrow_mut().push(task.to_string());
+        if self.crash_check.replace(false) {
+            panic!("simulated crash during the check");
+        }
         // a stop signal arriving while the check runs
         CHECK_TRIPS.with(|c| {
             if let Some(flag) = c.borrow().as_ref() {
@@ -230,7 +246,11 @@ impl Work for FkWork {
         Ok(self.review.clone())
     }
 
-    fn commit(&mut self, _task: &str) -> std::result::Result<CommitOutcome, String> {
+    fn commit(&mut self, task: &str) -> std::result::Result<CommitOutcome, String> {
+        self.commit_log.borrow_mut().push(task.to_string());
+        if self.crash_commit.replace(false) {
+            panic!("simulated crash during the merge");
+        }
         let mut c = self.commits.borrow_mut();
         Ok(if c.is_empty() { CommitOutcome::Merged } else { c.remove(0) })
     }
@@ -421,6 +441,10 @@ impl One {
                 lines: RefCell::new(vec![]),
                 commits: RefCell::new(vec![]),
                 baseline: RefCell::new(None),
+                check_log: RefCell::new(vec![]),
+                commit_log: RefCell::new(vec![]),
+                crash_check: Cell::new(false),
+                crash_commit: Cell::new(false),
             },
             notes: Notes(RefCell::new(vec![])),
             say_log: Rc::new(RefCell::new(Vec::new())),
@@ -583,6 +607,10 @@ fn recovery_confirms_from_a_working_agent_and_resends_to_an_idle_one() {
         lines: RefCell::new(vec![]),
         commits: RefCell::new(vec![]),
         baseline: RefCell::new(None),
+        check_log: RefCell::new(vec![]),
+        commit_log: RefCell::new(vec![]),
+        crash_check: Cell::new(false),
+        crash_commit: Cell::new(false),
     };
     let mut say = pusher(&say_log);
     let report = reconcile(
@@ -753,6 +781,10 @@ fn the_lead_waits_then_the_milestone_is_auto_dispatched() {
             lines: RefCell::new(vec![]),
             commits: RefCell::new(vec![]),
             baseline: RefCell::new(None),
+            check_log: RefCell::new(vec![]),
+            commit_log: RefCell::new(vec![]),
+            crash_check: Cell::new(false),
+            crash_commit: Cell::new(false),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -813,6 +845,10 @@ fn the_budget_used_up_stops_the_run_with_a_stopped_entry() {
             lines: RefCell::new(vec![]),
             commits: RefCell::new(vec![]),
             baseline: RefCell::new(None),
+            check_log: RefCell::new(vec![]),
+            commit_log: RefCell::new(vec![]),
+            crash_check: Cell::new(false),
+            crash_commit: Cell::new(false),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -866,6 +902,10 @@ fn reconcile_parks_a_coding_task_whose_agent_vanished() {
         lines: RefCell::new(vec![]),
         commits: RefCell::new(vec![]),
         baseline: RefCell::new(None),
+        check_log: RefCell::new(vec![]),
+        commit_log: RefCell::new(vec![]),
+        crash_check: Cell::new(false),
+        crash_commit: Cell::new(false),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -910,6 +950,10 @@ fn reconcile_clears_a_half_finished_wake_up() {
         lines: RefCell::new(vec![]),
         commits: RefCell::new(vec![]),
         baseline: RefCell::new(None),
+        check_log: RefCell::new(vec![]),
+        commit_log: RefCell::new(vec![]),
+        crash_check: Cell::new(false),
+        crash_commit: Cell::new(false),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -939,6 +983,10 @@ fn reconcile_never_marks_incomplete_work_as_completed() {
         lines: RefCell::new(vec![]),
         commits: RefCell::new(vec![]),
         baseline: RefCell::new(None),
+        check_log: RefCell::new(vec![]),
+        commit_log: RefCell::new(vec![]),
+        crash_check: Cell::new(false),
+        crash_commit: Cell::new(false),
     };
     let say_log = Rc::new(RefCell::new(Vec::new()));
     let mut say = pusher(&say_log);
@@ -963,6 +1011,10 @@ fn park_with_lost_fails_the_milestone_at_max_lost() {
         lines: RefCell::new(vec![]),
         commits: RefCell::new(vec![]),
         baseline: RefCell::new(None),
+        check_log: RefCell::new(vec![]),
+        commit_log: RefCell::new(vec![]),
+        crash_check: Cell::new(false),
+        crash_commit: Cell::new(false),
     };
     for _ in 0..3 {
         let st = park_with_lost(
@@ -1192,6 +1244,10 @@ fn a_passing_check_with_a_plan_review_goes_to_review_then_merges() {
             lines: RefCell::new(vec![]),
             commits: RefCell::new(vec![]),
             baseline: RefCell::new(None),
+            check_log: RefCell::new(vec![]),
+            commit_log: RefCell::new(vec![]),
+            crash_check: Cell::new(false),
+            crash_commit: Cell::new(false),
         },
         notes: Notes(RefCell::new(vec![])),
         say_log: Rc::new(RefCell::new(Vec::new())),
@@ -1250,7 +1306,7 @@ fn strict_scope_sends_the_milestone_back_naming_the_stray_files() {
     let mut one = strayed("strict");
     one.cycle(); // verifying: the scope check fires before the check
     let t = one.store.get_task("M1").unwrap();
-    assert_eq!(t.status, State::NeedsFix, "{}", joined(&one.say_log));
+    assert_eq!(t.status, State::Coding, "handed straight back to its coder: {}", joined(&one.say_log));
     assert_eq!(t.fix_rounds, 1);
     assert_eq!(
         one.work.kinds.borrow().as_slice(),
@@ -1259,9 +1315,7 @@ fn strict_scope_sends_the_milestone_back_naming_the_stray_files() {
     assert!(joined(&one.say_log).contains("outside its Likely files: Cargo.toml -> fix round"));
     let rec = Records::load(one.dir.path());
     assert_eq!(rec.0["M1"].out_of_scope, vec!["Cargo.toml"]);
-    let job = one.with_manager(|m, _| m.state.jobs.clone());
-    assert_eq!(job.len(), 1);
-    assert_eq!(job[0].file, "scope-fix-1.md");
+    assert!(one.dir.path().join(".orch-task/M1/scope-fix-1.md").exists());
 }
 
 #[test]
@@ -1280,9 +1334,8 @@ fn warn_scope_lists_the_strays_in_the_record_and_carries_on() {
 fn a_stray_already_sent_back_does_not_send_the_milestone_back_again() {
     let mut one = strayed("strict");
     one.cycle();
-    assert_eq!(one.store.get_task("M1").unwrap().status, State::NeedsFix);
+    assert_eq!(one.store.get_task("M1").unwrap().status, State::Coding);
     // the coder explained why in its report and left the file: the next verify carries on
-    one.store.transition("M1", &TransitionRequest::auto(State::Coding, None)).unwrap();
     one.store.transition("M1", &TransitionRequest::auto(State::Verifying, None)).unwrap();
     one.cycle();
     assert_eq!(one.store.get_task("M1").unwrap().status, State::Merged, "{}", joined(&one.say_log));
@@ -1483,15 +1536,13 @@ fn a_merged_result_that_fails_the_check_goes_back_as_an_integration_fix_round() 
     *one.work.commits.borrow_mut() = vec![branch_fails("FAILED: x::y")];
     land_m1(&mut one);
     let t = one.store.get_task("M1").unwrap();
-    assert_eq!(t.status, State::NeedsFix, "{}", joined(&one.say_log));
+    // the job is handed straight back to its coder (the claim was released)
+    assert_eq!((t.status, t.attempt), (State::Coding, 2), "{}", joined(&one.say_log));
     assert_eq!((t.fix_rounds, t.conflict_rounds), (1, 0));
-    assert!(t.reason.contains("fails the check on feature/x once merged (round 1)"), "{}", t.reason);
     // the job text (Python's `_integration_failed`) names the branch and the failing tail
-    let state = orch_core::manager::DriverState::load(&one.dir.path().join(".orchestrate"));
-    let job = state.jobs.iter().find(|j| j.task == "M1").expect("a queued job");
-    assert_eq!(job.file, "integration-fix-1.md");
-    assert!(job.body.contains("fails the check once merged onto `feature/x` (round 1)"), "{}", job.body);
-    assert!(job.body.contains("FAILED: x::y"), "{}", job.body);
+    let body = std::fs::read_to_string(one.dir.path().join(".orch-task/M1/integration-fix-1.md")).unwrap();
+    assert!(body.contains("fails the check once merged onto `feature/x` (round 1)"), "{body}");
+    assert!(body.contains("FAILED: x::y"), "{body}");
     assert!(joined(&one.say_log).contains("integration-fix round 1"), "{}", joined(&one.say_log));
 }
 
@@ -1502,13 +1553,11 @@ fn integration_fix_rounds_stop_at_three_and_fail_the_milestone() {
     land_m1(&mut one);
     for _ in 0..2 {
         // the coder fixed it (as far as the fake goes): back to verifying, then landing again
-        one.store.transition("M1", &TransitionRequest::auto(State::Coding, None)).unwrap();
+        assert_eq!(one.store.get_task("M1").unwrap().status, State::Coding);
         one.store.transition("M1", &TransitionRequest::auto(State::Verifying, None)).unwrap();
         one.cycle();
-        assert_eq!(one.store.get_task("M1").unwrap().status, State::NeedsFix);
     }
     assert_eq!(one.store.get_task("M1").unwrap().fix_rounds, 3);
-    one.store.transition("M1", &TransitionRequest::auto(State::Coding, None)).unwrap();
     one.store.transition("M1", &TransitionRequest::auto(State::Verifying, None)).unwrap();
     one.cycle();
     let t = one.store.get_task("M1").unwrap();
@@ -1693,4 +1742,313 @@ fn a_signal_during_a_check_lets_the_step_finish_and_starts_nothing_new() {
     // the next start picks M2 up
     one.with_manager(|m, _| m.cycle());
     assert_eq!(one.store.get_task("M2").unwrap().status, State::Coding);
+}
+
+// ---- Phase 10: failure simulation and concurrency
+
+fn rig(tasks: &[PlanTask]) -> One {
+    let mut one = One::new();
+    one.store
+        .apply_sync(&SyncInput { settings: settings(false), agents: agents(&["w1", "w2"], false), tasks: tasks.to_vec() })
+        .unwrap();
+    one
+}
+
+fn done(one: &mut One, task: &str, agent: &str) {
+    one.with_manager(|m, _| m.apply_event(&RunEvent::Done { task: task.into(), agent: agent.into() }).unwrap());
+}
+
+fn status(one: &One, task: &str) -> State {
+    one.store.get_task(task).unwrap().status
+}
+
+/// A process kill: the step panics; the next start is a new manager over the same store.
+fn killed(one: &mut One) {
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| one.cycle()));
+    assert!(r.is_err(), "the step should have been killed");
+}
+
+/// `run` for one loop pass, then stop.
+fn restart(one: &mut One) -> i32 {
+    let n = Cell::new(0);
+    one.with_manager(|m, _| {
+        m.run(&|| {
+            n.set(n.get() + 1);
+            n.get() > 1
+        })
+    })
+}
+
+#[test]
+fn a_kill_between_recording_and_sending_the_prompt_resends_it_once_to_the_same_agent() {
+    let mut one = One::new();
+    CRASH_SEND.with(|c| c.set(true));
+    killed(&mut one);
+    assert_eq!(status(&one, "M1"), State::Coding);
+    let d = one.store.latest_delivery("M1", 1, DeliveryKind::Coder).unwrap().unwrap();
+    assert!(!d.confirmed, "recorded, never sent");
+    RECOVER_STATUS.with(|c| *c.borrow_mut() = Some(AgentState::Idle));
+    one.clock.0.set(now() + 3600);
+    restart(&mut one);
+    RECOVER_STATUS.with(|c| *c.borrow_mut() = None);
+    let after = one.store.latest_delivery("M1", 1, DeliveryKind::Coder).unwrap().unwrap();
+    assert_eq!((after.id, after.confirmed, after.agent.as_str()), (d.id, true, "w1"));
+    assert_eq!(one.deliver.resends.get(), 1);
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!((t.status, t.attempt, t.lost), (State::Coding, 1, 0), "no second attempt, no lost attempt");
+}
+
+#[test]
+fn a_kill_during_the_check_leaves_the_task_verifying_and_the_restart_checks_and_merges_it_once() {
+    let mut one = One::new();
+    one.cycle();
+    done(&mut one, "M1", "w1");
+    one.work.crash_check.set(true);
+    killed(&mut one);
+    assert_eq!(status(&one, "M1"), State::Verifying, "not complete early");
+    assert!(one.work.commit_log.borrow().is_empty());
+    let code = restart(&mut one);
+    assert_eq!(code, 0);
+    assert_eq!(status(&one, "M1"), State::Merged);
+    assert_eq!(*one.work.commit_log.borrow(), ["M1"], "merged exactly once");
+    let merged = one.store.history("M1").unwrap().iter().filter(|t| t.to == State::Merged).count();
+    assert_eq!(merged, 1);
+}
+
+#[test]
+fn a_kill_during_the_merge_is_not_complete_and_the_restart_lands_it_once() {
+    let mut one = One::new();
+    one.cycle();
+    done(&mut one, "M1", "w1");
+    one.work.crash_commit.set(true);
+    killed(&mut one);
+    assert_ne!(status(&one, "M1"), State::Merged, "nothing marked complete early");
+    restart(&mut one);
+    assert_eq!(status(&one, "M1"), State::Merged);
+    let merged = one.store.history("M1").unwrap().iter().filter(|t| t.to == State::Merged).count();
+    assert_eq!(merged, 1);
+}
+
+#[test]
+fn a_second_done_from_the_same_coder_after_a_fix_round_is_applied() {
+    let mut one = One::new();
+    one.cycle();
+    done(&mut one, "M1", "w1");
+    one.work.check = Ok(CheckOutcome::Fail { tail: "boom".into() });
+    one.cycle(); // check fails -> fix job queued
+    // the fix goes straight back to a coder: the coder is released, so the scheduler takes it
+    assert_eq!(status(&one, "M1"), State::Coding);
+    assert_eq!(one.store.get_task("M1").unwrap().attempt, 2);
+    let w = one.store.get_task("M1").unwrap().worker.unwrap();
+    done(&mut one, "M1", &w);
+    assert_eq!(status(&one, "M1"), State::Verifying, "the second DONE is a new event, not a replay");
+}
+
+#[test]
+fn a_vanished_coder_moves_its_task_on_with_saved_work_while_the_others_keep_running() {
+    let mut one = rig(&[plan_task("M1", Some("medium")), plan_task("M2", Some("medium"))]);
+    one.cycle();
+    let (w1, w2) = (one.store.get_task("M1").unwrap().worker.unwrap(), one.store.get_task("M2").unwrap().worker.unwrap());
+    assert_ne!(w1, w2);
+    let t0 = one.clock.0.get();
+    one.with_manager(|m, _| m.apply_event(&RunEvent::Gone { task: "M1".into(), agent: w1.clone() }).unwrap());
+    let m1 = one.store.get_task("M1").unwrap();
+    assert_eq!((m1.status, m1.lost), (State::Pending, 1));
+    assert_eq!(m1.last_worker.as_deref(), Some(w1.as_str()));
+    assert_eq!(one.work.save_calls.get(), 1, "its work so far was saved");
+    let m2 = one.store.get_task("M2").unwrap();
+    assert_eq!((m2.status, m2.worker.as_deref()), (State::Coding, Some(w2.as_str())), "M2 untouched");
+    let snap = one.store.scheduler_snapshot().unwrap().unwrap();
+    let b = snap.benches.iter().find(|b| b.agent == w1).unwrap();
+    assert_eq!((b.reason.as_str(), b.until), ("gone", t0 + 600));
+    // M2 carries on to the merge, then M1 goes to the surviving coder
+    done(&mut one, "M2", &w2);
+    one.cycle();
+    assert_eq!(status(&one, "M2"), State::Merged);
+    one.cycle();
+    let m1 = one.store.get_task("M1").unwrap();
+    assert_eq!((m1.status, m1.worker.as_deref()), (State::Coding, Some(w2.as_str())));
+}
+
+#[test]
+fn a_gone_bench_ends_as_soon_as_herdr_sees_the_agent_again() {
+    let mut one = rig(&[plan_task("M1", Some("medium"))]);
+    one.cycle();
+    let w1 = one.store.get_task("M1").unwrap().worker.unwrap();
+    one.with_manager(|m, _| m.apply_event(&RunEvent::Gone { task: "M1".into(), agent: w1.clone() }).unwrap());
+    one.runtime.set(&w1, AgentState::Gone);
+    one.cycle();
+    assert!(one.store.benches().unwrap().iter().any(|b| b.agent == w1), "still gone: still benched");
+    one.runtime.set(&w1, AgentState::Idle);
+    one.cycle();
+    assert!(!one.store.benches().unwrap().iter().any(|b| b.agent == w1), "back: the bench ends at once");
+}
+
+fn reviewing_rig() -> One {
+    let mut m1 = plan_task("M1", Some("medium"));
+    m1.review = true;
+    let mut one = rig(&[m1, plan_task("M2", Some("medium"))]);
+    one.cycle(); // M1 -> w1, M2 -> w2
+    done(&mut one, "M1", "w1");
+    one.cycle(); // check passes -> awaiting review (M1's coder freed)
+    one.cycle(); // the review prompt goes out
+    assert_eq!(status(&one, "M1"), State::Reviewing);
+    one
+}
+
+#[test]
+fn a_vanished_reviewer_only_delays_its_review_and_keeps_the_round() {
+    let mut one = reviewing_rig();
+    assert_eq!(one.store.get_task("M1").unwrap().review_rounds, 1);
+    one.with_manager(|m, _| m.apply_event(&RunEvent::Gone { task: "M1".into(), agent: "rev".into() }).unwrap());
+    assert_eq!(status(&one, "M1"), State::AwaitingReview);
+    assert_eq!(one.store.get_task("M1").unwrap().review_rounds, 0, "the round was not used");
+    // the other task keeps running and merges while the review waits
+    done(&mut one, "M2", "w2");
+    one.cycle();
+    assert_eq!(status(&one, "M2"), State::Merged);
+    // benched: no prompt is aimed at the gone reviewer
+    let id = one.store.latest_delivery("M1", 1, DeliveryKind::Reviewer).unwrap().unwrap().id;
+    for _ in 0..3 {
+        one.cycle();
+    }
+    assert_eq!(status(&one, "M1"), State::AwaitingReview);
+    assert_eq!(one.store.latest_delivery("M1", 1, DeliveryKind::Reviewer).unwrap().unwrap().id, id);
+    assert_eq!(one.store.get_task("M1").unwrap().review_rounds, 0);
+    // the reviewer is back: the review goes out as round 1 again, and blockers get their fix job
+    one.runtime.set("rev", AgentState::Idle);
+    one.cycle();
+    assert_eq!(status(&one, "M1"), State::Reviewing);
+    assert_eq!(one.store.get_task("M1").unwrap().review_rounds, 1);
+    one.work.review = ReviewOutcome::Blockers { count: 1 };
+    one.with_manager(|m, _| m.apply_event(&RunEvent::Reviewed { task: "M1".into(), agent: "rev".into() }).unwrap());
+    one.cycle();
+    assert_eq!(status(&one, "M1"), State::Coding, "a first set of blockers is a fix job, not out of rounds");
+    assert!(one.store.get_task("M1").unwrap().attempt >= 2);
+}
+
+#[test]
+fn a_review_prompt_that_cannot_be_delivered_does_not_use_up_a_round() {
+    let mut one = reviewing_rig();
+    one.with_manager(|m, _| m.apply_event(&RunEvent::Gone { task: "M1".into(), agent: "rev".into() }).unwrap());
+    one.store.end_bench("rev").unwrap();
+    one.deliver.fail_sends.set(2);
+    one.cycle();
+    assert_eq!(status(&one, "M1"), State::AwaitingReview);
+    assert_eq!(one.store.get_task("M1").unwrap().review_rounds, 0);
+}
+
+#[test]
+fn a_run_whose_only_open_work_waits_for_a_benched_reviewer_does_not_stop() {
+    let mut m1 = plan_task("M1", Some("medium"));
+    m1.review = true;
+    let mut one = rig(&[m1]);
+    one.cycle();
+    done(&mut one, "M1", "w1");
+    one.cycle();
+    one.cycle();
+    one.with_manager(|m, _| m.apply_event(&RunEvent::Gone { task: "M1".into(), agent: "rev".into() }).unwrap());
+    assert_eq!(one.cycle(), orch_core::manager::Cycle::Continue, "waiting for the reviewer is not stuck");
+}
+
+#[test]
+fn retry_exhaustion_fails_the_task_with_its_history_and_an_out_of_rounds_task_escalates_once() {
+    // lost attempts: the budget is ORCH_MAX_LOST
+    let mut one = One::new();
+    for _ in 0..4 {
+        one.cycle();
+        let w = one.store.get_task("M1").unwrap().worker;
+        if let Some(w) = w {
+            one.with_manager(|m, _| m.apply_event(&RunEvent::Gone { task: "M1".into(), agent: w }).unwrap());
+        }
+        one.clock.0.set(one.clock.0.get() + 3600);
+    }
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!(t.status, State::Failed);
+    assert!(t.reason.contains("lost 4 attempts") && t.reason.contains("disappeared"), "{}", t.reason);
+    assert!(one.store.history("M1").unwrap().len() >= 8, "the history is kept");
+
+    // out of rounds: a stronger coder gets one more go, then it fails
+    let mut hi = agents(&["w1", "w2"], false);
+    hi[1].tier = Some("high".into());
+    let mut one = One::new();
+    one.store
+        .apply_sync(&SyncInput { settings: settings(false), agents: hi, tasks: vec![plan_task("M1", Some("medium"))] })
+        .unwrap();
+    one.work.check = Ok(CheckOutcome::Fail { tail: "red".into() });
+    let mut escalations = 0;
+    for _ in 0..30 {
+        one.cycle();
+        let t = one.store.get_task("M1").unwrap();
+        if t.status == State::Failed {
+            break;
+        }
+        if t.status == State::Coding {
+            let w = t.worker.unwrap();
+            done(&mut one, "M1", &w);
+        }
+        if t.escalated {
+            escalations = 1;
+        }
+    }
+    let t = one.store.get_task("M1").unwrap();
+    assert_eq!(t.status, State::Failed, "{}", joined(&one.say_log));
+    assert!(t.reason.contains("out of rounds"), "{}", t.reason);
+    assert_eq!(escalations, 1);
+    let esc = one.store.history("M1").unwrap().iter().filter(|h| h.why.contains("escalated")).count();
+    assert_eq!(esc, 1, "escalated exactly once");
+}
+
+#[test]
+fn several_milestones_finishing_in_one_poll_batch_are_each_claimed_checked_and_merged_once() {
+    let ids = ["M1", "M2", "M3", "M4"];
+    let tasks: Vec<PlanTask> = ids.iter().map(|i| plan_task(i, Some("medium"))).collect();
+    let mut one = rig(&tasks);
+    one.store
+        .apply_sync(&SyncInput { settings: { let mut s = settings(false); s.max_parallel = 4; s }, agents: agents(&["w1", "w2", "w3", "w4"], false), tasks })
+        .unwrap();
+    one.cycle();
+    let mut workers = std::collections::HashSet::new();
+    let mut batch = vec![];
+    for i in ids {
+        let t = one.store.get_task(i).unwrap();
+        assert_eq!(t.status, State::Coding);
+        assert_eq!(t.attempt, 1);
+        assert!(workers.insert(t.worker.clone().unwrap()), "one coder per milestone");
+        batch.push(RunEvent::Done { task: i.into(), agent: t.worker.unwrap() });
+    }
+    // every event arrives twice in the same batch
+    let mut doubled = batch.clone();
+    doubled.extend(batch);
+    one.poll.batches.borrow_mut().push(doubled);
+    let n = Cell::new(0);
+    let code = one.with_manager(|m, _| {
+        m.run(&|| {
+            n.set(n.get() + 1);
+            n.get() > 3
+        })
+    });
+    assert_eq!(code, 0, "{}", joined(&one.say_log));
+    for i in ids {
+        assert_eq!(status(&one, i), State::Merged);
+        assert_eq!(one.work.check_log.borrow().iter().filter(|c| *c == i).count(), 1, "{i} checked once");
+        assert_eq!(one.work.commit_log.borrow().iter().filter(|c| *c == i).count(), 1, "{i} merged once");
+        assert_eq!(one.store.get_task(i).unwrap().attempt, 1);
+    }
+}
+
+#[test]
+fn the_same_event_twice_is_handled_once_even_in_one_batch() {
+    let mut one = One::new();
+    one.cycle();
+    let ev = RunEvent::Done { task: "M1".into(), agent: "w1".into() };
+    one.poll.batches.borrow_mut().push(vec![ev.clone(), ev]);
+    one.with_manager(|m, _| {
+        m.run(&|| false);
+    });
+    // (the loop exits on all-done) the task merged from one DONE, checked once
+    assert_eq!(status(&one, "M1"), State::Merged);
+    assert_eq!(one.work.commit_log.borrow().len(), 1);
+    let h = one.store.history("M1").unwrap().iter().filter(|t| t.to == State::Verifying).count();
+    assert_eq!(h, 1);
 }
