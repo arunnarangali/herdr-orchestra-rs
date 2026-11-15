@@ -48,12 +48,10 @@ impl Default for Servers {
     }
 }
 
-/// The key a project's server is stored under: its canonical folder when it exists.
+/// The key a project's server is stored under: the project's one canonical spelling (symlinks
+/// resolved, no trailing slash), the same one the project list stores.
 pub fn key_of(project: &Path) -> String {
-    std::fs::canonicalize(project)
-        .unwrap_or_else(|_| project.to_path_buf())
-        .display()
-        .to_string()
+    crate::projects::canonical(&project.display().to_string())
 }
 
 /// Removes the project from `starting` however the start ends.
@@ -176,7 +174,7 @@ impl Servers {
             command.args(["--allow-origin", origin]);
         }
         #[cfg(test)]
-        let _spawning = tests::SPAWN.lock().unwrap_or_else(|e| e.into_inner());
+        let _spawning = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
         let mut child = command
             .current_dir(project)
             .stdin(Stdio::null())
@@ -250,16 +248,17 @@ impl Servers {
     }
 }
 
+/// Writing an executable while another thread forks makes the exec fail with "text file busy";
+/// tests take this lock around writing a fake `orch` and around every spawn (also `git`'s).
+#[cfg(test)]
+pub(crate) static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
     /// A stand-in for `orch` that prints `lines` like `orch serve` and then waits.
-    /// Writing an executable while another thread forks makes the exec fail with "text file
-    /// busy"; tests take this lock around writing and around every spawn.
-    pub(super) static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn fake_orch(dir: &Path, script: &str) -> std::path::PathBuf {
         let _w = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
         let p = dir.join("orch");
@@ -499,5 +498,25 @@ mod tests {
         assert!(forgotten, "an exited server is not reported as open");
         assert!(gone(&pid));
         state.stop_all();
+    }
+
+    #[test]
+    fn a_symlinked_spelling_of_the_folder_is_the_same_project() {
+        let d = scratch("symsrv");
+        let real = scratch("symsrv-real");
+        let link = scratch("symsrv-links").join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let state = Servers::with_timeout(Duration::from_secs(5));
+        let c = state.start_with(&fake_serving(&d, "a", 4061), &link).unwrap();
+        // found, stopped and listed under any spelling; starting again does not spawn another
+        assert_eq!(state.current(&real).map(|x| x.url), Some(c.url.clone()));
+        assert_eq!(state.current(&link).map(|x| x.url), Some(c.url.clone()));
+        let with_slash = std::path::PathBuf::from(format!("{}/", link.display()));
+        assert_eq!(state.start_using(&with_slash, Some("/nonexistent/orch".into())).unwrap().url, c.url);
+        assert_eq!(state.open_paths().len(), 1);
+        let pid = std::fs::read_to_string(d.join("a-pid")).unwrap().trim().to_string();
+        state.stop(&real);
+        assert!(gone(&pid));
+        assert!(state.current(&link).is_none());
     }
 }
