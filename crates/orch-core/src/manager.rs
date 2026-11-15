@@ -1780,17 +1780,24 @@ impl<'a> Manager<'a> {
                 self.applied.insert(key.clone());
                 self.orphan(task, status)
             }
-            RunEvent::Blocked { task, agent } => {
+            RunEvent::Blocked { task, agent, prompt } => {
                 self.applied.insert(key.clone());
                 if !self.state.notified.contains(&key) {
                     self.state.notified.push(key.clone());
+                    let wants = prompt
+                        .as_deref()
+                        .map_or_else(String::new, |p| format!(" It wants: {p}."));
                     self.log(
                         &format!(
-                            "{agent} is waiting for a PERMISSION/QUESTION in its pane (task {task}). \
-                             Answer it there; autopilot keeps going."
+                            "{agent} is waiting for a PERMISSION/QUESTION in its pane (task \
+                             {task}).{wants} Answer it there; autopilot keeps going."
                         ),
                         true,
                     );
+                    // §15A item 1: the lead hears of it with the agent and the prompt
+                    let _ = self
+                        .store
+                        .enqueue_blocked_lead_event(task, agent, prompt.as_deref());
                 }
                 Ok(())
             }
@@ -2076,4 +2083,327 @@ fn is_rate_limited(pane: &str) -> bool {
     ]
     .iter()
     .any(|p| lower.contains(p))
+}
+#[cfg(test)]
+mod blocked_tests {
+    use super::*;
+    use crate::events::{AgentState, PollOutcome, RuntimeView};
+    use crate::lead_queue::LeadKind;
+    use crate::run_store::{PlanTask, RunAgent, RunSettings, SyncInput};
+    use crate::store::StoreError;
+    use crate::wake::LeadPane;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    // ---- minimal fakes: apply_event needs the log, the clock and the state only
+
+    struct FkClock(Rc<Cell<i64>>);
+    impl Clock for FkClock {
+        fn now(&self) -> i64 {
+            self.0.get()
+        }
+    }
+
+    struct FkPoll;
+    impl PollSource for FkPoll {
+        fn poll(&mut self, _store: &mut Store, _secs: u64) -> PollOutcome {
+            PollOutcome::Waiting { nothing_running: true }
+        }
+    }
+
+    struct FkRuntime {
+        st: std::collections::HashMap<String, AgentState>,
+    }
+    impl RuntimeView for FkRuntime {
+        fn status(&self, agent: &str) -> Option<AgentState> {
+            self.st.get(agent).copied()
+        }
+        fn output(&self, _agent: &str, _lines: u32) -> Option<String> {
+            None
+        }
+    }
+
+    struct FkWork;
+    impl Work for FkWork {
+        fn prepare(&mut self, _: &str, _: &str) -> std::result::Result<(), String> {
+            Ok(())
+        }
+        fn write_task(&mut self, _: &str) -> std::result::Result<(), String> {
+            Ok(())
+        }
+        fn fix_body(&mut self, _: &str, _: u32, _: &str) -> std::result::Result<String, String> {
+            Ok(String::new())
+        }
+        fn fix_prompt(
+            &mut self,
+            _: &str,
+            _: u32,
+            _: &FixKind,
+        ) -> std::result::Result<String, String> {
+            Ok(String::new())
+        }
+        fn blocker_lines(
+            &mut self,
+            _: &str,
+            _: u32,
+        ) -> std::result::Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+        fn strays(&mut self, _: &str) -> std::result::Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+        fn check(&mut self, _: &str) -> std::result::Result<CheckOutcome, String> {
+            Ok(CheckOutcome::Pass)
+        }
+        fn save_work(&mut self, _: &str) -> std::result::Result<(), String> {
+            Ok(())
+        }
+        fn review_body(&mut self, _: &str, _: u32) -> std::result::Result<String, String> {
+            Ok(String::new())
+        }
+        fn review_verdict(
+            &mut self,
+            _: &str,
+            _: u32,
+        ) -> std::result::Result<ReviewOutcome, String> {
+            Ok(ReviewOutcome::Approved)
+        }
+        fn commit(&mut self, _: &str) -> std::result::Result<CommitOutcome, String> {
+            Ok(CommitOutcome::Merged)
+        }
+        fn baseline(&mut self) -> std::result::Result<(bool, String), String> {
+            Ok((true, String::new()))
+        }
+    }
+
+    struct FkLead;
+    impl LeadRuntime for FkLead {
+        fn pane(&self, _: &str) -> LeadPane {
+            LeadPane::Idle
+        }
+        fn send(&self, _: &str, _: &str) -> std::result::Result<(), String> {
+            Ok(())
+        }
+    }
+
+    struct FkNotes;
+    impl Notifier for FkNotes {
+        fn notify(&self, _: &str) {}
+    }
+
+    struct FkDeliveries;
+    impl Deliveries for FkDeliveries {
+        fn send(
+            &mut self,
+            store: &mut Store,
+            req: NewDelivery<'_>,
+        ) -> std::result::Result<DeliveryOutcome, StoreError> {
+            let id = store.record_delivery(req.agent, req.task, req.attempt, req.kind, req.prompt)?;
+            store.confirm_delivery(id)?;
+            Ok(DeliveryOutcome::Sent { delivery: store.delivery(id)? })
+        }
+        fn resend(
+            &mut self,
+            _store: &mut Store,
+            _id: i64,
+        ) -> std::result::Result<DeliveryOutcome, StoreError> {
+            unreachable!()
+        }
+        fn failure_streak(&self, _: &Store, _: &str) -> u32 {
+            0
+        }
+        fn recover(
+            &mut self,
+            _: &mut Store,
+            _: i64,
+            _: i64,
+        ) -> std::result::Result<Vec<Recovered>, StoreError> {
+            Ok(vec![])
+        }
+    }
+
+    fn tun() -> LoopTunables {
+        LoopTunables {
+            idle_grace_s: 120,
+            confirm_s: 30,
+            coder_budget_s: 2700,
+            review_budget_s: 900,
+            send_retry_s: 120,
+            unreachable_min: 30,
+            cooldown_min: 60,
+            gone_cooldown_min: 10,
+            max_lost: 4,
+            lead_wait_s: 900,
+            lead_idle_max_s: 43200,
+            lead_confirm_s: 20,
+            lead_confirm_wakes: 2,
+            lead_rewake_s: 300,
+            lead_max_wakes: 3,
+        }
+    }
+
+    fn settings(lead: bool) -> RunSettings {
+        RunSettings {
+            branch: "feature/x".into(),
+            base: None,
+            title: "X".into(),
+            commits: "per-milestone".into(),
+            isolation: "worktree".into(),
+            max_parallel: 2,
+            setup_inputs: vec![],
+            scope: "warn".into(),
+            risk_hold: false,
+            budget_s: None,
+            check_command: String::new(),
+            setup_command: "none".into(),
+            lead_mode: if lead { "events".into() } else { "off".into() },
+            reviewer: None,
+        }
+    }
+
+    fn agent(name: &str, role: AgentRole) -> RunAgent {
+        RunAgent {
+            role,
+            name: name.into(),
+            kind: "claude".into(),
+            model: None,
+            tier: Some("medium".into()),
+            detect: true,
+            pane: None,
+        }
+    }
+
+    fn task(id: &str) -> PlanTask {
+        PlanTask {
+            id: id.into(),
+            title: format!("task {id}"),
+            deps: vec![],
+            enabled: true,
+            open_questions: false,
+            tier: Some("medium".into()),
+            needs: vec![],
+            model_why: String::new(),
+            prefer: "any".into(),
+            review: false,
+            files: vec![],
+            parallel: true,
+        }
+    }
+
+    struct Rig {
+        dir: tempfile::TempDir,
+        store: Store,
+        clock: FkClock,
+        runtime: FkRuntime,
+        log: Rc<std::cell::RefCell<Vec<String>>>,
+    }
+
+    impl Rig {
+        fn new(lead: bool) -> Rig {
+            let dir = tempfile::tempdir().unwrap();
+            let mut store = Store::open_in(&dir.path().join(".orchestrate")).unwrap();
+            let mut agents = vec![agent("w1", AgentRole::Worker), agent("w2", AgentRole::Worker)];
+            if lead {
+                agents.push(agent("lead", AgentRole::Lead));
+            }
+            store
+                .apply_sync(&SyncInput {
+                    settings: settings(lead),
+                    agents,
+                    tasks: vec![task("M1"), task("M2")],
+                })
+                .unwrap();
+            Rig {
+                dir,
+                store,
+                clock: FkClock(Rc::new(Cell::new(1_000_000))),
+                runtime: FkRuntime { st: std::collections::HashMap::new() },
+                log: Rc::new(std::cell::RefCell::new(Vec::new())),
+            }
+        }
+
+        /// Two milestones in flight, one agent each.
+        fn two_in_flight(&mut self) {
+            self.store.claim("M1", "w1", None).unwrap();
+            self.store.claim("M2", "w2", None).unwrap();
+        }
+
+        fn with_manager<R>(&mut self, f: impl FnOnce(&mut Manager<'_>) -> R) -> R {
+            let mut say = |m: &str, _: bool| self.log.borrow_mut().push(m.to_string());
+            let mut poll = FkPoll;
+            let mut work = FkWork;
+            let mut deliveries = FkDeliveries;
+            let mut m = Manager::new(
+                self.dir.path().to_path_buf(),
+                &mut self.store,
+                &self.runtime,
+                &watch_all,
+                &mut poll,
+                &mut work,
+                &FkLead,
+                &FkNotes,
+                &self.clock,
+                &mut deliveries,
+                tun(),
+                &mut say,
+            )
+            .unwrap();
+            f(&mut m)
+        }
+    }
+
+    fn watch_all(_: &str) -> bool {
+        true
+    }
+
+    // AC1: the blocked event names the agent and the pane's prompt, in the log and the
+    // lead's queue (what `orch events` and the API read).
+    #[test]
+    fn a_blocked_agent_is_reported_with_its_name_and_prompt() {
+        let mut rig = Rig::new(true);
+        rig.two_in_flight();
+        rig.with_manager(|m| {
+            m.apply_event(&RunEvent::Blocked {
+                task: "M1".into(),
+                agent: "w1".into(),
+                prompt: Some("cargo test --workspace".into()),
+            })
+            .unwrap();
+        });
+        let log = rig.log.borrow().join("\n");
+        assert!(log.contains("w1 is waiting for a PERMISSION/QUESTION"), "{log}");
+        assert!(log.contains("It wants: cargo test --workspace"), "{log}");
+        let e = &rig.store.unread_lead_events().unwrap()[0];
+        assert_eq!(e.kind, LeadKind::Blocked);
+        assert_eq!(e.task.as_deref(), Some("M1"));
+        assert_eq!(e.agent.as_deref(), Some("w1"));
+        assert_eq!(e.prompt.as_deref(), Some("cargo test --workspace"));
+        // and the lead's queue view (what `orch events` prints) shows it as new
+        let run = rig.store.load_run().unwrap().unwrap();
+        let v = crate::view::events_view(&rig.store, &run, None, None).unwrap();
+        assert!(v.new.iter().any(|e| e.agent.as_deref() == Some("w1")
+            && e.prompt.as_deref() == Some("cargo test --workspace")));
+    }
+
+    // AC6: one agent blocked does not stop the others.
+    #[test]
+    fn the_other_tasks_keep_running_while_one_agent_is_blocked() {
+        let mut rig = Rig::new(false);
+        rig.two_in_flight();
+        rig.with_manager(|m| {
+            m.apply_event(&RunEvent::Blocked {
+                task: "M1".into(),
+                agent: "w1".into(),
+                prompt: Some("rm -rf /".into()),
+            })
+            .unwrap();
+            // the second coder's done file still moves its milestone on
+            m.apply_event(&RunEvent::Done { task: "M2".into(), agent: "w2".into() })
+                .unwrap();
+        });
+        assert_eq!(rig.store.get_task("M1").unwrap().status, State::Coding);
+        assert_eq!(rig.store.get_task("M2").unwrap().status, State::Verifying);
+        // and the blocked agent is not benched: it can still be prompted after an answer
+        assert!(rig.store.benches().unwrap().is_empty());
+    }
 }

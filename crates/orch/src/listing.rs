@@ -62,6 +62,35 @@ pub fn render_agents(reg: &Registry) -> String {
             missing.join(", ")
         ));
     }
+    // §15A: prompts stay on by default; say which kinds can pre-allow commands and
+    // which fall back to their own permission settings.
+    let with: Vec<&str> = reg
+        .0
+        .iter()
+        .filter(|(_, v)| v.allow_flag.is_some())
+        .map(|(k, _)| k.as_str())
+        .collect();
+    let without: Vec<&str> = reg
+        .0
+        .iter()
+        .filter(|(_, v)| v.allow_flag.is_none())
+        .map(|(k, _)| k.as_str())
+        .collect();
+    let with_txt = if with.is_empty() {
+        "no kind".to_string()
+    } else {
+        with.join(", ")
+    };
+    let without_txt = if without.is_empty() {
+        "none".to_string()
+    } else {
+        without.join(", ")
+    };
+    s.push_str(&format!(
+        "\nCommand prompts stay on: {with_txt} pre-allow the allow_commands configured for the \
+kind; {without_txt} have no pre-allow option in the registry (set permissions in each tool's \
+own config)\n"
+    ));
     s.push_str(&format!(
         "\nOverride or add kinds in {}\n",
         agents::user_agents_file().display()

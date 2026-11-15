@@ -58,6 +58,12 @@ pub struct LeadQueueEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
     pub text: String,
+    /// The agent the event is about (a blocked permission event names its agent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// What the agent's pane asks for (the visible prompt text, when read).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_at: Option<i64>,
 }
@@ -480,6 +486,8 @@ fn poll_once(
             task: row.task.clone(),
             task_id: row.task,
             text: row.text,
+            agent: row.agent,
+            prompt: row.prompt,
             read_at: row.read_at,
         };
         hub.publish("lead-event", serde_json::to_value(ev).unwrap_or_default());

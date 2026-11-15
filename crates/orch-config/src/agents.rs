@@ -146,6 +146,16 @@ pub struct AgentKind {
     /// Command that prints the tool's help (default `<binary> --help`).
     #[serde(default)]
     pub help_cmd: Option<String>,
+    /// The launch option that pre-allows ONE command without prompting, with `{cmd}`
+    /// where the command goes (claude: `--allowedTools Bash({cmd}:*)`). Kinds without
+    /// one keep their usual prompts; `orch agents launch` then says the commands are
+    /// ignored. Never a blanket skip: one entry, one command prefix.
+    #[serde(default)]
+    pub allow_flag: Option<String>,
+    /// Commands allowed without prompting (the project's own check and build
+    /// commands, for example). Default: none — every command keeps its prompt.
+    #[serde(default)]
+    pub allow_commands: Vec<String>,
     /// Command whose exit status tells whether the account is logged in (0 = yes);
     /// its output is never read. Must be a non-destructive status command of the tool.
     #[serde(default)]
@@ -187,6 +197,8 @@ const KEY_TYPES: &[(&str, KeyType)] = &[
     ("help_cmd", KeyType::Str),
     ("auth_cmd", KeyType::Str),
     ("auth_file", KeyType::Str),
+    ("allow_flag", KeyType::Str),
+    ("allow_commands", KeyType::AllowCommands),
 ];
 
 #[derive(Clone, Copy)]
@@ -197,6 +209,7 @@ enum KeyType {
     StrMap,
     Roles,
     Count,
+    AllowCommands,
 }
 
 fn check_key(key: &str, ty: KeyType, v: &toml::Value) -> std::result::Result<(), String> {
@@ -231,7 +244,54 @@ fn check_key(key: &str, ty: KeyType, v: &toml::Value) -> std::result::Result<(),
             Some(t) if t.values().all(toml::Value::is_str) => Ok(()),
             _ => bad("a table of strings"),
         },
+        KeyType::AllowCommands => match v.as_array() {
+            Some(a) if a.iter().all(toml::Value::is_str) => {
+                for c in a.iter().filter_map(toml::Value::as_str) {
+                    if let Some(problem) = allow_command_problem(c) {
+                        return Err(format!("key `{key}`: {problem}"));
+                    }
+                }
+                Ok(())
+            }
+            _ => bad("a list of strings"),
+        },
     }
+}
+
+/// One `allow_commands` entry must be a command prefix the tool can pattern-match: a
+/// non-empty command with no shell or pattern metacharacters, and never a catch-all.
+/// Anything else would pre-allow more than the developer listed.
+fn allow_command_problem(c: &str) -> Option<String> {
+    if c.is_empty() {
+        return Some("an empty entry is not a command".to_string());
+    }
+    if c.trim() != c {
+        return Some(format!(
+            "{c:?} has leading or trailing spaces — write the bare command"
+        ));
+    }
+    if c == "*" {
+        return Some(
+            "`*` would allow every command — list each command separately instead"
+                .to_string(),
+        );
+    }
+    if let Some(m) = c
+        .chars()
+        .find(|c| matches!(c, ';' | '|' | '&' | '>' | '<' | '(' | ')' | '$' | '`' | '\'' | '"'))
+    {
+        return Some(format!(
+            "{c:?} contains {m:?} — an entry is one command prefix like \"cargo test\", without \
+             shell or pattern metacharacters"
+        ));
+    }
+    if c.starts_with('-') {
+        return Some(format!(
+            "{c:?} looks like an option, not a command — an entry is a command prefix like \
+             \"cargo test\""
+        ));
+    }
+    None
 }
 
 /// The whole registry: agent kind name -> its entry.
@@ -347,6 +407,17 @@ pub fn registry(
             file: file_name(user_file),
             problem: format!("agent kind {kind:?}: {e}"),
         })?;
+        if let Some(flag) = &ak.allow_flag
+            && !flag.contains("{cmd}")
+        {
+            return Err(AgentsError {
+                file: file_name(user_file),
+                problem: format!(
+                    "agent kind {kind:?}: key `allow_flag`: must contain {{cmd}} where the command \
+                     goes, e.g. \"--allowedTools Bash({{cmd}}:*)\""
+                ),
+            });
+        }
         kinds.insert(kind, ak);
     }
     Ok(Registry(kinds))

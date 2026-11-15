@@ -21,6 +21,15 @@
 #                 no auth_cmd
 #                 Shipped: claude (`claude auth status`) and codex (`codex login status`), both checked against
 #                 their --help; opencode, amp, hermes and agy have no documented exit-code login check, so unknown
+#   allow_flag    (optional) the launch option that pre-allows ONE command without prompting, with
+#                 {cmd} where the command goes. Shipped for claude (`--allowedTools Bash({cmd}:*)`,
+#                 in its --help). Kinds without one keep their usual prompts: `orch agents` says so
+#                 and `orch agents launch` warns when commands were listed anyway.
+#   allow_commands  commands allowed without prompting (default: NONE — every command keeps its
+#                 prompt; permissions are never turned off wholesale). Set them per kind in
+#                 ~/.config/herdr-orchestra/agents.toml with the project's own check and build
+#                 commands, for example: [claude] allow_commands = ["cargo build", "cargo test"].
+#                 Entries are one command prefix each, no metacharacters, no `*`.
 #   Also optional: display_name, extra_args, env, workdir, capabilities, max_sessions, timeout_s, cooldown_min,
 #   instructions, version_cmd, help_cmd
 #
@@ -37,8 +46,9 @@ commands_dirs = ["~/.claude/commands"]
 commands_from = "claude-commands"
 invoke = "/orch-plan <feature>"
 auth_cmd = "claude auth status"
+allow_flag = "--allowedTools Bash({cmd}:*)"
 verified = true
-notes = "Claude Code 2.1: --permission-mode acceptEdits in --help; ~/.claude/skills present; herdr kind 'claude'."
+notes = "Claude Code 2.1: --permission-mode acceptEdits and --allowedTools in --help; ~/.claude/skills present; herdr kind 'claude'."
 
 [codex]
 binary = "codex"
@@ -73,7 +83,7 @@ commands_dirs = ["~/.config/opencode/commands"]
 commands_from = "opencode-commands"
 invoke = "/orch-plan <feature>"
 verified = true
-notes = "Reads ~/.agents/skills and ~/.claude/skills, so only its slash commands are installed."
+notes = "Reads ~/.agents/skills and ~/.claude/skills, so only its slash commands are installed. No CLI flag to pre-allow commands: permissions live in its own config (the permission ask setting in ~/.config/opencode/opencode.json)."
 
 [hermes]
 binary = "hermes"

@@ -1,6 +1,7 @@
 //! The one launch-command builder (Python's `launch_cmd`): the registry's `launch`
 //! command for a kind, plus its configured extra arguments, on a given model under the
-//! deny policy.
+//! deny policy — and, when the kind's registry entry lists them, its `allow_commands`
+//! pre-allowed through its `allow_flag`.
 
 use crate::agents::{Registry, user_agents_file};
 use crate::models::Catalog;
@@ -35,6 +36,15 @@ pub fn shell_quote(s: &str) -> String {
     }
 }
 
+/// The `allow_flag` template split into words, `{cmd}` replaced by the command, each
+/// word shell-quoted — so `--allowedTools Bash({cmd}:*)` with `cargo test` becomes
+/// `--allowedTools 'Bash(cargo test:*)'` (two arguments; the pattern stays one).
+fn allow_tokens(flag: &str, command: &str) -> Vec<String> {
+    flag.split_whitespace()
+        .map(|t| shell_quote(&t.replace("{cmd}", command)))
+        .collect()
+}
+
 /// Python's `repr` of a plain string, as the messages show it.
 pub fn repr(s: &str) -> String {
     if s.contains('\'') && !s.contains('"') {
@@ -50,7 +60,9 @@ pub fn repr(s: &str) -> String {
 /// * a kind without `model_flag` refuses a model, unless `strict` is false: then the
 ///   kind starts on its default model (the caller says so);
 /// * a model the catalog lists for other kinds only gives a warning;
-/// * the kind's `extra_args` follow the launch command, each shell-quoted.
+/// * the kind's `extra_args` follow the launch command, each shell-quoted;
+/// * the kind's `allow_commands` follow those, one `allow_flag` token each (warned
+///   away when the kind has no `allow_flag`).
 pub fn launch_command(
     registry: &Registry,
     catalog: &Catalog,
@@ -76,6 +88,26 @@ pub fn launch_command(
         command.push_str(&shell_quote(a));
     }
     let mut warnings = Vec::new();
+    // Pre-allow the commands the registry lists for the kind (its allow_commands, one
+    // `allow_flag` token each). Default is none; permissions are never turned off
+    // wholesale, and a kind without a pre-allow option just keeps asking.
+    if !ak.allow_commands.is_empty() {
+        match ak.allow_flag.as_deref().filter(|f| !f.is_empty()) {
+            Some(flag) => {
+                for c in &ak.allow_commands {
+                    for t in allow_tokens(flag, c) {
+                        command.push(' ');
+                        command.push_str(&t);
+                    }
+                }
+            }
+            None => warnings.push(format!(
+                "WARN: {} allow_commands are listed for {kind}, but the registry has no \
+                 allow_flag for it — they are ignored, {kind} keeps its usual prompts",
+                ak.allow_commands.len()
+            )),
+        }
+    }
     if let Some(model) = model.filter(|m| !m.is_empty()) {
         if let Some(pat) = catalog.denied(model) {
             return Err(LaunchError(format!(
@@ -221,5 +253,37 @@ mod tests {
         assert_eq!(shell_quote(""), "''");
         assert_eq!(shell_quote("a b"), "'a b'");
         assert_eq!(shell_quote("it's"), "'it'\"'\"'s'");
+    }
+
+    #[test]
+    fn allow_commands_become_allow_flag_tokens() {
+        let r = reg("[claude]\nallow_commands = [\"cargo build\", \"cargo test\"]\n");
+        let l = launch_command(&r, &cat(MODELS), "claude", None, true).unwrap();
+        assert_eq!(
+            l.command,
+            "claude --permission-mode acceptEdits \
+             --allowedTools 'Bash(cargo build:*)' --allowedTools 'Bash(cargo test:*)'"
+        );
+        assert!(l.warnings.is_empty());
+        // a command with spaces stays one argument
+        let r = reg("[claude]\nallow_commands = [\"cargo test --workspace\"]\n");
+        let l = launch_command(&r, &cat(MODELS), "claude", None, true).unwrap();
+        assert!(
+            l.command.ends_with("--allowedTools 'Bash(cargo test --workspace:*)'"),
+            "{}",
+            l.command
+        );
+    }
+
+    #[test]
+    fn allow_commands_without_an_allow_flag_only_warn() {
+        let r = reg("[amp]\nallow_commands = [\"cargo test\"]\n");
+        let l = launch_command(&r, &cat(MODELS), "amp", None, true).unwrap();
+        assert_eq!(l.command, "amp");
+        assert_eq!(
+            l.warnings,
+            ["WARN: 1 allow_commands are listed for amp, but the registry has no allow_flag for \
+              it — they are ignored, amp keeps its usual prompts"]
+        );
     }
 }
