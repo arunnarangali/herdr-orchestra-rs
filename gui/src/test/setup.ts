@@ -1,6 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
+
+// The suite runs many files in parallel workers; under that load the app's async settles
+// (health checks, fetches, stream connects) can outlast the 1s default. A wider window
+// keeps the same assertions honest on a busy machine.
+configure({ asyncUtilTimeout: 5000 });
 
 // Node 25 ships its own `localStorage` global that is unusable without a file; use a plain
 // in-memory one so tests behave the same on every Node version.

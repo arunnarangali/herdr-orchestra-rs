@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { samples } from "../api/contract";
 import { deadAddress, startFakeServer, type FakeServer } from "../test/fakeServer";
 import { fakeShell, renderApp } from "../test/render";
 
@@ -16,31 +17,49 @@ afterEach(async () => {
 
 const pill = () => screen.getByRole("status", { name: /^Connection:/ });
 
+// The suite runs many files in parallel workers; under load the connection settles slower
+// than waitFor's 1s default. Same assertions, a wider window (the app polls every 50ms).
+const PATIENT = { timeout: 5000 } as const;
+const waitPill = (state: string) =>
+  waitFor(() => expect(pill()).toHaveAccessibleName(`Connection: ${state}`), PATIENT);
+const waitStreams = (srv: FakeServer, count: number) =>
+  waitFor(() => expect(srv.streamRequests()).toHaveLength(count), PATIENT);
+
+// Real screens fetch their own data and show their own error panels, so a frame test
+// looks at the frame's banner specifically, not at every alert on the page.
+const banner = () => {
+  const found = screen.getAllByRole("alert").find((el) => el.className.includes("banner--"));
+  if (!found) throw new Error("the frame's connection banner is not shown");
+  return found;
+};
+
 describe("connection state in the app frame", () => {
   it("connected: shows the project and no warning", async () => {
+    server.respond("GET", "/plan", 200, samples.plan);
+    server.respond("GET", "/tasks", 200, samples.tasks);
     renderApp({ route: "/workflows", initial: server });
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Connected"));
+    await waitPill("Connected");
     expect(pill()).toHaveAttribute("title", "/home/me/project");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
+    await waitStreams(server, 1);
   });
 
   it("no server: says so and what to do, and keeps trying", async () => {
     const url = await deadAddress();
     renderApp({ route: "/workflows", initial: { url, token: server.token } });
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: No server"));
-    const banner = screen.getByRole("alert");
-    expect(banner).toHaveTextContent(`No server answers at ${url}`);
-    expect(banner).toHaveTextContent("orch serve");
-    expect(within(banner).getByRole("button", { name: "Check again" })).toBeInTheDocument();
+    await waitPill("No server");
+    const frame = banner();
+    expect(frame).toHaveTextContent(`No server answers at ${url}`);
+    expect(frame).toHaveTextContent("orch serve");
+    expect(within(frame).getByRole("button", { name: "Check again" })).toBeInTheDocument();
   });
 
   it("bad token: says the token was refused and never shows it", async () => {
     renderApp({ route: "/workflows", initial: { url: server.url, token: "x".repeat(64) } });
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Bad token"));
-    const banner = screen.getByRole("alert");
-    expect(banner).toHaveTextContent("The server refused the token");
-    expect(banner).toHaveTextContent("api-token");
+    await waitPill("Bad token");
+    const frame = banner();
+    expect(frame).toHaveTextContent("The server refused the token");
+    expect(frame).toHaveTextContent("api-token");
     expect(document.body).not.toHaveTextContent("x".repeat(64));
   });
 
@@ -48,8 +67,8 @@ describe("connection state in the app frame", () => {
     const noRun = await startFakeServer({ run: false });
     open.push(noRun);
     renderApp({ route: "/workflows", initial: noRun });
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: No run"));
-    expect(screen.getByRole("alert")).toHaveTextContent("orch sync");
+    await waitPill("No run");
+    expect(banner()).toHaveTextContent("orch sync");
     expect(noRun.streamRequests()).toHaveLength(0);
   });
 
@@ -63,28 +82,28 @@ describe("connection state in the app frame", () => {
     open.push(odd);
     // Health passes, then the token is replaced: the stream is refused.
     renderApp({ route: "/workflows", initial: odd });
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Connected"));
+    await waitPill("Connected");
     odd.rejectToken();
     odd.dropStreams();
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Bad token"));
+    await waitPill("Bad token");
   });
 
   it("reconnects: server goes away (no server), comes back (connected, stream resumes with Last-Event-ID)", async () => {
     renderApp({ route: "/workflows", initial: server });
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Connected"));
-    await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
+    await waitPill("Connected");
+    await waitStreams(server, 1);
     server.emit(9, "run-state", { run_control: "paused" });
     // let the message arrive before the server disappears
     await new Promise((r) => setTimeout(r, 60));
 
     const { port, token } = server;
     await server.close();
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: No server"));
+    await waitPill("No server");
 
     const back = await startFakeServer({ port, token });
     open.push(back);
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Connected"));
-    await waitFor(() => expect(back.streamRequests()).toHaveLength(1));
+    await waitPill("Connected");
+    await waitStreams(back, 1);
     expect(back.streamRequests()[0]?.headers["last-event-id"]).toBe("9");
   });
 });
@@ -103,7 +122,7 @@ describe("choosing a server", () => {
     await user.type(token, server.token);
     await user.click(screen.getByRole("button", { name: "Connect" }));
 
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Connected"));
+    await waitPill("Connected");
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Token")).not.toBeInTheDocument();
     // Kept in memory only.
@@ -134,7 +153,7 @@ describe("choosing a server", () => {
     });
     renderApp({ route: "/overview", shell });
     await user.click(await screen.findByRole("button", { name: "Choose project folder…" }));
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Connected"));
+    await waitPill("Connected");
     expect(started).toEqual(["/work/proj"]);
   });
 
@@ -163,7 +182,7 @@ describe("choosing a server", () => {
   it("desktop shell: picks up a server the shell already started", async () => {
     const shell = fakeShell({ getConnection: async () => ({ url: server.url, token: server.token }) });
     renderApp({ route: "/overview", shell });
-    await waitFor(() => expect(pill()).toHaveAccessibleName("Connection: Connected"));
+    await waitPill("Connected");
   });
 
   it("changing the connection stops the shell's server and shows the connect step again", async () => {

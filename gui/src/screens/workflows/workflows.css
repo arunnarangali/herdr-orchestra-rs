@@ -1,0 +1,229 @@
+/* Workflows: plan settings, the milestone graph and the milestone cards. */
+.prewrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.plan-title {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.plan-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.4rem 1rem;
+  margin: 0;
+}
+.plan-fact {
+  min-width: 0;
+}
+.plan-fact dt {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.plan-fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- graph ---------------------------------------------------------------------------- */
+.graph-wrap {
+  max-width: 100%;
+}
+.graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.graph-node {
+  cursor: pointer;
+}
+.graph-node-box {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+.graph-node--success .graph-node-box {
+  fill: var(--success-bg);
+  stroke: var(--success);
+}
+.graph-node--danger .graph-node-box {
+  fill: var(--danger-bg);
+  stroke: var(--danger);
+}
+.graph-node--warning .graph-node-box {
+  fill: var(--warning-bg);
+  stroke: var(--warning);
+}
+.graph-node--info .graph-node-box {
+  fill: var(--info-bg);
+  stroke: var(--info);
+}
+.graph-node--muted .graph-node-box {
+  fill: var(--muted-bg);
+  stroke: var(--border);
+}
+.graph-node--disabled .graph-node-box {
+  stroke-dasharray: 4 3;
+  opacity: 0.7;
+}
+.graph-node:focus-visible .graph-node-box {
+  stroke: var(--focus);
+  stroke-width: 2.5;
+}
+.graph-node-id {
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--text);
+}
+.graph-node-title {
+  font-size: 10px;
+  fill: var(--text-muted);
+}
+.graph-edge {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  cursor: help;
+}
+.graph-edge--active,
+.graph-edge:hover,
+.graph-edge:focus-visible {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.graph-arrow {
+  fill: var(--text-muted);
+}
+.graph-caption {
+  min-height: 1.45em;
+  margin: 0.25rem 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.graph-list,
+.ms-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.graph-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.graph-list-item .button {
+  text-align: left;
+}
+.graph-list-deps {
+  font-size: 0.85rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- milestone cards ------------------------------------------------------------------ */
+.ms-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+}
+.ms-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ms-card-head .button {
+  text-align: left;
+  border: 0;
+  background: none;
+  font-weight: 600;
+  padding: 0 0.2rem;
+}
+.ms-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ms-card-worker {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.ms-card-model {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.ms-card-goal {
+  margin: 0.35rem 0 0.25rem;
+}
+.ms-card-more summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+/* ---- detail (cards and the graph's modal) ---------------------------------------------- */
+.ms-detail-section {
+  margin: 0.75rem 0;
+}
+.ms-detail-section h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0 0 0.25rem;
+}
+.ms-detail-section p,
+.ms-detail-section ul,
+.ms-detail-section ol {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+.ms-detail-section p {
+  padding-inline-start: 0;
+}
+.ms-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.5rem;
+}
+.ms-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  margin: 0.75rem 0;
+}
+.ms-facts dt {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.ms-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.ms-detail-section .ac-list {
+  list-style: none;
+  padding-inline-start: 0;
+}
+.ac-id {
+  display: inline-block;
+  min-width: 3em;
+  font-weight: 600;
+}
+.file-list {
+  word-break: break-all;
+}

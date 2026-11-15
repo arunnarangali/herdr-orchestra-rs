@@ -1,0 +1,89 @@
+/* Reports: the run's numbers, the per-model table and the per-milestone results. */
+.run-note {
+  margin: 0 0 var(--gap);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.rep-numbers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+.rep-numbers dt {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.rep-numbers dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.rep-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+.rep-table th,
+.rep-table td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.rep-table thead th {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rep-table tbody th {
+  font-weight: 500;
+  min-width: 12rem;
+  overflow-wrap: anywhere;
+}
+.rep-row:hover {
+  background: var(--surface-2);
+}
+.rep-expand {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.85rem;
+}
+.rep-detail-row td {
+  background: var(--surface-2);
+}
+
+.task-detail {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.task-detail-block h4 {
+  margin: 0.25rem 0 0.25rem;
+  font-size: 0.85rem;
+}
+.task-detail-block ul {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+.task-detail-block h5 {
+  margin: 0.4rem 0 0.15rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.review-round p {
+  margin: 0.25rem 0;
+}
+.finding-list {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+.file-list {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+  word-break: break-all;
+}
