@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "actions": [
+        "open_chat"
+      ],
+      "agent": "rs-claude-1",
+      "detail": "needs bash permission",
+      "id": "blocked:1",
+      "kind": "blocked",
+      "prompt": "May I run `cargo test`?",
+      "since": "2023-11-14T22:13:20Z",
+      "task": "M1",
+      "title": "rs-claude-1 is blocked on permission"
+    }
+  ]
+}

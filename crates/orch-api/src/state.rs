@@ -2,8 +2,11 @@
 
 use crate::error::ApiError;
 use crate::token::Token;
+use orch_config::tunables::Tunables;
 use orch_core::paths::ORCH_DIR;
 use orch_core::store::{DB_FILE, Store};
+use orch_herdr::RuntimeAdapter;
+use orch_herdr::cli::CliHerdr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -14,16 +17,35 @@ pub struct AppState {
     project_root: Arc<PathBuf>,
     token: Token,
     shutdown: Arc<watch::Sender<bool>>,
+    herdr: Arc<dyn RuntimeAdapter + Send + Sync>,
 }
 
 impl AppState {
     /// State for the project whose main repository root is `project_root`.
     pub fn new(project_root: PathBuf, token: Token) -> AppState {
+        let tunables = Tunables::from_env()
+            .unwrap_or_else(|_| Tunables::from_lookup(|_| None).expect("defaults always parse"));
+        let herdr = Arc::new(CliHerdr::from_tunables(&tunables));
+        Self::with_herdr(project_root, token, herdr)
+    }
+
+    /// State with an explicit Herdr runtime adapter (e.g. `FakeHerdr` in tests).
+    pub fn with_herdr(
+        project_root: PathBuf,
+        token: Token,
+        herdr: Arc<dyn RuntimeAdapter + Send + Sync>,
+    ) -> AppState {
         AppState {
             project_root: Arc::new(project_root),
             token,
             shutdown: Arc::new(watch::channel(false).0),
+            herdr,
         }
+    }
+
+    /// The Herdr runtime adapter.
+    pub fn herdr(&self) -> &Arc<dyn RuntimeAdapter + Send + Sync> {
+        &self.herdr
     }
 
     /// The project (main repository) root being served.
