@@ -4,6 +4,7 @@
 
 use orch_api::routes::stream::feed::StreamHub;
 use orch_api::{Api, AppState, Token, build_with};
+use orch_core::actions::{RunControl, Source};
 use orch_core::lead_queue::LeadKind;
 use orch_core::run_store::{AgentRole, PlanTask, RunAgent, RunSettings, SyncInput};
 use orch_core::store::{Store, TransitionRequest};
@@ -614,3 +615,174 @@ async fn test_ac6_openapi_document_media_type_and_shapes() {
 
     srv.stop();
 }
+
+async fn api_req(addr: SocketAddr, method: &str, path: &str, body: Option<&str>) -> (u16, Value) {
+    let b = body.unwrap_or("");
+    let ct = if body.is_some() {
+        "Content-Type: application/json\r\n"
+    } else {
+        ""
+    };
+    let text = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nAuthorization: Bearer {SECRET}\r\n{ct}Content-Length: {}\r\n\r\n{b}",
+        b.len()
+    );
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(text.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    s.read_to_end(&mut raw).await.unwrap();
+    let resp = String::from_utf8_lossy(&raw);
+    let status = resp
+        .lines()
+        .next()
+        .and_then(|l| l.split(' ').nth(1))
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(0);
+    let body_str = resp.split("\r\n\r\n").nth(1).unwrap_or("{}");
+    let json: Value = serde_json::from_str(body_str).unwrap_or(Value::Null);
+    (status, json)
+}
+
+#[tokio::test]
+async fn test_run_control_changes_reported_on_stream_and_reconnect() {
+    let _lock = TEST_LOCK.lock().await;
+    unsafe {
+        std::env::set_var("ORCH_STREAM_POLL_MS", "30");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let _store = create_test_run(dir.path());
+    let srv = TestServer::start(dir.path()).await;
+
+    // Connect SSE client
+    let (status, mut client) =
+        SseClient::connect(srv.addr, &format!("/api/v1/stream?token={SECRET}"), &[]).await;
+    assert_eq!(status, 200);
+
+    // 1. POST /api/v1/run/pause
+    let (s, resp) = api_req(srv.addr, "POST", "/api/v1/run/pause", None).await;
+    assert_eq!(s, 200, "{resp}");
+
+    let ev_pause = client
+        .next_event(Duration::from_millis(2000))
+        .await
+        .expect("expected run-state event on pause");
+    assert_eq!(ev_pause.event.as_deref(), Some("run-state"));
+    assert!(ev_pause.id.is_some(), "event must have an id");
+    let data_pause: Value = serde_json::from_str(&ev_pause.data.unwrap()).unwrap();
+    assert_eq!(data_pause["run_control"], "paused");
+    assert_eq!(data_pause["source"], "api");
+    assert_eq!(data_pause["action"], "pause");
+
+    // 2. POST /api/v1/run/resume
+    let (s, resp) = api_req(srv.addr, "POST", "/api/v1/run/resume", None).await;
+    assert_eq!(s, 200, "{resp}");
+
+    let ev_resume = client
+        .next_event(Duration::from_millis(2000))
+        .await
+        .expect("expected run-state event on resume");
+    assert_eq!(ev_resume.event.as_deref(), Some("run-state"));
+    let resume_id = ev_resume.id.clone().expect("event must have an id");
+    let data_resume: Value = serde_json::from_str(&ev_resume.data.unwrap()).unwrap();
+    assert_eq!(data_resume["run_control"], "running");
+    assert_eq!(data_resume["source"], "api");
+    assert_eq!(data_resume["action"], "resume");
+
+    // 3. Disconnect client and call POST /api/v1/run/pause while disconnected
+    drop(client);
+
+    let (s, resp) = api_req(srv.addr, "POST", "/api/v1/run/pause", None).await;
+    assert_eq!(s, 200, "{resp}");
+
+    // Give the poller time to pick it up and publish to history
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // 4. Reconnect with Last-Event-ID set to resume_id
+    let (status, mut client2) = SseClient::connect(
+        srv.addr,
+        "/api/v1/stream",
+        &[
+            ("Authorization", &format!("Bearer {SECRET}")),
+            ("Last-Event-ID", &resume_id),
+        ],
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let replayed = client2
+        .next_event(Duration::from_millis(2000))
+        .await
+        .expect("expected replayed run-state event after resume_id");
+    assert_eq!(replayed.event.as_deref(), Some("run-state"));
+    let data_replayed: Value = serde_json::from_str(&replayed.data.unwrap()).unwrap();
+    assert_eq!(data_replayed["run_control"], "paused");
+    assert_eq!(data_replayed["source"], "api");
+    assert_eq!(data_replayed["action"], "pause");
+
+    // 5. POST /api/v1/run/stop
+    let (s, resp) = api_req(srv.addr, "POST", "/api/v1/run/stop", None).await;
+    assert_eq!(s, 200, "{resp}");
+
+    let ev_stop = client2
+        .next_event(Duration::from_millis(2000))
+        .await
+        .expect("expected run-state event on stop");
+    assert_eq!(ev_stop.event.as_deref(), Some("run-state"));
+    let data_stop: Value = serde_json::from_str(&ev_stop.data.unwrap()).unwrap();
+    assert_eq!(data_stop["run_control"], "stopped");
+    assert_eq!(data_stop["source"], "api");
+    assert_eq!(data_stop["action"], "stop");
+
+    unsafe {
+        std::env::remove_var("ORCH_STREAM_POLL_MS");
+    }
+    srv.stop();
+}
+
+#[tokio::test]
+async fn test_run_control_changes_via_cli_and_direct_store() {
+    let _lock = TEST_LOCK.lock().await;
+    unsafe {
+        std::env::set_var("ORCH_STREAM_POLL_MS", "30");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = create_test_run(dir.path());
+    let srv = TestServer::start(dir.path()).await;
+
+    // Connect SSE client
+    let (status, mut client) =
+        SseClient::connect(srv.addr, &format!("/api/v1/stream?token={SECRET}"), &[]).await;
+    assert_eq!(status, 200);
+
+    // Update via store (CLI simulation with record_action)
+    store.set_run_control(RunControl::Paused, Source::Cli).unwrap();
+    store.record_action(Source::Cli, "pause", None, "").unwrap();
+
+    let ev = client
+        .next_event(Duration::from_millis(2000))
+        .await
+        .expect("expected run-state event on CLI pause");
+    assert_eq!(ev.event.as_deref(), Some("run-state"));
+    let data: Value = serde_json::from_str(&ev.data.unwrap()).unwrap();
+    assert_eq!(data["run_control"], "paused");
+    assert_eq!(data["source"], "cli");
+    assert_eq!(data["action"], "pause");
+
+    // Direct update without record_action (e.g. event manager startup / direct change)
+    store.set_run_control(RunControl::Running, Source::Manager).unwrap();
+
+    let ev2 = client
+        .next_event(Duration::from_millis(2000))
+        .await
+        .expect("expected run-state event on manager resume");
+    assert_eq!(ev2.event.as_deref(), Some("run-state"));
+    let data2: Value = serde_json::from_str(&ev2.data.unwrap()).unwrap();
+    assert_eq!(data2["run_control"], "running");
+    assert_eq!(data2["source"], "manager");
+
+    unsafe {
+        std::env::remove_var("ORCH_STREAM_POLL_MS");
+    }
+    srv.stop();
+}
+

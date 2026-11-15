@@ -78,6 +78,12 @@ pub struct RunStateEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_control: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ts: Option<i64>,
 }
 
@@ -341,6 +347,9 @@ impl<S: futures_util::Stream + Unpin> futures_util::Stream for GuardedStream<S> 
 struct PollState {
     last_event_id: i64,
     last_lead_queue_id: i64,
+    last_action_id: i64,
+    last_run_control_state: Option<String>,
+    last_run_control_source: Option<String>,
     events_jsonl_offset: u64,
     log_offset: u64,
 }
@@ -352,8 +361,13 @@ impl PollState {
         let events_jsonl_path = orch_dir.join("events.jsonl");
         let autopilot_log_path = orch_dir.join("autopilot.log");
 
-        let (last_event_id, last_lead_queue_id) =
-            orch_core::events::init_db_poll_state(&db_path);
+        let (last_event_id, last_lead_queue_id, last_action_id, initial_control) =
+            orch_core::events::init_db_poll_state_all(&db_path);
+
+        let (last_run_control_state, last_run_control_source) = match initial_control {
+            Some(rc) => (Some(rc.state), Some(rc.source)),
+            None => (Some("running".to_string()), None),
+        };
 
         let events_jsonl_offset = if events_jsonl_path.exists() {
             std::fs::metadata(&events_jsonl_path)
@@ -374,6 +388,9 @@ impl PollState {
         PollState {
             last_event_id,
             last_lead_queue_id,
+            last_action_id,
+            last_run_control_state,
+            last_run_control_source,
             events_jsonl_offset,
             log_offset,
         }
@@ -466,6 +483,82 @@ fn poll_once(
             read_at: row.read_at,
         };
         hub.publish("lead-event", serde_json::to_value(ev).unwrap_or_default());
+    }
+
+    // 1c. Read run actions (audit trail) and run_control changes
+    let actions = orch_core::events::poll_run_actions(db_path, &mut state.last_action_id);
+    for act in actions {
+        if matches!(act.action.as_str(), "pause" | "resume" | "stop") {
+            let control_state = match act.action.as_str() {
+                "pause" => "paused".to_string(),
+                "resume" => "running".to_string(),
+                "stop" => {
+                    if let Some(rc) = orch_core::events::get_run_control(db_path)
+                        && (rc.state == "stopping" || rc.state == "stopped")
+                    {
+                        rc.state
+                    } else {
+                        "stopping".to_string()
+                    }
+                }
+                _ => "running".to_string(),
+            };
+            let changed = state.last_run_control_state.as_deref() != Some(&control_state)
+                || state.last_run_control_source.as_deref() != Some(&act.source);
+            if changed {
+                let ev = RunStateEvent {
+                    action: Some(act.action.clone()),
+                    message: Some(format!("run control: {control_state} ({})", act.source)),
+                    event: Some("run-control".to_string()),
+                    task: None,
+                    agent: None,
+                    status: Some(control_state.clone()),
+                    run_control: Some(control_state.clone()),
+                    state: Some(control_state.clone()),
+                    source: Some(act.source.clone()),
+                    ts: Some(act.ts),
+                };
+                hub.publish("run-state", serde_json::to_value(ev).unwrap_or_default());
+                state.last_run_control_state = Some(control_state);
+                state.last_run_control_source = Some(act.source);
+            }
+        }
+    }
+
+    // Also check run_control table directly (e.g. manager changes stopping -> stopped, or direct store updates)
+    if let Some(rc) = orch_core::events::get_run_control(db_path) {
+        let changed = match (&state.last_run_control_state, &state.last_run_control_source) {
+            (Some(last_state), Some(last_source)) => {
+                last_state != &rc.state || last_source != &rc.source
+            }
+            (Some(last_state), None) => {
+                last_state != &rc.state
+            }
+            _ => true,
+        };
+        if changed {
+            let action = match rc.state.as_str() {
+                "paused" => "pause",
+                "running" => "resume",
+                "stopping" | "stopped" => "stop",
+                _ => rc.state.as_str(),
+            };
+            let ev = RunStateEvent {
+                action: Some(action.to_string()),
+                message: Some(format!("run control: {} ({})", rc.state, rc.source)),
+                event: Some("run-control".to_string()),
+                task: None,
+                agent: None,
+                status: Some(rc.state.clone()),
+                run_control: Some(rc.state.clone()),
+                state: Some(rc.state.clone()),
+                source: Some(rc.source.clone()),
+                ts: Some(rc.since),
+            };
+            hub.publish("run-state", serde_json::to_value(ev).unwrap_or_default());
+            state.last_run_control_state = Some(rc.state);
+            state.last_run_control_source = Some(rc.source);
+        }
     }
 
     // 2. Read events.jsonl
