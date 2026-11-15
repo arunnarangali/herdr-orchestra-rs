@@ -16,7 +16,15 @@ function skillsBadge(a: AgentKindInfo) {
   return <span className={`badge badge--${tone}`}>{a.skills.status}</span>;
 }
 
-export function AgentsTab({ data, status }: { data: AgentsResponse; status: StatusResponse | null }) {
+export function AgentsTab({
+  data,
+  status,
+  onOpenOutput,
+}: {
+  data: AgentsResponse;
+  status: StatusResponse | null;
+  onOpenOutput?: (agentName: string) => void;
+}) {
   const busy = new Map((status?.workers ?? []).map((w) => [w.name, w.task]));
   return (
     <>
@@ -85,16 +93,31 @@ export function AgentsTab({ data, status }: { data: AgentsResponse; status: Stat
                   <th scope="col">Kind</th>
                   <th scope="col">Model</th>
                   <th scope="col">Tier</th>
-                  <th scope="col">Availability</th>
+                  <th scope="col">Working on / State</th>
+                  <th scope="col">Output</th>
                 </tr>
               </thead>
               <tbody>
                 {data.team.map((m) => {
                   const task = busy.get(m.name);
                   const kind = data.agents.find((a) => a.kind === m.kind);
+                  const workingOn = m.working_on;
                   return (
                     <tr key={m.name}>
-                      <th scope="row">{m.name}</th>
+                      <th scope="row">
+                        {onOpenOutput ? (
+                          <button
+                            type="button"
+                            className="ag-link"
+                            onClick={() => onOpenOutput(m.name)}
+                            aria-label={`Open output for ${m.name}`}
+                          >
+                            {m.name}
+                          </button>
+                        ) : (
+                          m.name
+                        )}
+                      </th>
                       <td>{m.role}</td>
                       <td>{m.kind}</td>
                       <td>{m.model ?? "–"}</td>
@@ -102,14 +125,28 @@ export function AgentsTab({ data, status }: { data: AgentsResponse; status: Stat
                       <td>
                         {kind && !kind.installed ? (
                           <span className="badge badge--danger">not installed</span>
-                        ) : m.role !== "worker" ? (
-                          <span className="muted">–</span>
+                        ) : workingOn ? (
+                          <span className="badge badge--info">
+                            busy on {workingOn.task} ({workingOn.state})
+                          </span>
                         ) : task ? (
                           <span className="badge badge--info">busy on {task}</span>
                         ) : status ? (
                           <span className="badge badge--success">free</span>
                         ) : (
                           <span className="muted">unknown</span>
+                        )}
+                      </td>
+                      <td>
+                        {onOpenOutput && (
+                          <button
+                            type="button"
+                            className="button button--small"
+                            onClick={() => onOpenOutput(m.name)}
+                            aria-label={`View output for ${m.name}`}
+                          >
+                            View output
+                          </button>
                         )}
                       </td>
                     </tr>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection } from "../app/connection";
+import { getBackend } from "../screens/projects/backend";
 import { kindKey } from "./format";
 import "./components.css";
 
@@ -21,6 +22,20 @@ function desktopAllowed(): boolean {
   return typeof Notification !== "undefined" && Notification.permission === "granted";
 }
 
+async function sendDesktopNotification(title: string, body: string) {
+  if (!desktopAllowed()) return;
+  const backend = getBackend();
+  if (!backend) return;
+  try {
+    const { value } = await backend.getSettings();
+    if (value.notifications) {
+      new Notification(title, { body });
+    }
+  } catch {
+    // If settings cannot be read, do not send desktop notification
+  }
+}
+
 /**
  * In-app notices for what needs the developer: a new question, a hold, a failure, the end of
  * the run. When the app runs in the desktop shell and the user allowed it, the same text is
@@ -40,7 +55,7 @@ export function useNotices() {
         if (!k) return;
         const text = `${k.title}${m.data.task ? ` ${m.data.task}` : ""}: ${m.data.text}`;
         setNotices((n) => [...n.slice(-4), { id: next.current++, tone: k.tone, text }]);
-        if (shell && desktopAllowed()) new Notification(k.title, { body: m.data.text });
+        if (shell) void sendDesktopNotification(k.title, m.data.text);
       }),
     [subscribe, shell],
   );
