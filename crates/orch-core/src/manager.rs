@@ -16,7 +16,7 @@ use crate::claim::ClaimError;
 use crate::conflict::IssueKind;
 use crate::check::Records;
 use crate::fix::FixKind;
-use crate::events::{PollOutcome, PollSource, RunEvent, RuntimeView};
+use crate::events::{AgentState, PollOutcome, PollSource, RunEvent, RuntimeView};
 use crate::error::Result;
 use crate::lead_queue::LeadKind;
 use crate::reconcile::park_with_lost;
@@ -768,6 +768,9 @@ impl<'a> Manager<'a> {
             return Cycle::Exit(EXIT_STOPPED);
         }
 
+        // a `gone` bench ends as soon as herdr sees the agent again (§15)
+        self.end_gone_benches();
+
         // 1. act on tasks waiting for us (checks, reviews, commits)
         let tasks = match self.store.list_tasks() {
             Ok(t) => t,
@@ -824,6 +827,19 @@ impl<'a> Manager<'a> {
             return Cycle::Continue;
         }
         self.finish_or_stop_check()
+    }
+
+    fn end_gone_benches(&mut self) {
+        let now = self.now();
+        let Ok(benches) = self.store.active_benches(now) else { return };
+        for b in benches.iter().filter(|b| b.reason == "gone") {
+            if (self.watchable)(&b.agent)
+                && self.runtime.status(&b.agent).is_some_and(|s| s != AgentState::Gone)
+                && self.store.end_bench(&b.agent).is_ok()
+            {
+                self.log(&format!("{} is back — its bench ends", b.agent), false);
+            }
+        }
     }
 
     // ---- 1. in-flight work
@@ -1127,6 +1143,9 @@ impl<'a> Manager<'a> {
             Ok(b) => b,
             Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
         };
+        // the fix job goes back out through the scheduler, which only hands jobs to tasks
+        // that hold no coder (the builder is preferred through `last_worker`)
+        self.store.release_claim(id).ok();
         self.store.transition(
             id,
             &TransitionRequest::auto(State::NeedsFix, Some(&format!("fix round {n}"))),
@@ -1212,6 +1231,12 @@ impl<'a> Manager<'a> {
         if let Some(why) = self.reviewer_problem(id)? {
             return self.park(id, State::Paused, &why, false);
         }
+        // a benched reviewer (gone, unreachable) is not prompted: the review only waits
+        let reviewer = self.reviewer_of()?;
+        let now = self.now();
+        if self.store.active_benches(now)?.iter().any(|b| b.agent == reviewer) {
+            return Ok(());
+        }
         let body = match self.work.review_body(id, round) {
             Ok(b) => b,
             Err(e) => return self.park(id, State::Paused, &format!("orch error: {e}"), false),
@@ -1230,6 +1255,7 @@ impl<'a> Manager<'a> {
             // failure streak benches it (AC4)
             self.store
                 .transition(id, &TransitionRequest::auto(State::AwaitingReview, Some("reviewer unreachable")))?;
+            self.store.drop_review_round(id)?;
             let reviewer = self.reviewer_of()?;
             self.bench_after_delivery_failure(&reviewer, id, &e)?;
         }
@@ -1354,6 +1380,7 @@ impl<'a> Manager<'a> {
                     );
                 }
                 let n = self.store.bump(id, Counter::Conflict)?;
+                self.store.release_claim(id).ok();
                 self.store.transition(
                     id,
                     &TransitionRequest::auto(
@@ -1400,6 +1427,7 @@ impl<'a> Manager<'a> {
             &tail,
             &format!("result-{}.json", attempt + 1),
         );
+        self.store.release_claim(id).ok();
         self.store.transition(
             id,
             &TransitionRequest::auto(
@@ -1631,7 +1659,14 @@ impl<'a> Manager<'a> {
         let active = tasks.iter().any(|t| {
             matches!(
                 t.status,
-                State::Coding | State::Reviewing | State::Verifying | State::Committed
+                State::Coding
+                    | State::Reviewing
+                    | State::Verifying
+                    | State::Committed
+                    | State::AwaitingReview
+                    | State::Reviewed
+                    | State::NeedsFix
+                    | State::Conflict
             )
         });
         let ready = tasks
@@ -1711,12 +1746,20 @@ impl<'a> Manager<'a> {
     /// eligible work.
     pub fn apply_event(&mut self, ev: &RunEvent) -> Result<()> {
         let key = ev.key();
-        if self.applied.contains(&key) {
-            self.log(&format!("duplicate: {key} — nothing changed"), false);
-            return Ok(());
-        }
         if self.store.get_task(ev.task()).is_err() {
             self.log(&format!("unknown milestone {}: event dropped", ev.task()), false);
+            return Ok(());
+        }
+        // The same event of a later attempt or review round (the coder's DONE after a fix
+        // round, a second GONE) is a new event, not a replay.
+        let (attempt, round) = self
+            .store
+            .get_task(ev.task())
+            .map(|t| (t.attempt, t.review_rounds))
+            .unwrap_or_default();
+        let key = format!("{key} @{attempt}.{round}");
+        if self.applied.contains(&key) {
+            self.log(&format!("duplicate: {key} — nothing changed"), false);
             return Ok(());
         }
         self.log(&ev.line(), false);
@@ -1830,6 +1873,7 @@ impl<'a> Manager<'a> {
                     task,
                     &TransitionRequest::auto(State::AwaitingReview, Some("the review prompt never went out")),
                 )?;
+                self.store.drop_review_round(task)?;
                 self.log(&format!("{task}: the review prompt never went out -> queued for review again"), false);
                 Ok(())
             }
@@ -1919,6 +1963,7 @@ impl<'a> Manager<'a> {
                 task,
                 &TransitionRequest::auto(State::AwaitingReview, Some("the reviewer is gone")),
             )?;
+            self.store.drop_review_round(task)?;
             self.log(
                 &format!(
                     "reviewer {agent} is gone — restart it; {task} waits for review (the coder's work is kept)"

@@ -195,6 +195,7 @@ fn delivery_gone(
                     )
                     .is_ok();
             if moved {
+                let _ = store.drop_review_round(&d.task);
                 report.notes.push(format!(
                     "RECOVERED {}: the reviewer {} is gone — it waits for review again",
                     d.task, d.agent
