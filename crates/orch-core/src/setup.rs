@@ -14,6 +14,7 @@ use crate::store::{Store, now};
 use globset::{Glob, GlobSetBuilder};
 use rusqlite::{OptionalExtension, params};
 use std::io::Read;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -184,6 +185,18 @@ fn timeout() -> Duration {
     Duration::from_secs(min.max(1) * 60)
 }
 
+/// Kill the command's process group (`sh` and everything it started), then reap `sh`.
+fn kill_group(child: &mut std::process::Child) {
+    let group = format!("-{}", child.id());
+    let _ = Command::new("kill")
+        .args(["-KILL", "--", &group])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// Run `command` through the shell in `dir`. `Err` carries the last lines of its output.
 pub fn run_command(command: &str, dir: &Path, limit: Duration) -> std::result::Result<(), String> {
     let mut child = Command::new("sh")
@@ -192,6 +205,7 @@ pub fn run_command(command: &str, dir: &Path, limit: Duration) -> std::result::R
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .map_err(|e| format!("could not run `{command}` in {}: {e}", dir.display()))?;
     let drain = |s: Option<Box<dyn Read + Send>>| {
@@ -210,12 +224,14 @@ pub fn run_command(command: &str, dir: &Path, limit: Duration) -> std::result::R
         match child.try_wait() {
             Ok(Some(st)) => break Some(st),
             Ok(None) if start.elapsed() > limit => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_group(&mut child);
                 break None;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return Err(format!("waiting for the setup command: {e}")),
+            Err(e) => {
+                kill_group(&mut child);
+                return Err(format!("waiting for the setup command: {e}"));
+            }
         }
     };
     let text = format!("{}{}", out.join().unwrap_or_default(), err.join().unwrap_or_default());
@@ -352,5 +368,19 @@ mod tests {
         let (_t, root) = repo();
         let e = run_command("sleep 30", &root, Duration::from_millis(200)).unwrap_err();
         assert!(e.contains("timed out"), "{e}");
+    }
+
+    #[test]
+    fn a_hung_setup_is_killed_with_its_children_and_says_it_timed_out() {
+        let d = tempfile::tempdir().unwrap();
+        let marker = d.path().join("setup-child-survived");
+        let cmd = format!("(sleep 2; touch {}) & sleep 30", marker.display());
+        let t0 = Instant::now();
+        let r = run_command(&cmd, d.path(), Duration::from_millis(300));
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("timed out"));
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(2500));
+        assert!(!marker.exists(), "the child process group was not killed");
     }
 }
