@@ -786,3 +786,66 @@ async fn test_run_control_changes_via_cli_and_direct_store() {
     srv.stop();
 }
 
+
+// A `chat` event for every stored message and every change of its delivery state.
+#[tokio::test]
+async fn a_chat_event_follows_every_stored_message_and_delivery_change() {
+    use orch_core::chat::{ChatKind, ChatTick, chat_tick};
+    use orch_core::wake::{Clock, LeadPane, LeadRuntime, Notifier, SystemClock, WakeEnv, WakeTunables};
+
+    struct Idle;
+    impl LeadRuntime for Idle {
+        fn pane(&self, _: &str) -> LeadPane {
+            LeadPane::Idle
+        }
+        fn send(&self, _: &str, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    struct Quiet;
+    impl Notifier for Quiet {
+        fn notify(&self, _: &str) {}
+    }
+    let _ = SystemClock.now();
+
+    let _lock = TEST_LOCK.lock().await;
+    unsafe {
+        std::env::set_var("ORCH_STREAM_POLL_MS", "40");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = create_test_run(dir.path());
+    let srv = TestServer::start(dir.path()).await;
+    let (status, mut client) =
+        SseClient::connect(srv.addr, &format!("/api/v1/stream?token={SECRET}"), &[]).await;
+    assert_eq!(status, 200);
+
+    // stored: queued
+    let m = store
+        .post_developer_message(ChatKind::Message, "hello", None)
+        .unwrap();
+    let e = client.next_event(Duration::from_millis(2000)).await.expect("stored");
+    assert_eq!(e.event.as_deref(), Some("chat"));
+    let d: Value = serde_json::from_str(&e.data.unwrap()).unwrap();
+    assert_eq!((d["id"].as_i64(), d["delivery"].as_str(), d["sender"].as_str()), (Some(m.id), Some("queued"), Some("developer")));
+    assert!(d["ts"].is_string());
+
+    // delivered: the event manager records the attempt, then `sent`
+    let env = WakeEnv { runtime: &Idle, notifier: &Quiet, clock: &SystemClock, tun: WakeTunables::default() };
+    assert_eq!(chat_tick(&mut store, &env, &mut |_| {}).unwrap(), ChatTick::Sent(m.id));
+    let mut last = Value::Null;
+    while let Some(e) = client.next_event(Duration::from_millis(600)).await {
+        assert_eq!(e.event.as_deref(), Some("chat"));
+        last = serde_json::from_str(&e.data.unwrap()).unwrap();
+    }
+    assert_eq!(last["delivery"], "sent", "{last}");
+
+    // the lead's reply, and the acknowledgement it causes
+    store.post_lead_reply("on it", Some("M1")).unwrap();
+    let mut seen = Vec::new();
+    while let Some(e) = client.next_event(Duration::from_millis(600)).await {
+        seen.push(serde_json::from_str::<Value>(&e.data.unwrap()).unwrap());
+    }
+    assert!(seen.iter().any(|d| d["sender"] == "lead" && d["about"] == "M1" && d["delivery"].is_null()), "{seen:?}");
+    assert!(seen.iter().any(|d| d["id"].as_i64() == Some(m.id) && d["delivery"] == "acknowledged"), "{seen:?}");
+    srv.stop();
+}

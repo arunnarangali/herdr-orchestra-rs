@@ -7,6 +7,9 @@
 import action from "./contract/ActionResponse.json";
 import agents from "./contract/AgentsResponse.json";
 import answerBody from "./contract/AnswerBody.json";
+import chatBody from "./contract/ChatBody.json";
+import chatList from "./contract/ChatListResponse.json";
+import chatMessage from "./contract/ChatMessageView.json";
 import dispatchBody from "./contract/DispatchBody.json";
 import errorBody from "./contract/ErrorBody.json";
 import escalateBody from "./contract/EscalateBody.json";
@@ -60,12 +63,15 @@ export const samples = {
   logs: fits<T.LogsResponse>()(logs),
   action: fits<T.ActionResponse>()(action),
   runControl: fits<T.RunControlResponse>()(runControl),
+  chatMessage: fits<T.ChatMessage>()(chatMessage),
+  chatList: fits<T.ChatListResponse>()(chatList),
   streamMessage: fits<T.StreamMessageEnvelope>()(streamMessage),
   taskStateEvent: fits<T.TaskStateEvent>()(taskStateEvent),
   leadEvent: fits<T.LeadQueueEvent>()(leadEvent),
   runStateEvent: fits<T.RunStateEvent>()(runStateEvent),
   logEvent: fits<T.LogEvent>()(logEvent),
   answerBody: fits<T.AnswerBody>()(answerBody),
+  chatBody: fits<T.ChatBody>()(chatBody),
   dispatchBody: fits<T.DispatchBody>()(dispatchBody),
   fixBody: fits<T.FixBody>()(fixBody),
   escalateBody: fits<T.EscalateBody>()(escalateBody),

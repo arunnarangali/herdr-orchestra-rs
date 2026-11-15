@@ -1,0 +1,13 @@
+{
+  "kind": "feature_request",
+  "text": "",
+  "request": {
+    "feature": "Dark mode",
+    "why": "easier on the eyes at night",
+    "must": "remember the choice",
+    "must_not": "change the API",
+    "decided": "CSS variables",
+    "done_when": "the toggle works and persists",
+    "mode": "worktree"
+  }
+}

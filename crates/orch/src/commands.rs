@@ -1,7 +1,7 @@
 //! The command table: every command name, its help line, and the usage text.
 
 use crate::{
-    autopilot, dispatch_cmds, doctor, events_cmd, finish_cmd, git_cmds, listing, merge_cmds,
+    autopilot, chat_cmds, dispatch_cmds, doctor, events_cmd, finish_cmd, git_cmds, listing, merge_cmds,
     plan_cmds, review_cmds, run_ctl_cmds, send_cmds, serve_cmd, task_cmds, team,
 };
 use orch_config::tunables::Tunables;
@@ -52,6 +52,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "dispatch",
     "retry",
     "answer",
+    "say",
     "escalate",
     "fix",
     "team",
@@ -91,6 +92,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         ("serve", _) => Some(serve_cmd::serve(&args[1..])),
         ("dispatch" | "retry", _) => Some(dispatch_cmds::dispatch(&args[1..])),
         ("answer", _) => Some(dispatch_cmds::answer(&args[1..])),
+        ("say", _) => Some(chat_cmds::say(&args[1..])),
         ("fix", _) => Some(dispatch_cmds::fix(&args[1..])),
         ("approve", _) => Some(dispatch_cmds::approve(&args[1..])),
         ("escalate", _) => Some(dispatch_cmds::escalate(&args[1..])),
@@ -243,6 +245,10 @@ pub const HELP: &[(&str, &str)] = &[
     (
         "answer <Mn> <text>",
         "(lead) the developer's answer: into plan.md, and back to the same coder",
+    ),
+    (
+        "say \"<text>\" [--about Mn]",
+        "(lead) reply to the developer in the GUI chat",
     ),
     (
         "fix <Mn> <text> [--to <worker>]",
@@ -429,6 +435,7 @@ mod tests {
             "dispatch",
             "retry",
             "answer",
+            "say",
             "escalate",
             "fix",
             "team",
