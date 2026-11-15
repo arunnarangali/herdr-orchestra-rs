@@ -9,6 +9,7 @@
 pub mod api_router;
 pub mod doc;
 pub mod error;
+pub mod models;
 mod guard;
 pub mod routes;
 pub mod state;

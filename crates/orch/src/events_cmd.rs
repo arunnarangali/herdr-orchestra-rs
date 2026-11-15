@@ -3,11 +3,14 @@
 //! Python v4.10.1's `cmd_events`; the queue and the wake-up logic live in `orch_core`
 //! (`lead_queue`, `wake`).
 
-use orch_core::lead_queue::{LeadEntry, LeadKind};
+use orch_core::lead_queue::LeadEntry;
+#[cfg(test)]
+use orch_core::lead_queue::LeadKind;
 use orch_core::lease::{driver_alive, driver_info, driver_lock_path};
 use orch_core::paths;
 use orch_core::run_store::{AgentRole, Run};
 use orch_core::store::{DB_FILE, Store};
+use orch_core::view;
 use orch_core::wake::{LeadPane, LeadRuntime};
 use orch_herdr::error::HerdrError;
 use orch_herdr::{AgentStatus, RuntimeAdapter};
@@ -21,73 +24,6 @@ const NO_LEAD: &str =
 const NOT_RUNNING: &str = "NOT running — your next `orch dispatch` or `orch answer` starts it";
 const CLOSING: &str = "Handle each event above, then STOP: you are woken again when something else happens. Never prompt a coder yourself and never poll.";
 
-/// What the lead is told to do about each kind (Python's `EVENT_HELP`; `{t}` is the milestone).
-fn event_help(kind: LeadKind) -> &'static str {
-    match kind {
-        LeadKind::Paused => {
-            "a coder's question, or an agent that stopped. A question only the developer can settle: ask them, then `orch answer {t} \"<their answer>\"`. An agent problem: tell the developer what to look at, then `orch dispatch {t}`."
-        }
-        LeadKind::Failed => {
-            "still failing after its rounds. Read the last report and check or review output, add the missing FACT or constraint to the plan (never a how-to), then `orch dispatch {t}` (add `--tier high` or `--to <worker>` to give it a stronger model)."
-        }
-        LeadKind::Held => {
-            "risky changes wait for the developer: show them the reasons; they run `orch approve {t}`. Never approve it yourself."
-        }
-        LeadKind::NeedsAnswer => {
-            "open questions in plan.md: ask the developer, write the answers under \"Notes from user\", set \"Open questions:\" to `- none`, `orch sync`, then `orch dispatch {t}`."
-        }
-        LeadKind::Merged => {
-            "landed on the feature branch. Nothing to do unless it unlocked work listed under READY."
-        }
-        LeadKind::Ready => "milestones are ready for you: `orch dispatch <Mn>...`.",
-        LeadKind::Escalated => "moved to a stronger model after its rounds ran out. Nothing to do.",
-        LeadKind::AutoDispatched => {
-            "started without you because you did not dispatch it in time. Nothing to do."
-        }
-        LeadKind::AllDone => {
-            "every milestone landed. Finish .orchestrate/summary.md (see `orch lead run`, section ALL_DONE)."
-        }
-        LeadKind::Stopped => {
-            "the event manager stopped. Tell the developer why; they run `orch autopilot` again."
-        }
-        LeadKind::AnswerProvided => {
-            "an answer for {t} was given (by you or by the developer) and goes to its coder. Nothing to do unless it changes what you told the developer."
-        }
-    }
-}
-
-/// 0 for no tier, else 1..3 (Python `rank`).
-fn rank(tier: Option<&str>) -> usize {
-    tier.and_then(|t| orch_config::models::TIERS.iter().position(|x| *x == t))
-        .map_or(0, |i| i + 1)
-}
-
-/// Workers allowed to take a milestone of `tier`: its tier or higher (unrated workers count as
-/// any tier); when nobody reaches it, the strongest workers (Python `eligible_workers`).
-fn eligible_workers(run: &Run, tier: Option<&str>) -> Vec<String> {
-    let need = rank(tier);
-    let workers: Vec<(&str, usize)> = run
-        .agents
-        .iter()
-        .filter(|a| a.role == AgentRole::Worker)
-        .map(|a| (a.name.as_str(), rank(a.tier.as_deref())))
-        .collect();
-    let ok: Vec<String> = workers
-        .iter()
-        .filter(|(_, r)| need == 0 || *r == 0 || *r >= need)
-        .map(|(n, _)| n.to_string())
-        .collect();
-    if !ok.is_empty() {
-        return ok;
-    }
-    let top = workers.iter().map(|(_, r)| *r).max().unwrap_or(0);
-    workers
-        .iter()
-        .filter(|(_, r)| *r == top)
-        .map(|(n, _)| n.to_string())
-        .collect()
-}
-
 fn show(out: &mut String, store: &Store, e: &LeadEntry) -> Result<(), String> {
     let mut head = format!("#{} {}", e.id, e.kind.heading());
     if let Some(t) = &e.task {
@@ -97,7 +33,7 @@ fn show(out: &mut String, store: &Store, e: &LeadEntry) -> Result<(), String> {
     if !e.text.is_empty() {
         let _ = write!(head, ": {}", e.text);
     }
-    let help = event_help(e.kind).replace("{t}", e.task.as_deref().unwrap_or("<Mn>"));
+    let help = view::lead_event_help(e.kind).replace("{t}", e.task.as_deref().unwrap_or("<Mn>"));
     let _ = writeln!(out, "{head}\n    -> {help}");
     Ok(())
 }
@@ -139,7 +75,7 @@ pub fn render(store: &Store, run: &Run, driver: &str) -> Result<(String, Vec<Lea
                 t.title,
                 tier.as_ref()
                     .map_or(String::new(), |x| format!(" tier {x}")),
-                eligible_workers(run, tier.as_deref()).join(" or ")
+                view::eligible_workers(run, tier.as_deref()).join(" or ")
             );
         }
     }
