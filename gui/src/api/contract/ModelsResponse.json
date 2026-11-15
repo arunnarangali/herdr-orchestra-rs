@@ -1,0 +1,36 @@
+{
+  "models": [
+    {
+      "architecture": 8,
+      "coding": 9,
+      "context_k": 200,
+      "denied": true,
+      "denied_by": "*-preview",
+      "evidence": "vendor benchmark",
+      "id": "claude-sonnet-5-5",
+      "instructions": 9,
+      "kinds": [
+        "claude"
+      ],
+      "open_weights": false,
+      "planning": 8,
+      "reasoning": 8,
+      "speed": 7,
+      "tier": "medium",
+      "tools": 9
+    }
+  ],
+  "policy": {
+    "deny": [
+      "*-preview"
+    ],
+    "deny_why": "unstable"
+  },
+  "tiers": [
+    {
+      "name": "medium",
+      "purpose": "most milestones",
+      "reasoning_floor": 6
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "agents": [
+    {
+      "display_name": "Claude Code",
+      "herdr_detect": true,
+      "installed": true,
+      "kind": "claude",
+      "launch": "claude",
+      "login": {
+        "reason": "credentials file found",
+        "state": "authenticated"
+      },
+      "roles": [
+        "worker",
+        "lead"
+      ],
+      "skills": {
+        "problems": [
+          "~/.claude/skills/orch-run/SKILL.md"
+        ],
+        "status": "outdated"
+      },
+      "verified": true
+    }
+  ],
+  "team": [
+    {
+      "detect": true,
+      "kind": "claude",
+      "model": "claude-sonnet-5-5",
+      "name": "rs-claude-1",
+      "role": "worker",
+      "tier": "medium"
+    }
+  ]
+}

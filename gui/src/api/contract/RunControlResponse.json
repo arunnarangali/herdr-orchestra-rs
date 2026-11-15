@@ -1,0 +1,7 @@
+{
+  "action": "pause",
+  "event_manager_running": true,
+  "message": "no new work starts",
+  "run_control": "paused",
+  "waiting": false
+}

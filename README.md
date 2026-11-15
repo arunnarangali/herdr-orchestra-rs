@@ -53,6 +53,45 @@ cargo run -p orch -- --version
 
 The CLI currently provides help and version output. Other recognized orchestration commands return an explicit “not implemented in this build” message until their implementation is added.
 
+## Desktop app
+
+The GUI in `gui/` is a React + TypeScript (strict) app built with Vite. It only reads and sends
+requests through the local API of `orch serve` (`/api/v1`); it never drives a run itself. It
+needs Node 20 or newer.
+
+In a browser (two commands, then open http://127.0.0.1:5173):
+
+```sh
+cd gui && npm ci && npm run dev
+```
+
+Start the API in a project and allow the dev page to call it, then enter the address `orch serve`
+prints and the token from the file it names (`~/.config/herdr-orchestra/api-token`). The token is
+kept in memory only.
+
+```sh
+orch serve --port 8787 --allow-origin http://127.0.0.1:5173
+```
+
+Other scripts: `npm run typecheck`, `npm test` (Vitest + Testing Library), `npm run build`.
+
+The desktop window is a Tauri 2 shell in `gui/src-tauri/` (outside the Cargo workspace, so
+`cargo build --workspace` does not need the desktop libraries; on Linux it needs webkit2gtk 4.1).
+It lets you choose a project folder, starts `orch serve` there, hands the page its address and
+token, and stops the server when the window closes. It finds `orch` through `ORCH_BIN` or the PATH
+(and Herdr through `HERDR_BIN` or the PATH).
+
+```sh
+cargo check --manifest-path gui/src-tauri/Cargo.toml
+cd gui && npm run tauri dev
+```
+
+**API contract.** `crates/orch-api/tests/contract.rs` builds every response shape from the
+server's real types and compares it with the JSON committed in `gui/src/api/contract/`; the
+GUI's `npm run typecheck` fails when those samples stop fitting `gui/src/api/types.ts`. After a
+deliberate API change run `ORCH_UPDATE_CONTRACT=1 cargo test -p orch-api --test contract`, then
+update the TypeScript types the typecheck points at.
+
 ## Development
 
 Format and lint the workspace with:

@@ -1,0 +1,12 @@
+{
+  "action": "pause",
+  "agent": "rs-claude-1",
+  "event": "run-control",
+  "message": "run control: paused (api)",
+  "run_control": "paused",
+  "source": "api",
+  "state": "paused",
+  "status": "paused",
+  "task": "M1",
+  "ts": 1700000300
+}

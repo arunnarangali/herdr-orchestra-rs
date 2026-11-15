@@ -1,0 +1,39 @@
+{
+  "lead_on": true,
+  "new": [
+    {
+      "help": "run `orch answer M1 \"…\"`",
+      "id": 7,
+      "kind": "needs-answer",
+      "open": true,
+      "read": false,
+      "task": "M1",
+      "task_title": "Foundation",
+      "text": "M1 needs an answer",
+      "ts": 1700000100
+    }
+  ],
+  "ready": [
+    {
+      "task": "M2",
+      "tier": "small",
+      "title": "Overview",
+      "workers": [
+        "rs-claude-1"
+      ]
+    }
+  ],
+  "still_open": [
+    {
+      "help": "run `orch answer M1 \"…\"`",
+      "id": 7,
+      "kind": "needs-answer",
+      "open": true,
+      "read": false,
+      "task": "M1",
+      "task_title": "Foundation",
+      "text": "M1 needs an answer",
+      "ts": 1700000100
+    }
+  ]
+}

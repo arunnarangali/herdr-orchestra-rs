@@ -1,0 +1,79 @@
+/*
+ * The theme: the only file that contains colours. Everything else uses these variables.
+ * Light is the default; dark follows the system unless the user picked a theme in the app
+ * (`data-theme` on <html>). The focus ring colour is chosen for each theme so it is visible
+ * on both the page and the surfaces.
+ */
+:root {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eceff3;
+  --border: #ccd3db;
+  --text: #1a1f26;
+  --text-muted: #4d5865;
+  --accent: #0a5bd1;
+  --accent-text: #ffffff;
+  --focus: #0a5bd1;
+  --success: #17692f;
+  --success-bg: #ddf3e4;
+  --warning: #805400;
+  --warning-bg: #fdf0cf;
+  --danger: #a4161a;
+  --danger-bg: #fbe1e1;
+  --info: #0a5bd1;
+  --info-bg: #dce9fc;
+  --muted-bg: #e4e8ed;
+  --overlay: rgba(15, 20, 28, 0.45);
+  --shadow: rgba(15, 20, 28, 0.18);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --surface: #161b22;
+  --surface-2: #1e252e;
+  --border: #323b47;
+  --text: #e8ecf1;
+  --text-muted: #a0aab6;
+  --accent: #6ca6ff;
+  --accent-text: #08111f;
+  --focus: #9cc2ff;
+  --success: #6fdc8c;
+  --success-bg: #12301c;
+  --warning: #f2c35b;
+  --warning-bg: #35280a;
+  --danger: #ff8d8d;
+  --danger-bg: #3a1416;
+  --info: #8fbbff;
+  --info-bg: #14284a;
+  --muted-bg: #232b35;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1116;
+    --surface: #161b22;
+    --surface-2: #1e252e;
+    --border: #323b47;
+    --text: #e8ecf1;
+    --text-muted: #a0aab6;
+    --accent: #6ca6ff;
+    --accent-text: #08111f;
+    --focus: #9cc2ff;
+    --success: #6fdc8c;
+    --success-bg: #12301c;
+    --warning: #f2c35b;
+    --warning-bg: #35280a;
+    --danger: #ff8d8d;
+    --danger-bg: #3a1416;
+    --info: #8fbbff;
+    --info-bg: #14284a;
+    --muted-bg: #232b35;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --shadow: rgba(0, 0, 0, 0.5);
+  }
+}
