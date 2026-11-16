@@ -16,7 +16,7 @@ const project = (o: Partial<ProjectInfo> = {}): ProjectInfo => ({
   archive: [],
   ...o,
 });
-const listOf = (projects: ProjectInfo[], active: string | null = null, warning: string | null = null): ProjectList => ({ projects, active, warning });
+const listOf = (projects: ProjectInfo[], active: string | null = null, warning: string | null = null): ProjectList => ({ projects, active, open: [], warning });
 
 function backend(o: Partial<AppBackend> = {}): AppBackend {
   return {
@@ -26,6 +26,17 @@ function backend(o: Partial<AppBackend> = {}): AppBackend {
     removeProject: async () => listOf([]),
     switchProject: async () => {
       throw new Error("switch not set up");
+    },
+    openProject: async () => {
+      throw new Error("open not set up");
+    },
+    retryProject: async () => {
+      throw new Error("retry not set up");
+    },
+    closeProject: async () => listOf([]),
+    restoreProjects: async () => [],
+    createProject: async () => {
+      throw new Error("create not set up");
     },
     getSettings: async () => ({ value: { theme: "system", notifications: false, orch_path: "" }, warning: null }),
     saveSettings: async (s) => s,

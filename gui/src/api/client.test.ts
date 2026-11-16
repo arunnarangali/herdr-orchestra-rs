@@ -29,8 +29,10 @@ describe("api client", () => {
       ["/events", () => c.events({ since: 3, limit: 10 }), samples.events],
       ["/report", () => c.report(), samples.report],
       ["/agents", () => c.agents(), samples.agents],
+      ["/agents/lead/output", () => c.agentOutput("lead", { lines: 100 }), samples.agentOutput],
       ["/models", () => c.models(), samples.models],
       ["/logs", () => c.logs({ lines: 50, milestone: "M1" }), samples.logs],
+      ["/attention", () => c.attention(), samples.attention],
       ["/openapi.json", () => c.openapi(), { openapi: "3.1.0", info: { title: "t", version: "1" }, paths: {} }],
     ];
     for (const [path, , body] of reads) server.respond("GET", path, 200, body);

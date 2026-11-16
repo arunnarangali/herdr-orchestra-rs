@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent } from "react";
 import { normalizeUrl } from "../api/client";
 import { useConnection } from "./connection";
+import { useProjects } from "./projects";
 
 function validUrl(input: string): boolean {
   try {
@@ -19,6 +20,7 @@ function validUrl(input: string): boolean {
  */
 export function ConnectPanel() {
   const { shell, connect, credentials } = useConnection();
+  const { multi, openFolder } = useProjects();
   const urlId = useId();
   const tokenId = useId();
   const [url, setUrl] = useState(credentials?.url ?? "http://127.0.0.1:");
@@ -41,7 +43,8 @@ export function ConnectPanel() {
     setError(null);
     try {
       const folder = await shell.chooseProjectFolder();
-      if (folder) connect(await shell.startServer(folder));
+      if (folder && multi) await openFolder(folder);
+      else if (folder) connect(await shell.startServer(folder));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

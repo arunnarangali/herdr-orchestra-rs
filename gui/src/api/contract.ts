@@ -5,8 +5,14 @@
 // `types.ts` is updated. Request samples are checked the same way; the Rust test reads them
 // into the real request types.
 import action from "./contract/ActionResponse.json";
+import agentOutput from "./contract/AgentOutputResponse.json";
 import agents from "./contract/AgentsResponse.json";
 import answerBody from "./contract/AnswerBody.json";
+import attention from "./contract/AttentionResponse.json";
+import attentionEvent from "./contract/AttentionEvent.json";
+import chatBody from "./contract/ChatBody.json";
+import chatList from "./contract/ChatListResponse.json";
+import chatMessage from "./contract/ChatMessageView.json";
 import dispatchBody from "./contract/DispatchBody.json";
 import errorBody from "./contract/ErrorBody.json";
 import escalateBody from "./contract/EscalateBody.json";
@@ -58,14 +64,20 @@ export const samples = {
   agents: fits<T.AgentsResponse>()(agents),
   models: fits<T.ModelsResponse>()(models),
   logs: fits<T.LogsResponse>()(logs),
+  attention: fits<T.AttentionResponse>()(attention),
+  agentOutput: fits<T.AgentOutputResponse>()(agentOutput),
   action: fits<T.ActionResponse>()(action),
   runControl: fits<T.RunControlResponse>()(runControl),
+  chatMessage: fits<T.ChatMessage>()(chatMessage),
+  chatList: fits<T.ChatListResponse>()(chatList),
   streamMessage: fits<T.StreamMessageEnvelope>()(streamMessage),
   taskStateEvent: fits<T.TaskStateEvent>()(taskStateEvent),
   leadEvent: fits<T.LeadQueueEvent>()(leadEvent),
   runStateEvent: fits<T.RunStateEvent>()(runStateEvent),
   logEvent: fits<T.LogEvent>()(logEvent),
+  attentionEvent: fits<T.AttentionEvent>()(attentionEvent),
   answerBody: fits<T.AnswerBody>()(answerBody),
+  chatBody: fits<T.ChatBody>()(chatBody),
   dispatchBody: fits<T.DispatchBody>()(dispatchBody),
   fixBody: fits<T.FixBody>()(fixBody),
   escalateBody: fits<T.EscalateBody>()(escalateBody),

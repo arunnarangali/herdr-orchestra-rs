@@ -139,3 +139,179 @@
   padding: 0.35rem 0.6rem;
   border-bottom: 1px solid var(--border);
 }
+
+/* Attention indicator and modals */
+.attention-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.attention-indicator:hover {
+  filter: brightness(1.08);
+}
+.attention-indicator-badge {
+  background: var(--warning);
+  color: var(--bg);
+  border-radius: 9999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.attention-dialog {
+  display: grid;
+  gap: 0.75rem;
+  width: min(34rem, 100%);
+}
+.attention-meta {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.attention-prompt {
+  display: grid;
+  gap: 0.25rem;
+}
+.attention-text {
+  background: var(--surface-2);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 14rem;
+  overflow: auto;
+}
+.attention-actions-area {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.attention-list-dialog {
+  display: grid;
+  gap: var(--gap);
+  width: min(36rem, 100%);
+}
+.attention-items-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+  max-height: 22rem;
+  overflow: auto;
+}
+.attention-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.attention-item-info {
+  display: grid;
+  gap: 0.2rem;
+}
+.attention-item-badges {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.attention-item-snippet {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+}
+
+
+/* ---- project bar: the open projects, one tab each ------------------------------------------ */
+.project-bar {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem var(--gap) 0;
+}
+.project-tabs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  align-items: flex-end;
+}
+.project-tab {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  flex: 0 0 auto;
+}
+.project-tab--active {
+  border-top: 3px solid var(--accent);
+  font-weight: 650;
+  background: var(--bg);
+  margin-bottom: -1px;
+  padding-bottom: 1px;
+}
+.project-tab-open,
+.project-tab-close {
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.project-tab-open {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.7rem;
+  max-width: 16rem;
+}
+.project-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-tab-close {
+  padding: 0 0.55rem;
+  color: var(--text-muted);
+}
+.project-tab-close:hover {
+  color: var(--danger);
+}
+.project-tab-add {
+  margin-left: 0.25rem;
+  padding-bottom: 0.2rem;
+}
+.project-tab-add .button {
+  padding: 0.15rem 0.6rem;
+  text-decoration: none;
+  display: inline-block;
+}
+.current-project {
+  font-weight: 650;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-problem {
+  max-width: 40rem;
+}

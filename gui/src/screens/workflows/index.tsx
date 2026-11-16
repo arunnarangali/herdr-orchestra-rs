@@ -6,6 +6,7 @@ import { useResource } from "../../ui/useResource";
 import { StatusBadge } from "../../ui/StatusBadge";
 import { MilestoneGraph } from "./Graph";
 import { MilestoneDetail } from "./MilestoneDetail";
+import { PlanApproval } from "./PlanApproval";
 import "./workflows.css";
 
 interface PlanAndTasks {
@@ -80,6 +81,7 @@ export function WorkflowsScreen() {
     const h = plan.header;
     return (
       <>
+        <PlanApproval tasks={tasks.tasks} />
         <section className="panel" aria-labelledby="wf-header">
           <h2 id="wf-header">Plan settings</h2>
           {plan.title && <p className="plan-title">{plan.title}</p>}

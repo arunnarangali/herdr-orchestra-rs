@@ -102,6 +102,140 @@ describe("Agents", () => {
     show();
     expect(await screen.findByText("The server refused the token")).toBeInTheDocument();
   });
+
+  it("lists lead, coders and reviewer with what each is working on", async () => {
+    serve({
+      agents: {
+        agents: samples.agents.agents,
+        team: [
+          {
+            name: "lead-agent",
+            role: "lead",
+            kind: "claude",
+            model: "claude-sonnet-5-5",
+            tier: "high",
+            detect: true,
+            working_on: { task: "M1", state: "planning" },
+          },
+          {
+            name: "coder-1",
+            role: "worker",
+            kind: "claude",
+            model: "claude-haiku-4-5",
+            tier: "small",
+            detect: true,
+            working_on: { task: "M2", state: "coding" },
+          },
+          {
+            name: "reviewer-1",
+            role: "reviewer",
+            kind: "claude",
+            model: "claude-sonnet-5-5",
+            tier: "medium",
+            detect: true,
+            working_on: { task: "M3", state: "reviewing" },
+          },
+        ],
+      },
+    });
+    show();
+    const team = await screen.findByRole("table", { name: "Team" });
+    const leadRow = within(team).getByRole("row", { name: /lead-agent/ });
+    expect(leadRow).toHaveTextContent("lead");
+    expect(leadRow).toHaveTextContent("busy on M1 (planning)");
+
+    const coderRow = within(team).getByRole("row", { name: /coder-1/ });
+    expect(coderRow).toHaveTextContent("worker");
+    expect(coderRow).toHaveTextContent("busy on M2 (coding)");
+
+    const reviewerRow = within(team).getByRole("row", { name: /reviewer-1/ });
+    expect(reviewerRow).toHaveTextContent("reviewer");
+    expect(reviewerRow).toHaveTextContent("busy on M3 (reviewing)");
+  });
+
+  it("updates live when stream events occur", async () => {
+    serve();
+    show();
+    const team = await screen.findByRole("table", { name: "Team" });
+    await waitFor(() => expect(team).toBeInTheDocument());
+    await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
+
+    // Update response for next fetch
+    server.respond("GET", "/agents", 200, {
+      agents: samples.agents.agents,
+      team: [
+        {
+          ...samples.agents.team[0]!,
+          working_on: { task: "M2", state: "verifying" },
+        },
+      ],
+    });
+
+    // Emit stream event
+    server.emit(10, "task-state", { task: "M2", state: "verifying" });
+
+    await waitFor(() => {
+      expect(screen.getByRole("table", { name: "Team" })).toHaveTextContent("busy on M2 (verifying)");
+    });
+  });
+
+  it("opening an agent shows its output, with lines selector, search, pause/resume and auto-scroll", async () => {
+    const user = userEvent.setup();
+    server.respond("GET", "/agents/rs-claude-1/output", 200, {
+      agent: "rs-claude-1",
+      lines: 2,
+      text: "Line 1: building project\nLine 2: tests passed cleanly",
+      ts: "2026-11-15T12:00:00Z",
+    });
+
+    serve();
+    show();
+
+    const team = await screen.findByRole("table", { name: "Team" });
+    const viewBtn = within(team).getByRole("button", { name: "View output for rs-claude-1" });
+    await user.click(viewBtn);
+
+    // Modal dialog is opened
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Live Output: rs-claude-1" })).toBeInTheDocument();
+    expect(screen.getByText(/Line 1: building project/)).toBeInTheDocument();
+    expect(screen.getByText(/Line 2: tests passed cleanly/)).toBeInTheDocument();
+
+    // Pause and Resume control
+    const pauseBtn = screen.getByRole("button", { name: "Pause refresh" });
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    await user.click(pauseBtn);
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume refresh" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Resume refresh" }));
+    expect(screen.getByText("Live")).toBeInTheDocument();
+
+    // Choose lines
+    const linesSelect = screen.getByLabelText("Lines:");
+    server.respond("GET", "/agents/rs-claude-1/output", 200, {
+      agent: "rs-claude-1",
+      lines: 50,
+      text: "50 lines of output...",
+      ts: "2026-11-15T12:01:00Z",
+    });
+    await user.selectOptions(linesSelect, "50");
+    await waitFor(() => {
+      const outputReqs = server.requests.filter((r) => r.path === "/agents/rs-claude-1/output");
+      expect(outputReqs.some((r) => r.query.get("lines") === "50")).toBe(true);
+    });
+
+    // Search inside output
+    const searchInput = screen.getByPlaceholderText("Search in output…");
+    await user.type(searchInput, "lines");
+    expect(await screen.findByText("1 match found")).toBeInTheDocument();
+    expect(screen.getByText("lines")).toHaveClass("ag-output-hit");
+
+    // Close button
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
 });
 
 describe("Models", () => {

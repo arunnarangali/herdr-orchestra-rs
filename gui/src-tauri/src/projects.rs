@@ -7,12 +7,14 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 const FILE: &str = "projects.txt";
-const KEYS: &[&str] = &["project", "active"];
+const KEYS: &[&str] = &["project", "active", "open"];
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct ProjectFile {
     pub projects: Vec<String>,
     pub active: Option<String>,
+    /// The projects that were open (each with its own server) when the app last ran, in order.
+    pub open: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -43,7 +45,32 @@ pub struct ProjectInfo {
 pub struct ProjectList {
     pub projects: Vec<ProjectInfo>,
     pub active: Option<String>,
+    pub open: Vec<String>,
     pub warning: Option<String>,
+}
+
+/// The one spelling of a project's folder: symlinks resolved, no trailing slash. Every path the
+/// shell receives goes through this before it is compared with, stored in or looked up in the
+/// project list, so `/home/me/work/app`, `/home/me/work/app/` and the real folder behind a
+/// symlinked `work` are the same project. A folder that is gone cannot be resolved; its parent
+/// still is, and failing that the path is only tidied.
+pub fn canonical(path: &str) -> String {
+    let p = Path::new(path.trim());
+    if let Ok(c) = std::fs::canonicalize(p) {
+        return c.display().to_string();
+    }
+    let tidy = |q: &Path| {
+        let s = q.display().to_string();
+        let t = s.trim_end_matches('/');
+        if t.is_empty() { "/".to_string() } else { t.to_string() }
+    };
+    match (p.parent().filter(|x| !x.as_os_str().is_empty()), p.file_name()) {
+        (Some(parent), Some(name)) => match std::fs::canonicalize(parent) {
+            Ok(c) => tidy(&c.join(name)),
+            Err(_) => tidy(p),
+        },
+        _ => tidy(p),
+    }
 }
 
 pub struct ProjectStore {
@@ -66,6 +93,7 @@ impl ProjectStore {
             match k.as_str() {
                 "project" if !out.projects.contains(&v) => out.projects.push(v),
                 "active" => out.active = Some(v),
+                "open" if !out.open.contains(&v) => out.open.push(v),
                 _ => {}
             }
         }
@@ -77,6 +105,9 @@ impl ProjectStore {
         {
             out.active = None;
         }
+        // Only listed projects can be open.
+        let listed = out.projects.clone();
+        out.open.retain(|o| listed.contains(o));
         Loaded {
             value: out,
             warning,
@@ -89,6 +120,7 @@ impl ProjectStore {
         if let Some(a) = &f.active {
             entries.push(("active", a));
         }
+        entries.extend(f.open.iter().map(|o| ("open", o.as_str())));
         store::write_atomic(&self.file(), &store::render(&entries))
     }
 
@@ -104,13 +136,13 @@ impl ProjectStore {
                 "{path} is not a git repository: choose the folder that contains .git (run `git init` there first if it is new)"
             ));
         }
-        let canonical = std::fs::canonicalize(p)
+        let resolved = std::fs::canonicalize(p)
             .map_err(|e| format!("cannot open {path}: {e}"))?
             .display()
             .to_string();
         let mut f = self.load().value;
-        if !f.projects.contains(&canonical) {
-            f.projects.push(canonical);
+        if !f.projects.contains(&resolved) {
+            f.projects.push(resolved);
         }
         self.save(&f)?;
         Ok(f)
@@ -118,8 +150,10 @@ impl ProjectStore {
 
     /// Forget `path`. Only the list changes; the folder is not touched.
     pub fn remove(&self, path: &str) -> Result<ProjectFile, String> {
+        let path = &canonical(path);
         let mut f = self.load().value;
         f.projects.retain(|p| p != path);
+        f.open.retain(|p| p != path);
         if f.active.as_deref() == Some(path) {
             f.active = None;
         }
@@ -129,6 +163,7 @@ impl ProjectStore {
 
     /// Make `path` the active project. It must be in the list and still exist.
     pub fn set_active(&self, path: &str) -> Result<ProjectFile, String> {
+        let path = &canonical(path);
         let mut f = self.load().value;
         if !f.projects.iter().any(|p| p == path) {
             return Err(format!("{path} is not in the project list"));
@@ -143,6 +178,25 @@ impl ProjectStore {
         Ok(f)
     }
 
+    /// Remember that `path` is open (or no longer). It must be in the list; the order of the
+    /// open projects is the order they were opened in.
+    pub fn set_open(&self, path: &str, open: bool) -> Result<ProjectFile, String> {
+        let path = &canonical(path);
+        let mut f = self.load().value;
+        if open {
+            if !f.projects.iter().any(|p| p == path) {
+                return Err(format!("{path} is not in the project list"));
+            }
+            if !f.open.iter().any(|p| p == path) {
+                f.open.push(path.to_string());
+            }
+        } else {
+            f.open.retain(|p| p != path);
+        }
+        self.save(&f)?;
+        Ok(f)
+    }
+
     pub fn list(&self) -> ProjectList {
         let Loaded { value, warning } = self.load();
         ProjectList {
@@ -152,6 +206,7 @@ impl ProjectStore {
                 .map(|p| inspect(Path::new(p)))
                 .collect(),
             active: value.active,
+            open: value.open,
             warning,
         }
     }
@@ -362,6 +417,93 @@ mod tests {
             (l.value.projects, l.value.active),
             (vec!["/a".to_string()], None)
         );
+    }
+
+    #[test]
+    fn the_open_projects_are_remembered_in_order_and_forgotten_with_the_project() {
+        let s = store("open");
+        let (a, b, c) = (repo("op-a", "main"), repo("op-b", "main"), repo("op-c", "main"));
+        for r in [&a, &b, &c] {
+            s.add(r.to_str().unwrap()).unwrap();
+        }
+        s.set_open(b.to_str().unwrap(), true).unwrap();
+        s.set_open(a.to_str().unwrap(), true).unwrap();
+        s.set_open(b.to_str().unwrap(), true).unwrap(); // twice is fine
+        let reloaded = ProjectStore::new(s.dir.clone()).list();
+        assert_eq!(
+            reloaded.open,
+            vec![b.display().to_string(), a.display().to_string()]
+        );
+        s.set_open(b.to_str().unwrap(), false).unwrap();
+        assert_eq!(s.list().open, vec![a.display().to_string()]);
+        s.remove(a.to_str().unwrap()).unwrap();
+        assert!(s.list().open.is_empty(), "a removed project is no longer open");
+        assert!(s.set_open("/not/listed", true).is_err());
+    }
+
+    #[test]
+    fn a_stray_open_entry_is_dropped_on_load() {
+        let s = store("stray-open");
+        std::fs::create_dir_all(&s.dir).unwrap();
+        std::fs::write(
+            s.file(),
+            format!("{}\nproject=/a\nopen=/a\nopen=/gone\n", store::HEADER),
+        )
+        .unwrap();
+        assert_eq!(s.load().value.open, vec!["/a".to_string()]);
+    }
+
+    /// `link/app` is the same folder as `real/app`.
+    fn symlinked(tag: &str) -> (PathBuf, PathBuf) {
+        let root = scratch(tag);
+        let real = root.join("real");
+        std::fs::create_dir_all(real.join("app/.git")).unwrap();
+        std::fs::write(real.join("app/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::os::unix::fs::symlink(&real, root.join("link")).unwrap();
+        (std::fs::canonicalize(real.join("app")).unwrap(), root.join("link/app"))
+    }
+
+    #[test]
+    fn canonical_resolves_symlinks_and_trailing_slashes() {
+        let (real, via_link) = symlinked("canon");
+        let want = real.display().to_string();
+        assert_eq!(canonical(via_link.to_str().unwrap()), want);
+        assert_eq!(canonical(&format!("{}/", via_link.display())), want);
+        assert_eq!(canonical(&format!("{}//", real.display())), want);
+        assert_eq!(canonical(&format!("  {}  ", want)), want);
+        // a vanished folder behind the symlink still resolves through its parent
+        std::fs::remove_dir_all(&real).unwrap();
+        assert_eq!(canonical(via_link.to_str().unwrap()), want);
+        assert_eq!(canonical("/no/such/place/"), "/no/such/place");
+        assert_eq!(canonical("/"), "/");
+    }
+
+    #[test]
+    fn a_project_added_through_a_symlink_is_found_by_every_spelling() {
+        let s = store("symlink");
+        let (real, via_link) = symlinked("symlink-r");
+        let (real_s, link_s) = (real.display().to_string(), via_link.display().to_string());
+        let f = s.add(&format!("{link_s}/")).unwrap();
+        assert_eq!(f.projects, vec![real_s.clone()], "stored once, as the real folder");
+        s.add(&link_s).unwrap();
+        s.add(&real_s).unwrap();
+        assert_eq!(s.load().value.projects.len(), 1);
+
+        // set_open / set_active / remove accept the path as typed, and as the list stores it
+        for spelling in [link_s.clone(), format!("{link_s}/"), real_s.clone()] {
+            s.set_open(&spelling, true).unwrap();
+            s.set_active(&spelling).unwrap();
+            let l = s.list();
+            assert_eq!((l.open.clone(), l.active.clone()), (vec![real_s.clone()], Some(real_s.clone())), "{spelling}");
+            assert_eq!(l.projects[0].path, real_s);
+            assert_eq!(l.projects[0].name, "app");
+        }
+        s.set_open(&link_s, false).unwrap();
+        assert!(s.list().open.is_empty());
+        s.set_open(&link_s, true).unwrap();
+        let f = s.remove(&format!("{link_s}/")).unwrap();
+        assert!(f.projects.is_empty() && f.open.is_empty() && f.active.is_none());
+        assert!(real.join(".git/HEAD").exists(), "the folder is untouched");
     }
 
     #[test]

@@ -1,0 +1,34 @@
+{
+  "messages": [
+    {
+      "about": null,
+      "delivery": "sent",
+      "delivery_note": "typed into the lead's pane",
+      "id": 3,
+      "kind": "feature_request",
+      "request": {
+        "decided": "CSS variables",
+        "done_when": "the toggle works and persists",
+        "feature": "Dark mode",
+        "mode": "worktree",
+        "must": "remember the choice",
+        "must_not": "change the API",
+        "why": "easier on the eyes at night"
+      },
+      "sender": "developer",
+      "text": "Feature request: Dark mode",
+      "ts": "2023-11-14T22:13:20Z"
+    },
+    {
+      "about": "M1",
+      "delivery": null,
+      "delivery_note": null,
+      "id": 4,
+      "kind": "message",
+      "request": null,
+      "sender": "lead",
+      "text": "M1 is running",
+      "ts": "2023-11-14T22:14:00Z"
+    }
+  ]
+}

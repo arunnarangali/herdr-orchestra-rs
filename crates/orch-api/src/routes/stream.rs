@@ -162,5 +162,7 @@ pub fn register(api: ApiRouter) -> ApiRouter {
         .schema::<LeadQueueEvent>()
         .schema::<RunStateEvent>()
         .schema::<LogEvent>()
+        .schema::<AttentionEvent>()
+        .schema::<AttentionOp>()
         .route("/stream", get(stream_handler), path_item)
 }

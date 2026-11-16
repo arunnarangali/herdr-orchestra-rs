@@ -229,6 +229,7 @@ fn create_test_run(dir: &Path) -> Store {
             }],
         })
         .unwrap();
+    store.mark_dispatched("M1").unwrap();
     store
 }
 
@@ -612,6 +613,7 @@ async fn test_ac6_openapi_document_media_type_and_shapes() {
     assert!(schemas["LeadQueueEvent"].is_object());
     assert!(schemas["RunStateEvent"].is_object());
     assert!(schemas["LogEvent"].is_object());
+    assert!(schemas["AttentionEvent"].is_object());
 
     srv.stop();
 }
@@ -786,3 +788,148 @@ async fn test_run_control_changes_via_cli_and_direct_store() {
     srv.stop();
 }
 
+#[tokio::test]
+async fn test_ac4_attention_event_emitted_on_addition_and_removal() {
+    let _lock = TEST_LOCK.lock().await;
+    unsafe {
+        std::env::set_var("ORCH_STREAM_POLL_MS", "30");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = create_test_run(dir.path());
+    let srv = TestServer::start(dir.path()).await;
+
+    let (status, mut client) =
+        SseClient::connect(srv.addr, &format!("/api/v1/stream?token={SECRET}"), &[]).await;
+    assert_eq!(status, 200);
+
+    // 1. Trigger addition of an attention item: milestone M1 into Held
+    store
+        .transition("M1", &TransitionRequest::auto(State::Coding, Some("start")))
+        .unwrap();
+    store
+        .transition("M1", &TransitionRequest::auto(State::Verifying, Some("check")))
+        .unwrap();
+    store
+        .transition(
+            "M1",
+            &TransitionRequest::auto(State::Held, Some("needs review")),
+        )
+        .unwrap();
+
+    let mut add_received = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(3000);
+    while tokio::time::Instant::now() < deadline {
+        if let Some(ev) = client.next_event(Duration::from_millis(500)).await
+            && ev.event.as_deref() == Some("attention")
+        {
+            let data: Value = serde_json::from_str(&ev.data.unwrap()).unwrap();
+            if data["op"] == "add"
+                && data["item"]["kind"] == "held"
+                && data["item"]["task"] == "M1"
+            {
+                assert_eq!(data["item"]["actions"], serde_json::json!(["approve"]));
+                assert_eq!(data["item"]["detail"], "needs review");
+                add_received = true;
+                break;
+            }
+        }
+    }
+    assert!(add_received, "expected attention event with op: add");
+
+    // 2. Trigger removal of the attention item: milestone M1 leaves Held
+    store
+        .transition(
+            "M1",
+            &TransitionRequest::auto(State::Pending, Some("resumed")),
+        )
+        .unwrap();
+
+    let mut remove_received = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(3000);
+    while tokio::time::Instant::now() < deadline {
+        if let Some(ev) = client.next_event(Duration::from_millis(500)).await
+            && ev.event.as_deref() == Some("attention")
+        {
+            let data: Value = serde_json::from_str(&ev.data.unwrap()).unwrap();
+            if data["op"] == "remove"
+                && data["item"]["kind"] == "held"
+                && data["item"]["task"] == "M1"
+            {
+                remove_received = true;
+                break;
+            }
+        }
+    }
+    assert!(remove_received, "expected attention event with op: remove");
+
+    unsafe {
+        std::env::remove_var("ORCH_STREAM_POLL_MS");
+    }
+    srv.stop();
+}
+
+// A `chat` event for every stored message and every change of its delivery state.
+#[tokio::test]
+async fn a_chat_event_follows_every_stored_message_and_delivery_change() {
+    use orch_core::chat::{ChatKind, ChatTick, chat_tick};
+    use orch_core::wake::{Clock, LeadPane, LeadRuntime, Notifier, SystemClock, WakeEnv, WakeTunables};
+
+    struct Idle;
+    impl LeadRuntime for Idle {
+        fn pane(&self, _: &str) -> LeadPane {
+            LeadPane::Idle
+        }
+        fn send(&self, _: &str, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    struct Quiet;
+    impl Notifier for Quiet {
+        fn notify(&self, _: &str) {}
+    }
+    let _ = SystemClock.now();
+
+    let _lock = TEST_LOCK.lock().await;
+    unsafe {
+        std::env::set_var("ORCH_STREAM_POLL_MS", "40");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = create_test_run(dir.path());
+    let srv = TestServer::start(dir.path()).await;
+    let (status, mut client) =
+        SseClient::connect(srv.addr, &format!("/api/v1/stream?token={SECRET}"), &[]).await;
+    assert_eq!(status, 200);
+
+    // stored: queued
+    let m = store
+        .post_developer_message(ChatKind::Message, "hello", None)
+        .unwrap();
+    let e = client.next_event(Duration::from_millis(2000)).await.expect("stored");
+    assert_eq!(e.event.as_deref(), Some("chat"));
+    let d: Value = serde_json::from_str(&e.data.unwrap()).unwrap();
+    assert_eq!((d["id"].as_i64(), d["delivery"].as_str(), d["sender"].as_str()), (Some(m.id), Some("queued"), Some("developer")));
+    assert!(d["ts"].is_string());
+
+    // delivered: the event manager records the attempt, then `sent`
+    let env = WakeEnv { runtime: &Idle, notifier: &Quiet, clock: &SystemClock, tun: WakeTunables::default() };
+    assert_eq!(chat_tick(&mut store, &env, &mut |_| {}).unwrap(), ChatTick::Sent(m.id));
+    let mut last = Value::Null;
+    while let Some(e) = client.next_event(Duration::from_millis(600)).await {
+        assert_eq!(e.event.as_deref(), Some("chat"));
+        last = serde_json::from_str(&e.data.unwrap()).unwrap();
+    }
+    assert_eq!(last["delivery"], "sent", "{last}");
+
+    // the lead's reply, and the acknowledgement it causes
+    store.post_lead_reply("on it", Some("M1")).unwrap();
+    let mut seen = Vec::new();
+    while let Some(e) = client.next_event(Duration::from_millis(600)).await {
+        seen.push(serde_json::from_str::<Value>(&e.data.unwrap()).unwrap());
+    }
+    assert!(seen.iter().any(|d| d["sender"] == "lead" && d["about"] == "M1" && d["delivery"].is_null()), "{seen:?}");
+    assert!(seen.iter().any(|d| d["id"].as_i64() == Some(m.id) && d["delivery"] == "acknowledged"), "{seen:?}");
+    unsafe {
+        std::env::remove_var("ORCH_STREAM_POLL_MS");
+    }
+    srv.stop();
+}

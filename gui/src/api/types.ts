@@ -332,6 +332,10 @@ export interface AgentKindInfo {
   skills: SkillsInfo;
   login: LoginInfo;
 }
+export interface WorkingOn {
+  task: string;
+  state: string;
+}
 export interface TeamMember {
   name: string;
   /** `worker`, `reviewer` or `lead`. */
@@ -340,6 +344,7 @@ export interface TeamMember {
   model: string | null;
   tier: string | null;
   detect: boolean;
+  working_on: WorkingOn | null;
 }
 export interface AgentsResponse {
   agents: AgentKindInfo[];
@@ -434,6 +439,53 @@ export interface RunControlResponse {
   message: string;
 }
 
+// -------------------------------------------------------------------------------- chat
+
+/** The plan's feature request, as separate values. Only `feature` is required. */
+export interface ChatRequest {
+  feature: string;
+  why: string;
+  must: string;
+  must_not: string;
+  decided: string;
+  done_when: string;
+  mode: string;
+}
+/* The wire carries these as plain strings (like every state in this file); narrow with these. */
+export type ChatSender = "developer" | "lead";
+export type ChatKind = "message" | "feature_request" | "plan_approval";
+export type ChatDelivery = "queued" | "sent" | "acknowledged" | "failed";
+/** One message of the conversation with the lead; also the payload of a `chat` stream event. */
+export interface ChatMessage {
+  id: number;
+  /** When it was stored, RFC 3339 UTC. */
+  ts: string;
+  /** `developer` or `lead` (see `ChatSender`). */
+  sender: string;
+  /** `message`, `feature_request` or `plan_approval` (see `ChatKind`). */
+  kind: string;
+  text: string;
+  request: ChatRequest | null;
+  /** The milestone a lead reply is about. */
+  about: string | null;
+  /** `queued`, `sent`, `acknowledged` or `failed` (see `ChatDelivery`); the lead's own have none. */
+  delivery: string | null;
+  /** Why it waits, or what to do when it failed. */
+  delivery_note: string | null;
+}
+/** Body of `POST /chat` (the answer is the stored `ChatMessage`, status 201). */
+export interface ChatBody {
+  /** `message`, `feature_request` or `plan_approval` (see `ChatKind`). */
+  kind: string;
+  /** May be empty for a feature request and for a plan approval. */
+  text: string;
+  request?: ChatRequest | null;
+}
+/** Answer of `GET /chat?after=<id>`: the conversation, oldest first. */
+export interface ChatListResponse {
+  messages: ChatMessage[];
+}
+
 // ------------------------------------------------------------------------------- stream
 
 /** Payload of a `task-state` message. */
@@ -485,6 +537,51 @@ export interface LogEvent {
   ts: number;
 }
 
+export type AttentionKind =
+  | "blocked"
+  | "question"
+  | "held"
+  | "failed"
+  | "wake_unread"
+  | "plan_approval";
+
+export type AttentionAction =
+  | "answer"
+  | "approve"
+  | "fix"
+  | "dispatch"
+  | "open_chat";
+
+export interface AttentionItem {
+  id: string;
+  kind: AttentionKind | (string & {});
+  task: string | null;
+  agent: string | null;
+  title: string;
+  detail: string | null;
+  prompt: string | null;
+  since: string;
+  actions: (AttentionAction | (string & {}))[];
+}
+
+export interface AttentionResponse {
+  items: AttentionItem[];
+}
+
+export interface AgentOutputResponse {
+  agent: string;
+  lines: number;
+  text: string;
+  ts: string;
+}
+
+export type AttentionOp = "add" | "remove";
+
+export interface AttentionEvent {
+  op: AttentionOp | (string & {});
+  item: AttentionItem;
+}
+
 /**
  * The server's own record of a message. On the wire `id` and `event` are SSE fields and
  * `data` is the JSON payload; see `StreamMessage` for what the app receives.
@@ -499,14 +596,18 @@ export interface StreamPayloads {
   "task-state": TaskStateEvent;
   "lead-event": LeadQueueEvent;
   "run-state": RunStateEvent;
+  chat: ChatMessage;
   log: LogEvent;
+  attention: AttentionEvent;
 }
 export type StreamEventName = keyof StreamPayloads;
 export const STREAM_EVENT_NAMES: readonly StreamEventName[] = [
   "task-state",
   "lead-event",
   "run-state",
+  "chat",
   "log",
+  "attention",
 ];
 
 /** One message from the live stream, typed by its event name. */

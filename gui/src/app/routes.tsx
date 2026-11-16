@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { AgentsScreen } from "../screens/agents";
+import { ChatScreen } from "../screens/chat";
 import { ExecutionScreen } from "../screens/execution";
 import { OnboardingScreen } from "../screens/onboarding";
 import { OverviewScreen } from "../screens/overview";
@@ -27,6 +28,7 @@ export interface ScreenDef {
  */
 export const screens: readonly ScreenDef[] = [
   { id: "overview", path: "/overview", label: "Overview", Component: OverviewScreen, nav: true, shortcut: "o" },
+  { id: "chat", path: "/chat", label: "Chat", Component: ChatScreen, nav: true, shortcut: "c" },
   { id: "projects", path: "/projects", label: "Projects", Component: ProjectsScreen, nav: true, shortcut: "p" },
   { id: "agents", path: "/agents", label: "Agents", Component: AgentsScreen, nav: true, shortcut: "a" },
   { id: "workflows", path: "/workflows", label: "Workflows", Component: WorkflowsScreen, nav: true, shortcut: "w" },

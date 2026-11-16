@@ -64,3 +64,94 @@
 .ag-rating meter {
   width: 100%;
 }
+
+/* Agent output modal styles */
+.ag-output-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  width: min(50rem, 85vw);
+}
+.ag-output-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.ag-output-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ag-output-field {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.ag-output-search input {
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.ag-output-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 18rem;
+  max-height: 55vh;
+}
+.ag-output-pre {
+  flex: 1;
+  margin: 0;
+  padding: 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  max-height: 52vh;
+}
+.ag-output-hit {
+  background: var(--warning-bg);
+  color: var(--text);
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.ag-output-scroll-btn {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 1.25rem;
+  z-index: 5;
+  box-shadow: 0 4px 12px var(--shadow);
+}
+.ag-output-search-summary {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+.ag-link {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-align: left;
+}
+.ag-link:hover {
+  filter: brightness(1.15);
+}
+

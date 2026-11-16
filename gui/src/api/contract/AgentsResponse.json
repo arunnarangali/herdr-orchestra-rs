@@ -30,7 +30,11 @@
       "model": "claude-sonnet-5-5",
       "name": "rs-claude-1",
       "role": "worker",
-      "tier": "medium"
+      "tier": "medium",
+      "working_on": {
+        "state": "coding",
+        "task": "M1"
+      }
     }
   ]
 }

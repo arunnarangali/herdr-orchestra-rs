@@ -576,6 +576,7 @@ dependencies = [
  "futures-util",
  "orch-config",
  "orch-core",
+ "orch-herdr",
  "serde",
  "serde_json",
  "tempfile",

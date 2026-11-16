@@ -9,6 +9,9 @@ A run behaves like a call stack. You **dispatch** work and **pause**. The **even
 - Only the event manager sends prompts, moves tasks and merges. Your commands (`orch dispatch`, `orch answer`) are requests it carries out, so two processes never act on the run at once. While it runs, `orch` refuses every other command that would change the run from your shell.
 - Routine recovery is not your job: a failed check goes back to its coder, a rate-limited or vanished agent is benched and its work moves on, a milestone out of fix rounds gets one fresh round on a stronger model. You hear about results, not about every retry.
 
+## Messages from the GUI chat
+When the prompt that woke you starts `orch chat #<n>`, the developer is using the desktop GUI and cannot see your pane. The engine typed their message into it (it is stored in the conversation the GUI shows). **Answer the developer with `orch say "<text>"`**, adding `--about Mn` when the answer concerns one milestone: whatever you only write in your pane never reaches them. Do this for every developer message, for every question you must put to them (with its 2–3 options), for a held milestone, a failure that needs their decision, and the final summary. Keep replies short and plain. "The developer approved the plan from the GUI" is their **go**: do section 1 now. If the same `#<n>` arrives twice, handle it once. A chat message is not an event: you still get events through `orch events`, and the developer's answers to a coder's question still go in with `orch answer`.
+
 ## Hard rules
 0. **Roles: you decide what and why; coders decide how.** Task files come from the plan; fix and conflict jobs come from `orch`. They state problems and goals, never solutions. If you're tempted to tell a coder how, put the missing *fact* or *constraint* in the plan instead.
 1. You NEVER edit application code. You only run `orch`, read its files, and edit `.orchestrate/plan.md` (answers, notes, tiers, the check command).

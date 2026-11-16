@@ -14,7 +14,7 @@ use orch_core::check::CheckRecord;
 use orch_core::run_store::Run;
 use orch_core::task::Transition;
 use orch_core::view;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 // ------------------------------------------------------------------------------- status
@@ -797,6 +797,12 @@ pub struct AgentKindInfo {
     pub login: LoginInfo,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct WorkingOn {
+    pub task: String,
+    pub state: String,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TeamMember {
     pub name: String,
@@ -806,6 +812,8 @@ pub struct TeamMember {
     pub model: Option<String>,
     pub tier: Option<String>,
     pub detect: bool,
+    /// What the agent is currently working on, if anything.
+    pub working_on: Option<WorkingOn>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -818,7 +826,11 @@ pub struct AgentsResponse {
 
 /// The registry as data. Login is read from the kind's `auth_file` only: a kind that needs
 /// a command to find out is `unknown` here (run `orch doctor`), so a GET never starts a tool.
-pub fn agents_response(reg: &Registry, run: Option<&Run>) -> AgentsResponse {
+pub fn agents_response(
+    reg: &Registry,
+    run: Option<&Run>,
+    tasks: Option<&[orch_core::task::Task]>,
+) -> AgentsResponse {
     let home = skills::home();
     let agents = reg
         .0
@@ -876,13 +888,40 @@ pub fn agents_response(reg: &Registry, run: Option<&Run>) -> AgentsResponse {
         .map(|r| {
             r.agents
                 .iter()
-                .map(|a| TeamMember {
-                    name: a.name.clone(),
-                    role: a.role.as_str().into(),
-                    kind: a.kind.clone(),
-                    model: a.model.clone(),
-                    tier: a.tier.clone(),
-                    detect: a.detect,
+                .map(|a| {
+                    let working_on = tasks.and_then(|ts| {
+                        if a.role == orch_core::run_store::AgentRole::Reviewer
+                            && let Some(t) = ts.iter().find(|t| t.status == orch_core::task::State::Reviewing)
+                        {
+                            return Some(WorkingOn {
+                                task: t.id.clone(),
+                                state: "reviewing".to_string(),
+                            });
+                        }
+                        ts.iter()
+                            .find(|t| {
+                                t.worker.as_deref() == Some(&a.name)
+                                    && (orch_core::run_store::is_active(t.status)
+                                        || matches!(
+                                            t.status,
+                                            orch_core::task::State::NeedsAnswer
+                                                | orch_core::task::State::Paused
+                                        ))
+                            })
+                            .map(|t| WorkingOn {
+                                task: t.id.clone(),
+                                state: t.status.as_str().to_string(),
+                            })
+                    });
+                    TeamMember {
+                        name: a.name.clone(),
+                        role: a.role.as_str().into(),
+                        kind: a.kind.clone(),
+                        model: a.model.clone(),
+                        tier: a.tier.clone(),
+                        detect: a.detect,
+                        working_on,
+                    }
                 })
                 .collect()
         })
@@ -986,4 +1025,96 @@ pub fn models_response(cat: &Catalog) -> ModelsResponse {
 pub struct LogsResponse {
     /// The last lines of `autopilot.log`, oldest first, as plain text.
     pub lines: Vec<String>,
+}
+
+// ------------------------------------------------------------------------------- output
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct AgentOutputResponse {
+    pub agent: String,
+    pub lines: usize,
+    pub text: String,
+    pub ts: String,
+}
+
+// ------------------------------------------------------------------------------- attention
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionKind {
+    Blocked,
+    Question,
+    Held,
+    Failed,
+    WakeUnread,
+    PlanApproval,
+}
+
+impl From<orch_core::attention::AttentionKind> for AttentionKind {
+    fn from(k: orch_core::attention::AttentionKind) -> Self {
+        match k {
+            orch_core::attention::AttentionKind::Blocked => Self::Blocked,
+            orch_core::attention::AttentionKind::Question => Self::Question,
+            orch_core::attention::AttentionKind::Held => Self::Held,
+            orch_core::attention::AttentionKind::Failed => Self::Failed,
+            orch_core::attention::AttentionKind::WakeUnread => Self::WakeUnread,
+            orch_core::attention::AttentionKind::PlanApproval => Self::PlanApproval,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionAction {
+    Answer,
+    Approve,
+    Fix,
+    Dispatch,
+    OpenChat,
+}
+
+impl From<orch_core::attention::AttentionAction> for AttentionAction {
+    fn from(a: orch_core::attention::AttentionAction) -> Self {
+        match a {
+            orch_core::attention::AttentionAction::Answer => Self::Answer,
+            orch_core::attention::AttentionAction::Approve => Self::Approve,
+            orch_core::attention::AttentionAction::Fix => Self::Fix,
+            orch_core::attention::AttentionAction::Dispatch => Self::Dispatch,
+            orch_core::attention::AttentionAction::OpenChat => Self::OpenChat,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AttentionItem {
+    pub id: String,
+    pub kind: AttentionKind,
+    pub task: Option<String>,
+    pub agent: Option<String>,
+    pub title: String,
+    pub detail: Option<String>,
+    pub prompt: Option<String>,
+    pub since: String,
+    pub actions: Vec<AttentionAction>,
+}
+
+impl From<orch_core::attention::AttentionItem> for AttentionItem {
+    fn from(item: orch_core::attention::AttentionItem) -> Self {
+        AttentionItem {
+            id: item.id,
+            kind: item.kind.into(),
+            task: item.task,
+            agent: item.agent,
+            title: item.title,
+            detail: item.detail,
+            prompt: item.prompt,
+            since: item.since,
+            actions: item.actions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct AttentionResponse {
+    pub items: Vec<AttentionItem>,
 }
