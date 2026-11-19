@@ -1,0 +1,113 @@
+/* Screen 05 — Projects & Workspaces */
+
+.pg { display: flex; flex-direction: column; gap: 12px; min-height: 100%; padding: 10px 12px 14px; }
+.pg__head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 2px 4px; }
+.pg__icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; color: var(--accent-violet); }
+.pg__icon .icon { width: 34px; height: 34px; stroke-width: 1.5; }
+.pg__titles { flex: 1 1 260px; min-width: 0; }
+.pg__title { font-size: 19px; font-weight: 600; }
+.pg__sub { font-size: 12.5px; color: var(--text-muted); }
+.pg__actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.pg__actions .btn { min-height: 36px; }
+.text-primary { color: var(--text-primary); }
+
+.badge--sm { min-height: 18px; padding: 0 7px; font-size: 10.5px; }
+
+/* ---------- project cards ---------- */
+.pcards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pcard { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 16px; }
+.pcard.card--tone { border-width: 1.5px; }
+
+.pcard__head { display: flex; align-items: flex-start; gap: 12px; }
+.pcard__logo {
+  display: grid; place-items: center; width: 54px; height: 54px; flex: none; color: var(--accent-violet);
+  background: color-mix(in srgb, var(--accent-violet) 14%, var(--bg-canvas));
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 40%, var(--border-subtle)); border-radius: 10px;
+}
+.pcard__logo--blue { color: var(--accent-cyan); background: color-mix(in srgb, var(--accent-cyan) 14%, var(--bg-canvas)); border-color: color-mix(in srgb, var(--accent-cyan) 40%, var(--border-subtle)); }
+.pcard__id { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.pcard__name { font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.pcard__pathlabel { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.pcard__path { font-size: 12.5px; overflow-wrap: anywhere; }
+.iconbtn { display: inline-grid; place-items: center; padding: 2px; color: var(--text-muted); background: transparent; border: 0; border-radius: 4px; }
+.iconbtn:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+.pcard__cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border-subtle); }
+.pcard__server { display: grid; align-content: start; gap: 8px; font-size: 12.5px; }
+.pcard__k { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.pcard__k .dot { width: 12px; height: 12px; }
+.pcard__cmd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.pcard__cmd .mono { font-size: 12.5px; overflow-wrap: anywhere; }
+.pcard__git { display: grid; align-content: start; gap: 6px; padding-left: 16px; border-left: 1px solid var(--border-subtle); font-size: 12.5px; }
+.pcard__gk { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.pcard__gr { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.pcard__gr > .icon { color: var(--text-muted); width: 14px; height: 14px; }
+.pcard__gr--small { gap: 4px 14px; font-size: 12px; }
+.pcard__clean, .pcard__wt { display: inline-flex; align-items: center; gap: 6px; }
+.pcard__wt .icon { color: var(--text-muted); }
+.pcard__wtpath { font-size: 11.5px; }
+
+.pcard__run { display: flex; align-items: center; gap: 12px; }
+.pcard__runicon { color: var(--accent-cyan); display: grid; }
+.pcard__runbody { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.pcard__runlabel { display: flex; gap: 10px; font-size: 12.5px; }
+.pcard__runtitle { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500; }
+.pcard__pct { min-width: 44px; text-align: right; font-size: 14px; font-weight: 500; }
+.bar { height: 8px; overflow: hidden; background: var(--bg-hover); border-radius: 999px; }
+.bar i { display: block; height: 100%; background: var(--accent-emerald); border-radius: inherit; transition: width .3s; }
+.bar--paused i { background: var(--accent-amber); }
+.bar--stopped i { background: var(--accent-coral); }
+
+.pcard__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.pcard__actions .btn { min-height: 38px; flex: 0 1 auto; }
+
+/* ---------- kebab ---------- */
+.kebab { position: relative; display: inline-flex; }
+.kebab__menu {
+  position: fixed; z-index: 20; top: 0; left: 0; min-width: 190px; padding: 4px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .35);
+}
+.kebab__item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px;
+  font: 500 12.5px var(--font-sans); text-align: left; color: var(--text-primary); background: transparent; border: 0; border-radius: 4px;
+}
+.kebab__item:hover, .kebab__item:focus-visible { background: var(--bg-hover); }
+.kebab__item .icon { color: var(--text-muted); }
+.kebab__item.text-coral .icon { color: var(--accent-coral); }
+
+.closed { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+
+/* ---------- history ---------- */
+.hist__head { flex-wrap: wrap; }
+.hist__icon { display: grid; color: var(--text-muted); }
+.hist__titles { flex: 1 1 240px; min-width: 0; }
+.hist__sub { font-size: 12px; }
+.hist__select-wrap { position: relative; display: flex; align-items: center; min-width: 190px; }
+.hist__select-wrap > .icon { position: absolute; left: 10px; pointer-events: none; color: var(--accent-violet); }
+.hist__select { padding-left: 32px; min-height: 34px; }
+.hist__scroll { overflow-x: auto; padding: 4px 12px 8px; }
+.hist__table { min-width: 820px; }
+.hist__table td { padding-top: 9px; padding-bottom: 9px; }
+.hist__ms { font-weight: 500; white-space: nowrap; }
+.hist__dur { white-space: nowrap; }
+.hist__actions { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.hist__act { min-width: 118px; }
+.hist__empty { padding: 24px; text-align: center; color: var(--text-muted); }
+.form-err { min-height: 1.4em; font-size: 12px; }
+
+@media (max-width: 1250px) {
+  .pcards { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1100px) {
+  .pcard__cols { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .pcard__git { padding-left: 0; border-left: 0; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+}
+@media (max-width: 640px) {
+  .pg { padding: 8px; gap: 8px; }
+  .pcard { padding: 12px; }
+  .pcard__head { flex-wrap: wrap; }
+  .pcard__actions .btn { flex: 1 1 100%; }
+  .pg__actions { width: 100%; }
+  .pg__actions .btn { flex: 1; }
+  .hist__select-wrap { flex: 1 1 100%; }
+}

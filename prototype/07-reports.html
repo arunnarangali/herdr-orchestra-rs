@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reports · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/reports.css">
+</head>
+<body data-page="reports">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="rep">
+        <header class="rep__head">
+          <span class="rep__icon" id="rep-icon"></span>
+          <div class="rep__titles">
+            <h1 class="rep__title"><span id="rep-title"></span> <span class="badge badge--mono" id="rep-status"></span></h1>
+            <p class="rep__meta" id="rep-meta"></p>
+          </div>
+          <div class="rep__actions">
+            <button type="button" class="btn" id="export-run-btn"></button>
+            <button type="button" class="btn" id="summary-btn" aria-haspopup="dialog"></button>
+            <button type="button" class="btn btn--emerald btn--solid" id="finish-btn" aria-haspopup="dialog"></button>
+          </div>
+        </header>
+
+        <section class="kpis" id="kpis" aria-label="Run metrics"></section>
+
+        <section class="card hist" aria-labelledby="hist-title">
+          <header class="card__head">
+            <h2 class="card__title" id="hist-title"></h2>
+            <span class="badge badge--pill" id="hist-count" aria-live="polite"></span>
+          </header>
+          <div class="toolbar" role="search" aria-label="Filter run history">
+            <div class="field tb__search">
+              <label for="f-q" class="sr-only">Search runs</label>
+              <input class="input" id="f-q" type="search" placeholder="Search run id, plan or branch" autocomplete="off" data-fk="f-q">
+            </div>
+            <div class="field">
+              <label for="f-range" class="sr-only">Date range</label>
+              <select class="select" id="f-range" data-fk="f-range">
+                <option value="all">All time</option>
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="f-status" class="sr-only">Status</label>
+              <select class="select" id="f-status" data-fk="f-status">
+                <option value="all">All statuses</option>
+                <option value="ALL_DONE">ALL_DONE</option>
+                <option value="PARTIAL">PARTIAL</option>
+                <option value="FAILED">FAILED</option>
+                <option value="RUNNING">RUNNING</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="f-sort" class="sr-only">Sort by</label>
+              <select class="select" id="f-sort" data-fk="f-sort">
+                <option value="date-desc">Newest first</option>
+                <option value="date-asc">Oldest first</option>
+                <option value="fp-desc">First-pass: high to low</option>
+                <option value="fp-asc">First-pass: low to high</option>
+                <option value="dur-desc">Longest duration</option>
+                <option value="cost-desc">Highest cost</option>
+                <option value="plan-asc">Plan name A to Z</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn--ghost" id="f-reset" data-fk="f-reset"></button>
+            <span class="tb__spacer"></span>
+            <button type="button" class="btn btn--sm" id="exp-csv" data-fk="exp-csv"></button>
+            <button type="button" class="btn btn--sm" id="exp-json" data-fk="exp-json"></button>
+          </div>
+          <div class="hist__grid">
+            <div class="hist__tablewrap">
+              <table class="table hist__table" id="hist-table" aria-describedby="hist-title">
+                <caption class="sr-only">Run history for the current project. Activate a run id to load its report above.</caption>
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <figure class="chart" id="chart-box">
+              <figcaption class="chart__cap">First-pass rate by run <span class="muted">(visible runs, oldest to newest)</span></figcaption>
+              <div id="chart"></div>
+            </figure>
+          </div>
+        </section>
+
+        <div class="pair">
+          <section class="card" aria-labelledby="tier-title">
+            <header class="card__head">
+              <h2 class="card__title" id="tier-title"></h2>
+              <div class="seg" role="group" aria-label="Filter milestones" id="m-filter">
+                <button type="button" data-v="all" data-fk="mf-all">All</button>
+                <button type="button" data-v="rework" data-fk="mf-rework">Rework</button>
+                <button type="button" data-v="escalated" data-fk="mf-esc">Escalated</button>
+              </div>
+              <span class="badge badge--pill" id="tier-count" aria-live="polite"></span>
+            </header>
+            <div class="scroll-x">
+              <table class="table tiers" id="tier-table">
+                <caption class="sr-only">Planned tier versus actual model per milestone</caption>
+                <thead>
+                  <tr><th scope="col">#</th><th scope="col">Milestone</th><th scope="col">Planned tier</th><th scope="col">Worker</th><th scope="col">Actual model</th><th scope="col">Rounds (Fix/Rev)</th><th scope="col">Status</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="model-title">
+            <header class="card__head"><h2 class="card__title" id="model-title"></h2></header>
+            <div class="models" id="models"></div>
+          </section>
+        </div>
+
+        <div class="pair pair--b">
+          <section class="card" aria-labelledby="scope-title">
+            <header class="card__head">
+              <h2 class="card__title" id="scope-title"></h2>
+              <span class="badge badge--pill" id="scope-count" aria-live="polite"></span>
+            </header>
+            <p class="card__note">Files modified that were not part of the <span class="mono">"Likely Files"</span> for the milestone.</p>
+            <div class="scroll-x">
+              <table class="table" id="scope-table">
+                <caption class="sr-only">Files modified outside the planned scope. Activate a file to read its details.</caption>
+                <thead><tr><th scope="col">#</th><th scope="col">Milestone</th><th scope="col">File (modified)</th><th scope="col">Change</th><th scope="col">Scope</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="details" id="scope-details" aria-live="polite"></div>
+          </section>
+
+          <section class="card" aria-labelledby="sugg-title">
+            <header class="card__head">
+              <h2 class="card__title" id="sugg-title"></h2>
+              <span class="badge badge--pill" id="sugg-count" aria-live="polite"></span>
+            </header>
+            <p class="card__note">Non-blocking suggestions from reviewer that are not yet applied.</p>
+            <ul class="sugg" id="sugg"></ul>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <dialog class="modal" id="summary-dialog" closedby="any" aria-labelledby="summary-title">
+    <div class="modal__head"><h2 class="modal__title" id="summary-title">summary.md</h2></div>
+    <div class="modal__body"><pre class="code summary" id="summary-text" tabindex="0"></pre></div>
+    <div class="modal__foot">
+      <button type="button" class="btn" id="summary-copy"></button>
+      <button type="button" class="btn" id="summary-dl"></button>
+      <button type="button" class="btn btn--solid btn--cyan" id="summary-close" autofocus>Close</button>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="finish-dialog" closedby="any" aria-labelledby="finish-title">
+    <form method="dialog" id="finish-form">
+      <div class="modal__head"><h2 class="modal__title" id="finish-title">Finish and create pull request</h2></div>
+      <div class="modal__body">
+        <p id="finish-lead"></p>
+        <div class="field"><label for="pr-title">Pull request title</label><input class="input" id="pr-title" required></div>
+        <label class="check"><input type="checkbox" id="pr-clean" checked><span>Remove milestone worktrees after the PR is created</span></label>
+        <label class="check"><input type="checkbox" id="pr-sum" checked><span>Attach <span class="mono">summary.md</span> as the PR description</span></label>
+      </div>
+      <div class="modal__foot">
+        <button type="submit" class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button type="submit" class="btn btn--emerald btn--solid" value="create">Create PR</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="fix-dialog" closedby="any" aria-labelledby="fix-title">
+    <form method="dialog">
+      <div class="modal__head"><h2 class="modal__title" id="fix-title">Create follow-up fix</h2></div>
+      <div class="modal__body">
+        <p id="fix-text"></p>
+        <pre class="code fixcmd" id="fix-cmd" tabindex="0"></pre>
+      </div>
+      <div class="modal__foot">
+        <button type="submit" class="btn" value="cancel">Cancel</button>
+        <button type="button" class="btn" id="fix-copy"></button>
+        <button type="submit" class="btn btn--violet btn--solid" value="queue">Queue follow-up fix</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="ms-dialog" closedby="any" aria-labelledby="ms-title">
+    <div class="modal__head"><h2 class="modal__title" id="ms-title"></h2></div>
+    <div class="modal__body" id="ms-body"></div>
+    <div class="modal__foot"><button type="button" class="btn btn--solid btn--cyan" id="ms-close" autofocus>Close</button></div>
+  </dialog>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/reports.js"></script>
+</body>
+</html>

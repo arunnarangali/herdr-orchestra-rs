@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notifications / Attention Center · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/notifications-attention-center.css">
+</head>
+<body data-page="notifications-attention-center">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="nc">
+        <header class="nc__head">
+          <span class="nc__icon" id="nc-icon"></span>
+          <div class="nc__who">
+            <h1 class="nc__title" id="nc-title">Attention Center</h1>
+            <p class="nc__sub">Cross-project attention, questions, risk holds and blocked prompts.</p>
+          </div>
+          <div class="nc__head-actions">
+            <button type="button" class="btn btn--amber" id="approve-holds"></button>
+            <button type="button" class="btn" id="restore-local" title="Restore the page-local alerts (blocked prompt, lead wake-ups) to their initial state"></button>
+          </div>
+        </header>
+
+        <section class="card nc__filters" aria-label="Filters">
+          <div class="nc__chips" role="group" aria-label="Project" id="project-chips"></div>
+          <div class="nc__chips" role="group" aria-label="Kind" id="kind-chips"></div>
+          <div class="nc__searchrow">
+            <label class="nc__search">
+              <span class="sr-only">Search notifications</span>
+              <span id="search-icon"></span>
+              <input class="nc__search-input" id="nc-search" type="search" placeholder="Search by milestone, agent, branch or message..." autocomplete="off">
+            </label>
+            <div class="seg nc__tabs" role="tablist" aria-label="Status" id="status-tabs"></div>
+          </div>
+        </section>
+
+        <div class="nc__bulk card" id="bulk-bar" hidden>
+          <span id="bulk-count" class="nc__bulk-count"></span>
+          <button type="button" class="btn btn--cyan btn--sm" id="bulk-apply"></button>
+          <button type="button" class="btn btn--ghost btn--sm" id="bulk-clear">Clear selection</button>
+        </div>
+
+        <div class="nc__grid">
+          <section aria-labelledby="list-title" class="nc__listwrap">
+            <h2 class="sr-only" id="list-title">Notifications</h2>
+            <div role="tabpanel" id="status-panel" aria-labelledby="status-tab-open" tabindex="-1">
+              <ul class="nc__list" id="nc-list"></ul>
+            </div>
+          </section>
+
+          <aside class="nc__side" aria-label="Summary and history">
+            <section class="card nc__panel" aria-labelledby="sum-title">
+              <h2 class="nc__panel-title" id="sum-title"></h2>
+              <ul class="nc__sum" id="sum-list"></ul>
+            </section>
+            <section class="card nc__panel" aria-labelledby="hist-title">
+              <div class="nc__panel-head">
+                <h2 class="nc__panel-title" id="hist-title"></h2>
+                <label class="check nc__unacked"><input type="checkbox" id="unacked-only"> <span>Unacknowledged only</span></label>
+              </div>
+              <ul class="nc__hist" id="hist-list"></ul>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <dialog class="modal" id="nc-dialog" closedby="any" aria-labelledby="nc-dialog-title">
+    <div class="modal__head">
+      <h2 class="modal__title" id="nc-dialog-title"></h2>
+      <button type="button" class="btn btn--ghost btn--icon btn--sm" id="nc-dialog-x" aria-label="Close"></button>
+    </div>
+    <div class="modal__body" id="nc-dialog-body"></div>
+    <div class="modal__foot"><button type="button" class="btn" id="nc-dialog-close">Close</button></div>
+  </dialog>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/notifications-attention-center.js"></script>
+</body>
+</html>
