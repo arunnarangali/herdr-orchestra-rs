@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/settings.css">
+</head>
+<body data-page="settings">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="set">
+        <header class="set__head">
+          <span class="set__icon" id="set-icon"></span>
+          <div>
+            <h1 class="set__title">Settings</h1>
+            <p class="set__sub">Configure Herdr Orchestra runtime, agents, models and execution policy.</p>
+          </div>
+        </header>
+
+        <div class="set__body">
+          <div class="set__navwrap">
+            <div class="set__nav" id="set-nav" role="tablist" aria-orientation="vertical" aria-label="Settings sections"></div>
+          </div>
+
+          <section class="card panel" aria-labelledby="panel-title">
+            <header class="panel__head">
+              <span class="panel__icon" id="panel-icon"></span>
+              <div class="panel__titles">
+                <h2 class="panel__title" id="panel-title"></h2>
+                <p class="panel__desc" id="panel-desc"></p>
+              </div>
+              <span class="prec mono" id="panel-prec"></span>
+            </header>
+            <div class="panel__rows" id="panel-rows" role="tabpanel" tabindex="-1"></div>
+            <footer class="panel__foot">
+              <button type="button" class="btn" id="reset-btn" aria-haspopup="dialog"></button>
+              <button type="button" class="btn btn--ghost" id="discard-btn"></button>
+              <span class="dirty" id="dirty" role="status" aria-live="polite"></span>
+              <span class="panel__spacer"></span>
+              <button type="button" class="btn btn--emerald btn--solid" id="save-btn"></button>
+            </footer>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <dialog class="modal" id="reset-dialog" closedby="any" aria-labelledby="reset-title">
+    <form method="dialog">
+      <div class="modal__head"><h2 class="modal__title" id="reset-title">Reset all settings to defaults?</h2></div>
+      <div class="modal__body">
+        <p>Every setting returns to its shipped default. Nothing is written to <span class="mono">.orchestrate/config.toml</span> until you press Save.</p>
+      </div>
+      <div class="modal__foot">
+        <button type="submit" class="btn" value="cancel" autofocus>Keep current values</button>
+        <button type="submit" class="btn btn--amber btn--solid" value="reset">Reset to defaults</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="cache-dialog" closedby="any" aria-labelledby="cache-title">
+    <form method="dialog">
+      <div class="modal__head"><h2 class="modal__title" id="cache-title">Clear cached agent logs?</h2></div>
+      <div class="modal__body">
+        <p>Removes captured pane output under <span class="mono" id="cache-path"></span>. Run reports and plans are kept.</p>
+      </div>
+      <div class="modal__foot">
+        <button type="submit" class="btn" value="cancel" autofocus>Cancel</button>
+        <button type="submit" class="btn btn--coral btn--solid" value="clear">Clear logs</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/settings.js"></script>
+</body>
+</html>

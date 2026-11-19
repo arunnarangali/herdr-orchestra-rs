@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Help &amp; Reference · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/help-reference.css">
+</head>
+<body data-page="help-reference">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="hp">
+        <header class="hp__head">
+          <span class="hp__icon" id="hp-icon"></span>
+          <div>
+            <h1 class="hp__title">Help &amp; Reference</h1>
+            <p class="hp__sub">CLI reference, keyboard shortcuts, playbooks and core architecture rules for Herdr Orchestra.</p>
+          </div>
+        </header>
+
+        <div class="card hp__search">
+          <span id="hp-search-icon"></span>
+          <label class="sr-only" for="hp-q">Search help</label>
+          <input id="hp-q" class="hp__q" type="search" autocomplete="off" spellcheck="false" placeholder="Search CLI commands, exit codes, keyboard shortcuts, or architecture rules...">
+          <kbd title="Press / to focus search">/</kbd>
+        </div>
+        <p class="sr-only" id="hp-status" role="status" aria-live="polite"></p>
+
+        <div class="hp__grid" id="hp-grid">
+          <div class="hp__col" id="col-1"></div>
+          <div class="hp__col" id="col-2"></div>
+          <div class="hp__col" id="col-3"></div>
+        </div>
+        <section class="card hp__none" id="hp-none" hidden>
+          <p><strong>No matches for <span class="mono" id="hp-none-q"></span></strong></p>
+          <p class="muted">Try a command name such as <span class="mono">orch status</span>, an exit code like <span class="mono">3</span>, or a word such as <span class="mono">lease</span>.</p>
+          <button type="button" class="btn btn--sm" id="hp-clear">Clear search</button>
+        </section>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/help-reference.js"></script>
+</body>
+</html>

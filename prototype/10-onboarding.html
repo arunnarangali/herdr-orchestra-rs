@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Onboarding · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/onboarding.css">
+</head>
+<body data-page="onboarding">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="ob">
+        <header class="ob__head">
+          <span class="ob__icon" id="ob-icon"></span>
+          <div class="ob__who">
+            <h1 class="ob__title">Workspace Preflight &amp; Environment Check</h1>
+            <p class="ob__sub">Zero external software is installed automatically. Verify your local toolchain below.</p>
+          </div>
+          <div class="ob__head-actions">
+            <button type="button" class="btn" id="reset-btn"></button>
+            <button type="button" class="btn btn--lg" id="rerun-btn"></button>
+          </div>
+        </header>
+
+        <section class="card ob__bar" aria-label="Progress">
+          <div class="ob__progress">
+            <strong id="ob-count"></strong>
+            <div class="bar" role="progressbar" aria-label="Preflight progress" aria-valuemin="0" aria-valuemax="6" id="ob-bar"><i></i></div>
+          </div>
+          <div class="ob__nav">
+            <button type="button" class="btn" id="back-btn"></button>
+            <button type="button" class="btn" id="skip-btn"></button>
+            <button type="button" class="btn btn--violet" id="next-btn"></button>
+          </div>
+          <p class="ob__msg" id="ob-msg" role="status" aria-live="polite"></p>
+        </section>
+
+        <ol class="steps" id="steps"></ol>
+
+        <section class="card card--tone tone-emerald ob__done" id="ob-done" aria-labelledby="done-title" hidden tabindex="-1">
+          <span class="ob__done-icon" id="done-icon"></span>
+          <div class="ob__done-text">
+            <h2 id="done-title">Onboarding complete</h2>
+            <p id="done-sub"></p>
+          </div>
+          <a class="btn btn--emerald btn--solid" href="01-chat-home.html" id="done-link"></a>
+        </section>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <dialog class="modal" id="browse-dialog" closedby="any" aria-labelledby="browse-title">
+    <div class="modal__head">
+      <h2 class="modal__title" id="browse-title">Choose a project folder</h2>
+      <button type="button" class="btn btn--ghost btn--icon btn--sm" id="browse-x" aria-label="Close"></button>
+    </div>
+    <div class="modal__body">
+      <p class="muted">Folders that contain a Git repository. This prototype lists known and recent locations.</p>
+      <ul class="browse" id="browse-list"></ul>
+    </div>
+    <div class="modal__foot"><button type="button" class="btn" id="browse-close">Cancel</button></div>
+  </dialog>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/onboarding.js"></script>
+</body>
+</html>

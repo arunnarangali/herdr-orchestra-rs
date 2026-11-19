@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workflows (Plan) · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/workflows-plan.css">
+</head>
+<body data-page="workflows-plan">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="wf">
+        <section class="card plan-head" aria-labelledby="plan-title">
+          <div class="plan-head__top">
+            <span class="plan-head__icon" id="plan-icon"></span>
+            <h1 class="plan-head__title mono" id="plan-title"></h1>
+            <div class="plan-head__actions">
+              <button type="button" class="btn" id="sync-btn"><span class="btn__icon" data-icon="sync"></span>Sync Plan</button>
+              <button type="button" class="btn" id="edit-btn" aria-haspopup="dialog"><span class="btn__icon" data-icon="pencil"></span>Edit Plan</button>
+              <button type="button" class="btn btn--emerald btn--solid" id="start-btn"><span class="btn__icon" data-icon="play"></span>Start Run</button>
+            </div>
+          </div>
+          <ul class="plan-head__chips" id="plan-chips" aria-label="Plan settings"></ul>
+        </section>
+
+        <section class="card dag" aria-labelledby="dag-title">
+          <header class="card__head">
+            <h2 class="card__title" id="dag-title"><span data-icon="dag"></span>Execution Plan (DAG) — Parallel &amp; Dependency View</h2>
+            <div class="seg" role="group" aria-label="Plan view">
+              <button type="button" id="view-dag" aria-pressed="true"><span data-icon="dag"></span>DAG</button>
+              <button type="button" id="view-list" aria-pressed="false"><span data-icon="list"></span>List</button>
+            </div>
+          </header>
+          <div class="dag__body" id="dag-body"></div>
+        </section>
+
+        <div class="wf-bottom">
+          <section class="card ms-card" aria-labelledby="ms-title">
+            <header class="card__head">
+              <h2 class="card__title" id="ms-title"></h2>
+              <label class="check ms-card__deps"><input type="checkbox" id="show-deps" checked> <span>Show dependencies</span></label>
+            </header>
+            <ul class="ms-rows" id="ms-rows"></ul>
+          </section>
+
+          <section class="card detail" id="detail" aria-live="polite" aria-labelledby="detail-title"></section>
+        </div>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <dialog class="modal" id="edit-dialog" closedby="any" aria-labelledby="edit-title">
+    <form id="edit-form">
+      <div class="modal__head">
+        <h2 class="modal__title" id="edit-title">Edit plan settings</h2>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" id="edit-close" aria-label="Close"><span data-icon="x"></span></button>
+      </div>
+      <div class="modal__body">
+        <div class="grid-2">
+          <div class="field"><label for="ed-base">Base branch</label><input class="input mono" id="ed-base" name="base" required></div>
+          <div class="field"><label for="ed-branch">Feature branch</label><input class="input mono" id="ed-branch" name="branch" required></div>
+        </div>
+        <div class="field"><label for="ed-check">Check command</label><input class="input mono" id="ed-check" name="check" required><span class="hint">Run by autopilot before a milestone can merge.</span></div>
+        <div class="grid-2">
+          <div class="field"><label for="ed-isolation">Isolation</label>
+            <select class="select mono" id="ed-isolation" name="isolation"><option>worktree</option><option>branch</option><option>none</option></select></div>
+          <div class="field"><label for="ed-scope">Scope</label>
+            <select class="select mono" id="ed-scope" name="scope"><option>off</option><option>warn</option><option>strict</option></select></div>
+          <div class="field"><label for="ed-commits">Commits</label>
+            <select class="select mono" id="ed-commits" name="commits"><option>per-milestone</option><option>per-run</option><option>manual</option></select></div>
+        </div>
+        <label class="check"><input type="checkbox" id="ed-risk" name="risk_hold"> <span>Risk hold <span class="muted">(hold milestones that touch migrations or config for approval)</span></span></label>
+      </div>
+      <div class="modal__foot">
+        <button type="button" class="btn" id="edit-cancel">Cancel</button>
+        <button type="submit" class="btn btn--emerald btn--solid">Save plan</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/workflows-plan.js"></script>
+</body>
+</html>

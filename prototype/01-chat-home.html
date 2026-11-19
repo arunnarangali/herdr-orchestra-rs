@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat / Home · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/chat-home.css">
+</head>
+<body data-page="chat-home">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="home">
+        <section class="card chat" aria-labelledby="lead-title">
+          <header class="chat__head">
+            <span class="avatar avatar--lead" id="lead-avatar"></span>
+            <div class="chat__who">
+              <h1 class="chat__title" id="lead-title"></h1>
+              <p class="chat__sub">Orchestration Lead <span aria-hidden="true">·</span> Plans <span aria-hidden="true">·</span> Delegates <span aria-hidden="true">·</span> Monitors <span aria-hidden="true">·</span> Adapts</p>
+            </div>
+            <span class="badge badge--violet" id="lead-status"></span>
+          </header>
+
+          <div class="chat__thread" id="thread" role="log" aria-live="polite" aria-label="Conversation with lead" tabindex="0"></div>
+
+          <form class="composer" id="composer" autocomplete="off">
+            <button type="button" class="btn btn--icon" id="new-request" aria-haspopup="dialog" aria-label="New structured feature request" title="New feature request">
+              <span id="plus-icon"></span>
+            </button>
+            <div class="composer__box">
+              <input class="composer__input" id="chat-input" name="message" type="text" placeholder="Message lead (delivers via orch chat)..." aria-label="Message lead">
+              <span class="composer__hint mono" aria-hidden="true">Enter to send</span>
+            </div>
+            <button type="submit" class="btn btn--cyan btn--icon composer__send" aria-label="Send message"><span id="send-icon"></span></button>
+          </form>
+        </section>
+
+        <div class="side-col">
+          <section class="card panel inbox" id="inbox" aria-labelledby="inbox-title" tabindex="-1">
+            <h2 class="panel__title" id="inbox-title"></h2>
+            <ul class="inbox__list" id="inbox-list"></ul>
+          </section>
+
+          <section class="card panel" aria-labelledby="agents-title">
+            <h2 class="panel__title" id="agents-title"></h2>
+            <ul class="agents" id="agents-list"></ul>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <dialog class="modal" id="request-dialog" closedby="any" aria-labelledby="request-title">
+    <form id="request-form" class="request-form">
+      <div class="modal__head">
+        <h2 class="modal__title" id="request-title">New feature request</h2>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" id="request-close" aria-label="Close"><span id="request-x"></span></button>
+      </div>
+      <div class="modal__body">
+        <div class="field">
+          <label for="fr-title">Feature title</label>
+          <input class="input" id="fr-title" name="title" required maxlength="80" placeholder="e.g. Product tags" autofocus>
+        </div>
+        <div class="field">
+          <label for="fr-desc">What should it do?</label>
+          <textarea class="textarea" id="fr-desc" name="description" required placeholder="Describe the outcome, not the implementation."></textarea>
+        </div>
+        <div class="field">
+          <label for="fr-accept">Acceptance criteria <span class="muted">(optional)</span></label>
+          <textarea class="textarea" id="fr-accept" name="acceptance" rows="2" placeholder="How will we know it is done?"></textarea>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="fr-ms">Milestones</label>
+            <select class="select" id="fr-ms" name="milestones">
+              <option>1</option><option>2</option><option>3</option><option selected>4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fr-par">Max parallel agents</label>
+            <select class="select" id="fr-par" name="max_parallel">
+              <option>1</option><option selected>2</option><option>3</option><option>4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fr-iso">Isolation</label>
+            <select class="select mono" id="fr-iso" name="isolation">
+              <option value="worktree" selected>worktree</option><option value="branch">branch</option><option value="none">none</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fr-tier">Model tier</label>
+            <select class="select" id="fr-tier" name="tier">
+              <option value="auto" selected>Let lead decide</option><option value="small">small</option><option value="medium">medium</option><option value="high">high</option>
+            </select>
+          </div>
+        </div>
+        <label class="check"><input type="checkbox" name="migrations"> <span>Touches a database migration <span class="muted">(first milestone will be held for approval)</span></span></label>
+      </div>
+      <div class="modal__foot">
+        <button type="button" class="btn" id="request-cancel">Cancel</button>
+        <button type="submit" class="btn btn--emerald btn--solid">Send to lead</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/chat-home.js"></script>
+</body>
+</html>

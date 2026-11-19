@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Execution Monitor · Herdr Orchestra</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('herdr.theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/pages/execution-monitor.css">
+</head>
+<body data-page="execution-monitor">
+  <div id="app">
+    <header id="topbar"></header>
+    <aside id="sidebar"></aside>
+
+    <main id="main" tabindex="-1">
+      <div class="mon">
+        <header class="mon__head">
+          <span class="mon__icon" id="mon-icon"></span>
+          <div>
+            <h1 class="mon__title"><span id="mon-title"></span> <span id="mon-live" class="badge badge--pill"></span></h1>
+            <p class="mon__sub" id="mon-sub"></p>
+          </div>
+        </header>
+
+        <section class="card progress" aria-label="Run progress">
+          <div class="progress__label"><span id="prog-icon"></span><strong>Run Progress</strong></div>
+          <div class="progress__bar">
+            <span id="prog-text"></span>
+            <div class="bar" role="progressbar" aria-label="Run progress" aria-valuemin="0" aria-valuemax="100" id="prog-bar"><i id="prog-fill"></i></div>
+          </div>
+          <div class="progress__time"><span id="clock-icon"></span><span>Elapsed: <strong class="mono" id="elapsed"></strong> / Budget: <strong class="mono" id="budget"></strong></span></div>
+          <div class="progress__actions">
+            <button type="button" class="btn" id="pause-btn"></button>
+            <button type="button" class="btn" id="resume-btn"></button>
+            <button type="button" class="btn btn--coral" id="stop-btn" aria-haspopup="dialog"></button>
+            <button type="button" class="btn btn--emerald btn--solid" id="herdr-btn"></button>
+          </div>
+        </section>
+
+        <section class="agents" id="agents" aria-label="Agents on this run"></section>
+
+        <div class="mon__bottom">
+          <section class="card output" aria-label="Agent output">
+            <div class="output__bar">
+              <div class="tabs" role="tablist" aria-label="Output sources" id="tabs"></div>
+              <span class="note mono">Stripped ANSI · Read-only</span>
+              <button type="button" class="btn btn--cyan btn--sm" id="pane-btn"></button>
+            </div>
+            <div class="log" id="log" role="tabpanel" tabindex="0" aria-live="off"></div>
+          </section>
+
+          <section class="card timeline" aria-labelledby="tl-title">
+            <header class="card__head">
+              <h2 class="card__title" id="tl-title"></h2>
+              <span class="badge badge--emerald badge--pill" id="tl-live"></span>
+            </header>
+            <ol class="tl" id="tl"></ol>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer id="statusbar"></footer>
+  </div>
+
+  <dialog class="modal" id="stop-dialog" closedby="any" aria-labelledby="stop-title">
+    <form method="dialog">
+      <div class="modal__head"><h2 class="modal__title" id="stop-title">Stop this run?</h2></div>
+      <div class="modal__body">
+        <p>Autopilot will stop dispatching work and agents will be asked to finish their current step. Uncommitted work stays in each worktree.</p>
+      </div>
+      <div class="modal__foot">
+        <button type="submit" class="btn" value="cancel" autofocus>Keep running</button>
+        <button type="submit" class="btn btn--coral btn--solid" value="stop">Stop run</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/demo-store.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/pages/execution-monitor.js"></script>
+</body>
+</html>
