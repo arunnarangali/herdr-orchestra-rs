@@ -400,7 +400,7 @@ describe("the Projects screen", () => {
         return { created: { path: p, made_folder: true, git_initialised: true }, connection: creds(B) };
       },
     }));
-    await user.click(await screen.findByRole("button", { name: "New project…" }));
+    await user.click(await screen.findByRole("button", { name: /Create New Project/ }));
     expect(await screen.findByText(/Created new-one: created the folder, set up a git repository, prepared it for a run, and opened it/)).toBeInTheDocument();
     expect(made).toEqual(["/work/new-one"]);
     expect(tab("new-one")).toHaveAttribute("aria-current", "true");
@@ -416,7 +416,7 @@ describe("the Projects screen", () => {
         throw new Error(`${PB} already holds a run (its .orchestrate/ has a plan or a state database): open it from the project list instead`);
       },
     }));
-    await user.click(await screen.findByRole("button", { name: "New project…" }));
+    await user.click(await screen.findByRole("button", { name: /Create New Project/ }));
     const alert = await screen.findByText(/already holds a run/);
     expect(alert).toHaveTextContent("open it from the project list");
     // nothing changed: still the two projects
@@ -426,10 +426,23 @@ describe("the Projects screen", () => {
   it("cancelling the folder dialog does nothing", async () => {
     const user = userEvent.setup();
     const b = open("/projects", backend({ createProject: async () => { throw new Error("must not be called"); } }));
-    await user.click(await screen.findByRole("button", { name: "New project…" }));
+    await user.click(await screen.findByRole("button", { name: /Create New Project/ }));
     await settled();
     expect(screen.queryByText(/must not be called/)).not.toBeInTheDocument();
     expect(b.calls.some((c) => c.startsWith("open"))).toBe(false);
+  });
+
+  it("lists the open projects like the tabs do, and switching on a card switches the tab", async () => {
+    const user = userEvent.setup();
+    open("/projects");
+    const beta = await screen.findByRole("article", { name: "beta" });
+    const alpha = screen.getByRole("article", { name: "alpha" });
+    expect(within(alpha).getByText("Active")).toBeInTheDocument();
+    expect(tab("alpha")).toHaveAttribute("aria-current", "true");
+    await user.click(within(beta).getByRole("button", { name: /Show this project/ }));
+    await waitFor(() => expect(tab("beta")).toHaveAttribute("aria-current", "true"));
+    expect(tab("alpha")).not.toHaveAttribute("aria-current");
+    expect(within(await screen.findByRole("article", { name: "beta" })).getByText("Active")).toBeInTheDocument();
   });
 
   it("opens a listed project that is closed, shows it, and can close it again", async () => {

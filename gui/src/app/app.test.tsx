@@ -18,8 +18,8 @@ const NAMES = ["Overview", "Chat / Home", "Projects", "Agents", "Workflows (Plan
 const HEADING: Record<string, string> = {
   overview: "Overview",
   chat: "Chat",
-  projects: "Projects",
-  agents: "Agents",
+  projects: "Projects & Workspaces",
+  agents: "Agents & Models",
   workflows: "Workflows",
   execution: "Execution",
   reports: "Reports",
@@ -48,7 +48,7 @@ describe("registry and sidebar", () => {
     expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
 
     await user.click(within(nav).getByRole("link", { name: "Agents" }));
-    expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Agents & Models" })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Agents" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
   });
@@ -61,7 +61,7 @@ describe("registry and sidebar", () => {
       expect(await screen.findByRole("heading", { name: HEADING[s.id] })).toBeInTheDocument();
     }
     expect(screen.getByText("Nothing here yet.")).toBeInTheDocument(); // Help, M5 builds it
-  });
+  }, 15_000); // it visits all ten screens, each loading its data
 
   it("the Attention Center has a route and a placeholder body", async () => {
     renderApp({ route: "/notifications", initial: server });

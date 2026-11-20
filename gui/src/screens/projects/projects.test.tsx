@@ -64,17 +64,19 @@ describe("Projects", () => {
     show();
     expect(await screen.findByText("Connected to one server")).toBeInTheDocument();
     expect(await screen.findByText("/home/me/project")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add project…" })).not.toBeInTheDocument();
+    // the list lives in the desktop app: the actions say so instead of pretending
+    expect(screen.getByRole("button", { name: /Add Existing Folder/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Create New Project/ })).toHaveAttribute("title", "Available in the desktop app");
   });
 
   it("no project: an empty state that says how to add one", async () => {
     setBackendForTests(backend());
     show();
     expect(await screen.findByText("No projects yet")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add project…" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add Existing Folder/ })).toBeInTheDocument();
   });
 
-  it("shows path, branch, base, run state, report and earlier runs for the active project", async () => {
+  it("shows path, server, branch, base, run state, progress and earlier runs for the active project", async () => {
     const p = project({
       archive: [{ name: "phase-1", files: ["plan.md", "summary.md"], modified: 1_700_000_000, summary: "# Phase 1 <b>done</b>" }],
     });
@@ -88,11 +90,23 @@ describe("Projects", () => {
     await waitFor(() => expect(card).toHaveTextContent("orch/desktop from main"));
     expect(card).toHaveTextContent("Running");
     expect(card).toHaveTextContent("1 of 2 merged");
-    expect(card).toHaveTextContent("phase-1");
-    expect(within(card).getByText("# Phase 1 <b>done</b>")).toBeInTheDocument(); // plain text
+    expect(within(card).getByRole("progressbar", { name: "project run progress" })).toHaveAttribute("aria-valuenow", "50");
+    expect(card).toHaveTextContent("Token Active");
+    expect(within(card).getByRole("link", { name: /Open Run/ })).toHaveAttribute("href", "/execution");
+    expect(within(card).getByRole("button", { name: /Stop Server/ })).toBeDisabled();
+
+    // the history lists the current run and the archived ones of the chosen project
+    const history = screen.getByRole("region", { name: /Execution History/ });
+    expect(history).toHaveTextContent("Recent runs for project");
+    expect(history).toHaveTextContent("phase-1");
+    expect(within(history).getByText("# Phase 1 <b>done</b>")).toBeInTheDocument(); // plain text
+    expect(within(history).getByRole("button", { name: /View Report/ })).toBeDisabled();
+    await userEvent.setup().selectOptions(within(history).getByLabelText("Project"), "/home/me/other");
+    expect(within(history).getByText("No earlier runs in .orchestrate/archive/.")).toBeInTheDocument();
+
     const otherCard = screen.getByRole("article", { name: "other" });
     expect(otherCard).toHaveTextContent("dev");
-    expect(within(otherCard).getByText("No earlier runs in .orchestrate/archive/.")).toBeInTheDocument();
+    expect(otherCard).toHaveTextContent("orch serve · not running");
     expect(within(otherCard).getByRole("button", { name: "Switch to this project" })).toBeEnabled();
     expect(within(card).queryByRole("button", { name: "Switch to this project" })).not.toBeInTheDocument();
   });
@@ -129,10 +143,10 @@ describe("Projects", () => {
     const chooseFolder = vi.fn<AppBackend["chooseFolder"]>().mockResolvedValueOnce("/work/plain").mockResolvedValueOnce("/work/repo");
     setBackendForTests(backend({ addProject, chooseFolder }));
     show();
-    await user.click(await screen.findByRole("button", { name: "Add project…" }));
+    await user.click(await screen.findByRole("button", { name: /Add Existing Folder/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("is not a git repository");
     expect(screen.getByText("No projects yet")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Add project…" }));
+    await user.click(screen.getByRole("button", { name: /Add Existing Folder/ }));
     expect(await screen.findByRole("article", { name: "repo" })).toBeInTheDocument();
     expect(screen.getByText("Added /work/repo.")).toBeInTheDocument();
   });
@@ -142,7 +156,7 @@ describe("Projects", () => {
     const addProject = vi.fn<AppBackend["addProject"]>();
     setBackendForTests(backend({ addProject }));
     show();
-    await user.click(await screen.findByRole("button", { name: "Add project…" }));
+    await user.click(await screen.findByRole("button", { name: /Add Existing Folder/ }));
     expect(addProject).not.toHaveBeenCalled();
   });
 
