@@ -1,21 +1,23 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
+/** `system` is offered in Settings; the top bar toggles between `light` and `dark`. */
 export type ThemePreference = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 
 const STORAGE_KEY = "orch.theme";
 export const THEME_CHOICES: readonly { value: ThemePreference; label: string }[] = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "system", label: "System" },
 ];
 
+/** Dark is the default; a saved choice wins. */
 function readPreference(): ThemePreference {
   try {
     const v = window.localStorage.getItem(STORAGE_KEY);
-    return v === "light" || v === "dark" ? v : "system";
+    return v === "light" || v === "dark" || v === "system" ? v : "dark";
   } catch {
-    return "system";
+    return "dark";
   }
 }
 
@@ -30,13 +32,15 @@ interface ThemeContext {
   /** What is shown now: the preference, or the system's setting when it is `system`. */
   resolved: ResolvedTheme;
   setPreference: (p: ThemePreference) => void;
+  /** Switch between light and dark (what the top bar button does) and remember it. */
+  toggle: () => void;
 }
 
 const Ctx = createContext<ThemeContext | null>(null);
 
 /**
- * Light and dark follow the system setting until the user picks one. The choice is only
- * written as `data-theme` on <html>; the colours live in `theme.css`.
+ * Dark by default, light as an override. The shown theme is written as `data-theme` on <html>
+ * (the colours live in `theme.css`) and the choice is kept in local storage.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>(readPreference);
@@ -51,28 +55,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, []);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    if (preference === "system") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", preference);
-  }, [preference]);
+  const resolved: ResolvedTheme = preference === "system" ? (dark ? "dark" : "light") : preference;
 
-  const value = useMemo<ThemeContext>(
-    () => ({
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", resolved);
+  }, [resolved]);
+
+  const value = useMemo<ThemeContext>(() => {
+    const setPreference = (p: ThemePreference) => {
+      setPreferenceState(p);
+      try {
+        window.localStorage.setItem(STORAGE_KEY, p);
+      } catch {
+        // storage is optional: the choice then lasts until the app closes
+      }
+    };
+    return {
       preference,
-      resolved: preference === "system" ? (dark ? "dark" : "light") : preference,
-      setPreference: (p) => {
-        setPreferenceState(p);
-        try {
-          if (p === "system") window.localStorage.removeItem(STORAGE_KEY);
-          else window.localStorage.setItem(STORAGE_KEY, p);
-        } catch {
-          // storage is optional: the choice then lasts until the app closes
-        }
-      },
-    }),
-    [preference, dark],
-  );
+      resolved,
+      setPreference,
+      toggle: () => setPreference(resolved === "dark" ? "light" : "dark"),
+    };
+  }, [preference, resolved]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

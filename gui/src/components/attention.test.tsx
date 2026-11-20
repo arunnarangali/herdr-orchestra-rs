@@ -202,8 +202,8 @@ describe("Indicator count and waiting list", () => {
     renderApp({ route: "/overview", initial: server });
     await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
 
-    // Initially count is 0, no indicator
-    expect(screen.queryByRole("button", { name: /Attention:/ })).not.toBeInTheDocument();
+    // Initially nothing waits: the bell has no count
+    expect(screen.queryByRole("button", { name: /need attention/ })).not.toBeInTheDocument();
 
     // 2 attention items arrive
     server.emit(8, "attention", {
@@ -216,7 +216,7 @@ describe("Indicator count and waiting list", () => {
     });
 
     // Indicator appears with count 2
-    const indicator = await screen.findByRole("button", { name: /Attention: 2 items waiting/ });
+    const indicator = await screen.findByRole("button", { name: /Notifications, 2 need attention/ });
     expect(indicator).toBeInTheDocument();
 
     // First popup is shown for Item 1
@@ -235,12 +235,11 @@ describe("Indicator count and waiting list", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
 
     // Both dismissed, but both stay in waiting count!
-    expect(screen.getByRole("button", { name: /Attention: 2 items waiting/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Notifications, 2 need attention/ })).toBeInTheDocument();
 
     // Clicking indicator opens waiting list
-    await user.click(screen.getByRole("button", { name: /Attention: 2 items waiting/ }));
-    const listModal = await screen.findByRole("dialog");
-    expect(within(listModal).getByText("Waiting Attention Items (2)")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Notifications, 2 need attention/ }));
+    const listModal = await screen.findByRole("dialog", { name: "Notifications" });
     expect(within(listModal).getByText("Item 1")).toBeInTheDocument();
     expect(within(listModal).getByText("Item 2")).toBeInTheDocument();
 
@@ -256,8 +255,8 @@ describe("Queueing, focus return, and keyboard use", () => {
     renderApp({ route: "/overview", initial: server });
     await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
 
-    // Focus on Help button before popup arrives
-    const helpBtn = screen.getByRole("button", { name: "Help" });
+    // Focus on the bell before popup arrives
+    const helpBtn = screen.getByRole("button", { name: "Notifications" });
     helpBtn.focus();
     expect(helpBtn).toHaveFocus();
 
@@ -289,7 +288,7 @@ describe("Queueing, focus return, and keyboard use", () => {
     await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
 
-    // Focus returns where it was (the Help button)
+    // Focus returns where it was (the bell)
     expect(helpBtn).toHaveFocus();
   });
 });

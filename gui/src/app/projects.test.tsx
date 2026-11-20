@@ -280,7 +280,7 @@ describe("attention from every open project", () => {
     expect(dialog).toHaveTextContent("Beta needs you");
     expect(dialog).toHaveTextContent("Project: beta");
     // the indicator and the beta tab count it; alpha's tab does not
-    expect(screen.getByRole("button", { name: /Attention: 1 item/, hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Notifications, 1 need attention/, hidden: true })).toBeInTheDocument();
     const betaTab = within(tabs()).getByRole("button", { name: /^beta/, hidden: true });
     const alphaTab = within(tabs()).getByRole("button", { name: /^alpha/, hidden: true });
     expect(within(betaTab).getByLabelText(/1 item needs attention/)).toBeInTheDocument();
@@ -301,10 +301,10 @@ describe("attention from every open project", () => {
       A.emit(1, "attention", { op: "add", item: attention({ title: "Alpha question" }) });
       B.emit(1, "attention", { op: "add", item: attention({ title: "Beta question" }) });
     });
-    expect(await screen.findByRole("button", { name: /Attention: 2 items/, hidden: true })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Notifications, 2 need attention/, hidden: true })).toBeInTheDocument();
     // removing alpha's leaves beta's
     await act(async () => A.emit(2, "attention", { op: "remove", item: attention() }));
-    expect(await screen.findByRole("button", { name: /Attention: 1 item/, hidden: true })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Notifications, 1 need attention/, hidden: true })).toBeInTheDocument();
   });
 
   it("items that were already waiting when the app started are counted per project", async () => {
@@ -322,7 +322,7 @@ describe("attention from every open project", () => {
     open();
     await within(await screen.findByRole("navigation", { name: "Open projects" })).findByLabelText(/1 item needs attention/);
     await user.click(within(tabs()).getByRole("button", { name: "Close beta" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: /Attention:/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: /need attention/ })).not.toBeInTheDocument());
   });
 });
 

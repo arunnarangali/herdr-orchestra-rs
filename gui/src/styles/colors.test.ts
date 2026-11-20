@@ -24,21 +24,48 @@ describe("colours", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("are defined for both themes, with the same variables", () => {
+  it("use the prototype's tokens exactly: dark by default, a light override", () => {
     const css = readFileSync(THEME, "utf8");
-    const names = (block: string) => [...block.matchAll(/(--[\w-]+):/g)].map((m) => m[1] ?? "").sort();
-    const light = /:root \{([^}]*)\}/.exec(css)?.[1] ?? "";
-    const dark = /:root\[data-theme="dark"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
-    const system = /prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{([^}]*)\}/.exec(css)?.[1] ?? "";
-    expect(names(light).length).toBeGreaterThan(10);
-    expect(names(dark)).toEqual(names(light).filter((n) => !["--radius"].includes(n)));
-    expect(names(system)).toEqual(names(dark));
+    const tokens = (block: string) =>
+      Object.fromEntries([...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((m) => [m[1], (m[2] ?? "").trim()]));
+    const dark = tokens(/:root \{([^}]*)\}/.exec(css)?.[1] ?? "");
+    const light = tokens(/\[data-theme="light"\] \{([^}]*)\}/.exec(css)?.[1] ?? "");
+    expect(dark).toMatchObject({
+      "--bg-canvas": "#0D0F12",
+      "--bg-panel": "#14171D",
+      "--bg-hover": "#1C212B",
+      "--border-subtle": "#262B36",
+      "--text-primary": "#E6EDF3",
+      "--text-muted": "#8B949E",
+      "--accent-emerald": "#3FB950",
+      "--accent-cyan": "#58A6FF",
+      "--accent-amber": "#D29922",
+      "--accent-coral": "#F85149",
+      "--accent-violet": "#BC8CFF",
+      "--on-solid": "#04130A",
+      "--backdrop": "rgb(0 0 0 / 0.55)",
+    });
+    expect(light).toMatchObject({
+      "--bg-canvas": "#F6F8FA",
+      "--bg-panel": "#FFFFFF",
+      "--bg-hover": "#EAEEF2",
+      "--border-subtle": "#D0D7DE",
+      "--text-primary": "#1F2328",
+      "--text-muted": "#59636E",
+      "--accent-emerald": "#1A7F37",
+      "--accent-cyan": "#0969DA",
+      "--accent-amber": "#9A6700",
+      "--accent-coral": "#CF222E",
+      "--accent-violet": "#8250DF",
+      "--on-solid": "#FFFFFF",
+      "--backdrop": "rgb(31 35 40 / 0.35)",
+    });
+    // the light block overrides exactly the tokens the dark block defines
+    expect(Object.keys(light).sort()).toEqual(Object.keys(dark).sort());
   });
 
-  it("gives the focus ring its own colour in both themes", () => {
-    const css = readFileSync(THEME, "utf8");
-    expect(css.match(/--focus:/g)?.length).toBe(3);
+  it("gives every control one focus ring in the accent colour", () => {
     const base = readFileSync(join(SRC, "styles", "base.css"), "utf8");
-    expect(base).toMatch(/:focus-visible\s*\{[^}]*outline:[^;]*var\(--focus\)/);
+    expect(base).toMatch(/:focus-visible\s*\{[^}]*outline:[^;]*var\(--accent-cyan\)/);
   });
 });
