@@ -1,74 +1,327 @@
-.project-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--gap);
+/* Screen 05: Projects & Workspaces. Colours come from the theme's tokens; tones through `--c`. */
+
+.pj.screen {
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.project--active {
-  border-color: var(--accent);
-}
-.project-head {
+.pj .pg-head {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 4px;
+}
+.pj .pg-head__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  color: var(--accent-violet);
+}
+.pj .pg-head__icon .icon {
+  width: 34px;
+  height: 34px;
+  stroke-width: 1.5;
+}
+.pj .pg-head__titles {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.pj .pg-head__title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+}
+.pj .pg-head__sub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.pj .pg-head__side {
+  display: flex;
+  gap: 10px;
   flex-wrap: wrap;
 }
-.project-head .panel-title {
+.pj .pg-head__side .btn {
+  min-height: 36px;
+}
+
+.pj-msg {
   margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--c-b60);
+  border-radius: var(--radius-sm);
+  background: var(--c-a8);
 }
-.project-sub {
-  font-size: 1rem;
-  margin: 0.75rem 0 0.4rem;
+.pj-note {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 16px;
+  max-width: 44rem;
 }
-.project code {
+.pj-note > .icon {
+  color: var(--accent-violet);
+}
+.pj-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  padding: 2px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+}
+.pj-iconbtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* project cards */
+.pcards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.pcard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  height: 100%;
+  padding: 16px;
+}
+.pcard.card--tone {
+  border-width: 1.5px;
+}
+.pcard__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.pcard__logo {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  flex: none;
+  color: var(--accent-violet);
+  background: var(--violet-soft);
+  border: 1px solid var(--violet-chip-border);
+  border-radius: 10px;
+}
+.pcard__id {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.pcard__name {
+  font-size: 18px;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
-.pj-head {
+.pcard__pathlabel {
   display: flex;
   align-items: center;
-  gap: var(--gap);
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
+  gap: 6px;
+  font-size: 12px;
 }
-.pj-head h1 {
-  margin: 0;
+.pcard__path {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
 }
-.pj-facts {
+.pcard__badges {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 2rem;
-  margin: 0.5rem 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
-.pj-facts dt {
-  color: var(--text-muted);
-  font-size: 0.85rem;
+.pcard__small {
+  font-size: 12px;
 }
-.pj-facts dd {
-  margin: 0;
-}
-.pj-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.pcard__cols {
   display: grid;
-  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
 }
-.pj-actions {
+.pcard__server {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.pcard__k {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pcard__k .dot {
+  width: 12px;
+  height: 12px;
+}
+.pcard__cmd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+.pcard__cmd .mono {
+  overflow-wrap: anywhere;
+}
+.pcard__git {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border-subtle);
+  font-size: 12.5px;
+}
+.pcard__gk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+.pcard__gr {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.pcard__flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pcard__run {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pcard__runicon {
+  display: grid;
+  color: var(--accent-cyan);
+}
+.pcard__runbody {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.pcard__runlabel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.pcard__runtitle {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.pcard__pct {
+  display: grid;
+  justify-items: end;
+  min-width: 64px;
+  font-size: 14px;
+}
+.pj-bar {
+  height: 8px;
+  overflow: hidden;
+  background: var(--bg-hover);
+  border-radius: 999px;
+}
+.pj-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent-emerald);
+  border-radius: inherit;
+}
+.pcard__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin: 0.75rem 0 0;
+  gap: 10px;
+  margin-top: auto;
 }
-.pj-msg {
-  margin: 0.5rem 0;
-  padding: 0.4rem 0.6rem;
-  border-radius: var(--radius);
+.pcard__actions .btn {
+  min-height: 38px;
 }
-.pj-msg--ok {
-  background: var(--success-bg);
+
+/* history */
+.hist__head {
+  flex-wrap: wrap;
 }
-.pj-msg--error {
-  background: var(--danger-bg);
-  border: 1px solid var(--danger);
+.hist__icon {
+  display: grid;
+  color: var(--text-muted);
+}
+.hist__titles {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.hist__sub {
+  font-size: 12px;
+}
+.hist__select {
+  min-width: 190px;
+  min-height: 34px;
+}
+.hist .table-wrap {
+  padding: 4px 12px 8px;
+}
+.hist__table {
+  min-width: 820px;
+}
+.hist__nowrap {
+  white-space: nowrap;
+}
+.hist__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+@media (max-width: 1250px) {
+  .pcards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 1100px) {
+  .pcard__cols {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .pcard__git {
+    padding: 12px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+@media (max-width: 640px) {
+  .pcard {
+    padding: 12px;
+  }
+  .pcard__head {
+    flex-wrap: wrap;
+  }
+  .pcard__badges {
+    align-items: flex-start;
+  }
+  .pcard__actions .btn {
+    flex: 1 1 100%;
+  }
+  .pj .pg-head__side {
+    width: 100%;
+  }
+  .pj .pg-head__side .btn {
+    flex: 1;
+  }
+  .hist__select {
+    flex: 1 1 100%;
+  }
 }

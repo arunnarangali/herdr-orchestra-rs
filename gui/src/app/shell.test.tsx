@@ -63,7 +63,7 @@ describe("command palette", () => {
     expect(screen.getAllByRole("option")[2]).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Projects" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Projects & Workspaces" })).toBeInTheDocument();
   });
 
   it("runs an action: the theme toggle", async () => {
@@ -162,8 +162,11 @@ describe("frame", () => {
     renderApp({ route: "/overview", initial: server });
     expect(await screen.findByText("orch/ui")).toBeInTheDocument(); // branch chip
     const bar = screen.getByRole("contentinfo");
-    await waitFor(() => expect(bar).toHaveTextContent("Run: Running"));
-    expect(bar).toHaveTextContent("Connected");
+    // /status and /health are separate requests: either may answer first
+    await waitFor(() => {
+      expect(bar).toHaveTextContent("Run: Running");
+      expect(bar).toHaveTextContent("Connected");
+    });
     expect(bar).toHaveTextContent(/milestones \d+\/\d+ merged/);
     expect(bar).toHaveTextContent("nothing needs you");
     expect(screen.queryByText(/Demo Data Layer/i)).not.toBeInTheDocument();

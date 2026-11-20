@@ -30,6 +30,11 @@ function serve(o: { agents?: unknown; models?: unknown; plan?: boolean; status?:
   }
 }
 const show = () => renderApp({ route: "/agents", initial: server });
+const openTab = async (name: RegExp) => {
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("tab", { name }));
+  return user;
+};
 
 describe("agentProblems", () => {
   it("is empty for a healthy agent", () => {
@@ -58,22 +63,45 @@ describe("Agents", () => {
       },
     });
     show();
-    const table = await screen.findByRole("table", { name: "Agent kinds" });
-    const rows = within(table).getAllByRole("row");
-    expect(rows).toHaveLength(4);
-    expect(rows[1]).toHaveTextContent("Claude Code");
-    expect(rows[1]).toHaveTextContent("installed");
-    expect(rows[1]).toHaveTextContent("worker, lead");
-    expect(rows[1]).toHaveTextContent("claude --x");
-    expect(rows[2]).toHaveTextContent("missing");
-    expect(within(rows[2]!).getByLabelText("Problems with codex")).toHaveTextContent("not installed");
-    expect(within(rows[3]!).getByLabelText("Problems with amp")).toHaveTextContent("not logged in");
-    expect(rows[3]).toHaveTextContent("outdated");
+    const list = await screen.findByRole("list", { name: "Agent kinds" });
+    const cards = within(list).getAllByRole("listitem").filter((li) => li.parentElement === list);
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toHaveTextContent("Claude Code");
+    expect(cards[0]).toHaveTextContent("Logged In");
+    expect(cards[0]).toHaveTextContent("Can be: worker, lead");
+    expect(cards[0]).toHaveTextContent("claude --x");
+    expect(cards[1]).toHaveTextContent("Not installed");
+    expect(within(cards[1]!).getByLabelText("Problems with codex")).toHaveTextContent("not installed");
+    expect(within(cards[2]!).getByLabelText("Problems with amp")).toHaveTextContent("not logged in");
+    expect(cards[2]).toHaveTextContent("Skills Outdated");
+  });
+
+  it("an agent card opens its details: launch, models it runs and what can be done", async () => {
+    const user = userEvent.setup();
+    serve();
+    show();
+    const list = await screen.findByRole("list", { name: "Agent kinds" });
+    const name = samples.agents.agents[0]!.display_name ?? samples.agents.agents[0]!.kind;
+    await user.click(within(list).getByRole("button", { name: `${name} details` }));
+    const dialog = await screen.findByRole("dialog", { name });
+    expect(dialog).toHaveTextContent(samples.agents.agents[0]!.launch);
+    expect(within(dialog).getByRole("button", { name: /Bench agent/ })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows the roles the run's team gives each kind on its card", async () => {
+    serve();
+    show();
+    const list = await screen.findByRole("list", { name: "Agent kinds" });
+    const m = samples.agents.team[0]!;
+    expect(list).toHaveTextContent(`(${m.model})`);
   });
 
   it("lists the run's team with availability when a run exists", async () => {
     serve();
     show();
+    await openTab(/Team Builder/);
     const team = await screen.findByRole("table", { name: "Team" });
     const row = within(team).getByRole("row", { name: /rs-claude-1/ });
     expect(row).toHaveTextContent("claude-sonnet-5-5");
@@ -85,6 +113,7 @@ describe("Agents", () => {
   it("without a run there is no team, and no error", async () => {
     serve({ plan: false, agents: { agents: samples.agents.agents, team: [] } });
     show();
+    await openTab(/Team Builder/);
     expect(await screen.findByText(/no team/)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -139,6 +168,7 @@ describe("Agents", () => {
       },
     });
     show();
+    await openTab(/Team Builder/);
     const team = await screen.findByRole("table", { name: "Team" });
     const leadRow = within(team).getByRole("row", { name: /lead-agent/ });
     expect(leadRow).toHaveTextContent("lead");
@@ -156,6 +186,7 @@ describe("Agents", () => {
   it("updates live when stream events occur", async () => {
     serve();
     show();
+    await openTab(/Team Builder/);
     const team = await screen.findByRole("table", { name: "Team" });
     await waitFor(() => expect(team).toBeInTheDocument());
     await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
@@ -190,6 +221,7 @@ describe("Agents", () => {
 
     serve();
     show();
+    await openTab(/Team Builder/);
 
     const team = await screen.findByRole("table", { name: "Team" });
     const viewBtn = within(team).getByRole("button", { name: "View output for rs-claude-1" });
@@ -238,11 +270,24 @@ describe("Agents", () => {
   });
 });
 
+describe("toolbar", () => {
+  it("Scan Agents reads the agents again; the CLI-only actions say why they are off", async () => {
+    serve();
+    show();
+    await screen.findByRole("list", { name: "Agent kinds" });
+    const before = server.requests.filter((r) => r.path === "/agents").length;
+    await userEvent.setup().click(screen.getByRole("button", { name: /Scan Agents/ }));
+    await waitFor(() => expect(server.requests.filter((r) => r.path === "/agents").length).toBe(before + 1));
+    expect(screen.getByRole("button", { name: /Run Doctor/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Sync Skills/ })).toHaveAttribute("title", expect.stringContaining("Not available yet"));
+  });
+});
+
 describe("Models", () => {
   const open = async () => {
     const user = userEvent.setup();
     show();
-    await user.click(await screen.findByRole("tab", { name: "Models" }));
+    await user.click(await screen.findByRole("tab", { name: /Model Catalog/ }));
     return user;
   };
 
@@ -250,12 +295,16 @@ describe("Models", () => {
     serve();
     const user = userEvent.setup();
     show();
-    const agents = await screen.findByRole("tab", { name: "Agents" });
+    const agents = await screen.findByRole("tab", { name: /Installed Agents/ });
     agents.focus();
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Models" })).toHaveFocus();
-    expect(await screen.findByRole("region", { name: "Catalog" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Model Catalog/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Model Catalog/ })).toHaveFocus();
+    expect(await screen.findByRole("region", { name: "Deny Policy Patterns" })).toBeInTheDocument();
+    await user.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "Team Builder" })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(screen.getByRole("tab", { name: /Installed Agents/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("shows tier, ratings as labelled bars, kinds, open weights and what the policy keeps out", async () => {
@@ -269,18 +318,53 @@ describe("Models", () => {
         policy: { deny: ["best"], deny_why: "kept out" },
       },
     });
-    await open();
-    const catalog = await screen.findByRole("region", { name: "Catalog" });
-    const alpha = within(catalog).getByRole("heading", { name: /alpha/ }).closest("li")!;
+    const user = await open();
+    const catalog = await screen.findByRole("region", { name: /Shipped Model Catalog/ });
+    const alpha = within(catalog).getByRole("row", { name: /alpha/ });
     expect(alpha).toHaveTextContent("high");
-    expect(alpha).toHaveTextContent("claude");
-    expect(alpha).toHaveTextContent("open weights: no");
-    expect(within(alpha).getByLabelText("Reasoning of alpha")).toHaveAttribute("value", "5");
-    expect(within(alpha).getByText("Speed").parentElement).toHaveTextContent("not rated");
-    const policy = await screen.findByRole("region", { name: "Policy" });
-    expect(policy).toHaveTextContent("Kept out of runs (1)");
+    expect(alpha).toHaveTextContent("claude · Proprietary");
+    expect(alpha).toHaveTextContent("Allowed");
+    const best = within(catalog).getByRole("row", { name: /best/ });
+    expect(best).toHaveTextContent("DENIED BY POLICY (best)");
+    expect(best).toHaveTextContent("unrated");
+    await user.click(within(alpha).getByRole("button", { name: "Ratings of alpha" }));
+    expect(within(catalog).getByLabelText("Reasoning of alpha")).toHaveAttribute("value", "5");
+    expect(within(catalog).getByText("Speed").parentElement).toHaveTextContent("not rated");
+    const policy = await screen.findByRole("region", { name: "Deny Policy Patterns" });
+    expect(policy).toHaveTextContent("1 model is kept out of runs: best");
     expect(policy).toHaveTextContent("kept out");
-    expect(within(policy).getByText("best")).toBeInTheDocument();
+    expect(within(policy).getByRole("list", { name: "Deny patterns" })).toHaveTextContent("best");
+    expect(within(policy).getByRole("button", { name: /Add to deny list/ })).toBeDisabled();
+  });
+
+  it("filters the catalog by text, tier and policy", async () => {
+    serve({
+      models: {
+        ...samples.models,
+        models: [
+          model({ id: "opus-x", tier: "high", kinds: ["claude"] }),
+          model({ id: "haiku-x", tier: "small", kinds: ["claude"] }),
+          model({ id: "gpt-x", tier: "medium", kinds: ["codex"] }),
+          model({ id: "astra-x", tier: "high", kinds: ["agy"], denied: true, denied_by: "*astra*" }),
+        ],
+      },
+    });
+    const user = await open();
+    const catalog = await screen.findByRole("region", { name: /Shipped Model Catalog/ });
+    const ids = () => within(catalog).queryAllByRole("rowheader").map((c) => c.textContent);
+    expect(ids()).toEqual(["opus-x", "haiku-x", "gpt-x", "astra-x"]);
+    await user.selectOptions(within(catalog).getByLabelText("Tier"), "high");
+    expect(ids()).toEqual(["opus-x", "astra-x"]);
+    await user.selectOptions(within(catalog).getByLabelText("Policy"), "allowed");
+    expect(ids()).toEqual(["opus-x"]);
+    await user.selectOptions(within(catalog).getByLabelText("Policy"), "denied");
+    expect(ids()).toEqual(["astra-x"]);
+    await user.selectOptions(within(catalog).getByLabelText("Tier"), "all");
+    await user.selectOptions(within(catalog).getByLabelText("Policy"), "all");
+    await user.type(within(catalog).getByLabelText("Search models"), "codex");
+    expect(ids()).toEqual(["gpt-x"]);
+    await user.type(within(catalog).getByLabelText("Search models"), "zzz");
+    expect(within(catalog).getByText("No models match these filters.")).toBeInTheDocument();
   });
 
   it("compares the tier a milestone asked for with the team that can serve it", async () => {
@@ -288,7 +372,8 @@ describe("Models", () => {
       agents: { agents: samples.agents.agents, team: [{ ...samples.agents.team[0]!, tier: "small", name: "weak-1" }] },
     });
     await open();
-    const region = await screen.findByRole("region", { name: "Plan tiers against the team" });
+    await openTab(/Team Builder/);
+    const region = await screen.findByRole("region", { name: "Tier Routing" });
     await waitFor(() => expect(region).toHaveTextContent("M1 Foundation"));
     expect(region).toHaveTextContent("medium");
     await waitFor(() => expect(region).toHaveTextContent("nobody on the team can serve this tier"));
@@ -297,14 +382,14 @@ describe("Models", () => {
   it("names the team members that can serve a tier", async () => {
     serve();
     await open();
-    await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Plan tiers against the team" })).toHaveTextContent("rs-claude-1 (medium)"),
-    );
+    await openTab(/Team Builder/);
+    await waitFor(() => expect(screen.getByRole("region", { name: "Tier Routing" })).toHaveTextContent("rs-claude-1 (medium)"));
   });
 
   it("without a run the comparison explains why it is empty", async () => {
     serve({ plan: false });
     await open();
+    await openTab(/Team Builder/);
     expect(await screen.findByText(/no plan to compare/)).toBeInTheDocument();
   });
 });
