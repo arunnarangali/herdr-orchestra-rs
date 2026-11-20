@@ -12,12 +12,29 @@ beforeEach(async () => {
 });
 afterEach(() => server.close());
 
-const NAMES = ["Overview", "Chat", "Projects", "Agents", "Workflows", "Execution", "Reports", "Settings"];
+// The sidebar's entries, in the prototype's order and wording.
+const NAMES = ["Overview", "Chat / Home", "Projects", "Agents", "Workflows (Plan)", "Execution Monitor", "Reports", "Settings", "Onboarding", "Help"];
+// What each screen's own heading says today (a screen milestone may change its own).
+const HEADING: Record<string, string> = {
+  overview: "Overview",
+  chat: "Chat",
+  projects: "Projects",
+  agents: "Agents",
+  workflows: "Workflows",
+  execution: "Execution",
+  reports: "Reports",
+  settings: "Settings",
+  onboarding: "Getting started",
+  help: "Help",
+  notifications: "Notifications / Attention Center",
+};
 
 describe("registry and sidebar", () => {
-  it("registers the eight screens and onboarding in one list", () => {
+  it("registers all eleven screens in one list, ten in the sidebar", () => {
+    expect(screens).toHaveLength(11);
     expect(screens.filter((s) => s.nav).map((s) => s.label)).toEqual(NAMES);
-    expect(screens.find((s) => s.id === "onboarding")?.nav).toBe(false);
+    expect(screens.find((s) => s.id === "notifications")).toMatchObject({ nav: false, path: "/notifications" });
+    expect(screens.find((s) => s.id === "help")).toMatchObject({ nav: true, path: "/help" });
     expect(new Set(screens.map((s) => s.path)).size).toBe(screens.length);
     const keys = screens.map((s) => s.shortcut).filter(Boolean);
     expect(new Set(keys).size).toBe(keys.length);
@@ -27,26 +44,29 @@ describe("registry and sidebar", () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
     const nav = screen.getByRole("navigation", { name: "Main" });
-    expect(within(nav).getAllByRole("link").map((l) => l.textContent?.replace(/g\s*\w$/, "").trim())).toEqual(NAMES);
-    expect(within(nav).getByRole("link", { name: /Overview/ })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getAllByRole("link").map((l) => l.textContent?.trim())).toEqual(NAMES);
+    expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
 
-    await user.click(within(nav).getByRole("link", { name: /Agents/ }));
+    await user.click(within(nav).getByRole("link", { name: "Agents" }));
     expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: /Agents/ })).toHaveAttribute("aria-current", "page");
-    expect(within(nav).getByRole("link", { name: /Overview/ })).not.toHaveAttribute("aria-current");
+    expect(within(nav).getByRole("link", { name: "Agents" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
   });
 
   it("shows every screen, the unbuilt ones as placeholders", async () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
-    // Every nav screen has its milestone's content now; the loop stays as a smoke test
-    // and the placeholder assertion remains for any screen that loses its content.
-    const built = ["Overview", "Chat", "Projects", "Agents", "Workflows", "Execution", "Reports", "Settings"];
-    for (const name of NAMES) {
-      await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: new RegExp(name) }));
-      expect(await screen.findByRole("heading", { name })).toBeInTheDocument();
-      if (!built.includes(name)) expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+    for (const s of screens.filter((x) => x.nav)) {
+      await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: s.label }));
+      expect(await screen.findByRole("heading", { name: HEADING[s.id] })).toBeInTheDocument();
     }
+    expect(screen.getByText("Nothing here yet.")).toBeInTheDocument(); // Help, M5 builds it
+  });
+
+  it("the Attention Center has a route and a placeholder body", async () => {
+    renderApp({ route: "/notifications", initial: server });
+    expect(await screen.findByRole("heading", { name: "Notifications / Attention Center" })).toBeInTheDocument();
+    expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
   });
 
   it("an unknown address goes to the first screen", async () => {
@@ -64,23 +84,28 @@ describe("no project chosen", () => {
     }
   });
 
-  it("Getting started stays reachable from the Help menu once connected", async () => {
+  it("Getting started stays reachable from the sidebar once connected", async () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
-    await user.click(screen.getByRole("button", { name: "Help" }));
-    await user.click(screen.getByRole("menuitem", { name: "Getting started" }));
+    await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: "Onboarding" }));
     expect(await screen.findByRole("heading", { name: "Getting started" })).toBeInTheDocument();
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });
 
 describe("keyboard", () => {
+  it("the two new screens have shortcuts that do not clash", () => {
+    const keys = screens.map((s) => s.shortcut).filter(Boolean);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(screens.find((s) => s.id === "notifications")?.shortcut).toBe("n");
+    expect(screens.find((s) => s.id === "help")?.shortcut).toBe("h");
+  });
+
   it("g then a letter opens a screen", async () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
     for (const s of screens.filter((x) => x.shortcut)) {
       await user.keyboard(`g${s.shortcut}`);
-      expect(await screen.findByRole("heading", { name: s.label })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: HEADING[s.id] })).toBeInTheDocument();
     }
   });
 
@@ -106,23 +131,6 @@ describe("keyboard", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("the Help menu opens the shortcut list too, and Escape closes the menu", async () => {
-    const user = userEvent.setup();
-    renderApp({ route: "/overview", initial: server });
-    const help = screen.getByRole("button", { name: "Help" });
-    await user.click(help);
-    expect(help).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("menuitem", { name: "Getting started" })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: /Keyboard shortcuts/ })).toHaveFocus();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(help).toHaveFocus();
-    await user.click(help);
-    await user.click(screen.getByRole("menuitem", { name: /Keyboard shortcuts/ }));
-    expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
-  });
-
   it("moves focus to the content after navigating", async () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
@@ -132,45 +140,56 @@ describe("keyboard", () => {
 });
 
 describe("theme", () => {
-  it("follows the system setting until the user chooses, then keeps the choice", async () => {
+  const toggle = () => screen.getByRole("button", { name: /Switch to (light|dark) theme/ });
+
+  it("is dark by default and the top bar toggles to light and back, remembering the choice", async () => {
     const user = userEvent.setup();
     renderApp({ route: "/overview", initial: server });
-    const select = screen.getByRole("combobox", { name: "Theme" });
-    expect(select).toHaveValue("system");
-    expect(document.documentElement).not.toHaveAttribute("data-theme");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(toggle()).toHaveAccessibleName("Switch to light theme");
+    expect(window.localStorage.getItem("orch.theme")).toBeNull();
 
-    await user.selectOptions(select, "dark");
+    await user.click(toggle());
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(window.localStorage.getItem("orch.theme")).toBe("light");
+    expect(toggle()).toHaveAccessibleName("Switch to dark theme");
+    expect(toggle()).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(toggle());
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
     expect(window.localStorage.getItem("orch.theme")).toBe("dark");
-    await user.selectOptions(select, "light");
-    expect(document.documentElement).toHaveAttribute("data-theme", "light");
-    await user.selectOptions(select, "system");
-    expect(document.documentElement).not.toHaveAttribute("data-theme");
-    expect(window.localStorage.getItem("orch.theme")).toBeNull();
   });
 
   it("restores the saved choice", () => {
-    window.localStorage.setItem("orch.theme", "dark");
+    window.localStorage.setItem("orch.theme", "light");
     renderApp({ route: "/overview", initial: server });
-    expect(screen.getByRole("combobox", { name: "Theme" })).toHaveValue("dark");
-    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(toggle()).toHaveAccessibleName("Switch to dark theme");
   });
 
-  it("tracks the system setting while on System", async () => {
-    const { useTheme } = await import("./theme");
+  it("follows the system setting only when System is chosen", async () => {
+    const { useTheme, ThemeProvider } = await import("./theme");
     const { render } = await import("@testing-library/react");
-    const { ThemeProvider } = await import("./theme");
     function Show() {
-      return <p data-testid="resolved">{useTheme().resolved}</p>;
+      const t = useTheme();
+      return (
+        <>
+          <p data-testid="resolved">{t.resolved}</p>
+          <button onClick={() => t.setPreference("system")}>system</button>
+        </>
+      );
     }
     render(
       <ThemeProvider>
         <Show />
       </ThemeProvider>,
     );
-    expect(screen.getByTestId("resolved")).toHaveTextContent("light");
+    expect(screen.getByTestId("resolved")).toHaveTextContent("dark");
     act(() => setSystemDark(true));
     expect(screen.getByTestId("resolved")).toHaveTextContent("dark");
+    await userEvent.setup().click(screen.getByText("system"));
+    act(() => setSystemDark(false));
+    expect(screen.getByTestId("resolved")).toHaveTextContent("light");
     act(() => setSystemDark(false));
   });
 });

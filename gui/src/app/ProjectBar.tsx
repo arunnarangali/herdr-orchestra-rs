@@ -2,6 +2,8 @@ import "../components/components.css";
 import { Link } from "react-router-dom";
 import { useAttention } from "../components/Attention";
 import { runStateLabel } from "../screens/projects/format";
+import { Badge } from "../ui/Badge";
+import type { Tone } from "../ui/Button";
 import { useProjects, type OpenProject, type Runtime } from "./projects";
 
 /** What to say next to a project's name: where it stands, in words. */
@@ -15,6 +17,14 @@ export function projectState(p: OpenProject, rt: Runtime | undefined): { text: s
   const tone = rt.runState === "all_done" ? "success" : rt.runState === "stopped" || rt.runState === "broken_branch" ? "warning" : "info";
   return { text: runStateLabel(rt.runState), tone };
 }
+
+const BADGE_TONE: Record<"info" | "success" | "warning" | "danger" | "muted", Tone> = {
+  info: "cyan",
+  success: "emerald",
+  warning: "amber",
+  danger: "coral",
+  muted: "neutral",
+};
 
 /**
  * The open projects, one tab each: its name, where its run stands and how many items wait for
@@ -42,9 +52,9 @@ export function ProjectBar() {
                 onClick={() => select(p.path)}
               >
                 <span className="project-tab-name">{p.name}</span>
-                <span className={`badge badge--${st.tone}`}>{st.text}</span>
+                <Badge tone={BADGE_TONE[st.tone]}>{st.text}</Badge>
                 {waiting > 0 && (
-                  <span className="attention-indicator-badge" aria-label={`${waiting} ${waiting === 1 ? "item needs" : "items need"} attention`}>
+                  <span className="project-tab__count" aria-label={`${waiting} ${waiting === 1 ? "item needs" : "items need"} attention`}>
                     {waiting}
                   </span>
                 )}
@@ -56,7 +66,7 @@ export function ProjectBar() {
           );
         })}
         <li className="project-tab-add">
-          <Link to="/projects" className="button" aria-label="Open or create a project">
+          <Link to="/projects" className="btn btn--sm" aria-label="Open or create a project">
             + Project
           </Link>
         </li>
@@ -85,10 +95,10 @@ export function ProjectProblem() {
         Only this project is affected; the others keep running. Fix the cause (for example the path of <code>orch</code> in Settings) and try again.
       </p>
       <div className="button-row">
-        <button type="button" className="button button--primary" onClick={() => void retry(p.path)}>
+        <button type="button" className="btn btn--cyan btn--solid" onClick={() => void retry(p.path)}>
           Try again
         </button>
-        <button type="button" className="button" onClick={() => void close(p.path)}>
+        <button type="button" className="btn" onClick={() => void close(p.path)}>
           Close this project
         </button>
       </div>

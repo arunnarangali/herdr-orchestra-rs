@@ -193,14 +193,13 @@ describe("skipping, finishing and reopening", () => {
     expect(screen.getByRole("navigation", { name: "Setup steps" })).toBeInTheDocument();
   });
 
-  it("a skipped flow is not shown again on the next launch, and is reachable from the Help menu", async () => {
+  it("a skipped flow is not shown again on the next launch, and is reachable from the sidebar", async () => {
     window.localStorage.setItem("orch.onboarding", "skipped");
     const user = userEvent.setup();
     show({ shell: fakeShell() });
     expect(screen.getByText("Setup was skipped.")).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Setup steps" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Help" }));
-    await user.click(screen.getByRole("menuitem", { name: "Getting started" }));
+    await user.click(screen.getByRole("link", { name: "Onboarding" }));
     expect(screen.getByRole("heading", { name: "Getting started" })).toBeInTheDocument();
   });
 

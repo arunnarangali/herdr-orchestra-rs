@@ -10,6 +10,10 @@ const LABEL: Record<ConnectionKind, string> = {
   connected: "Connected",
 };
 
+export function connectionLabel(kind: ConnectionKind): string {
+  return LABEL[kind];
+}
+
 /** What each state means and what to do about it. */
 export function advice(kind: ConnectionKind, url: string | null): { title: string; hint: string } | null {
   switch (kind) {
@@ -43,13 +47,14 @@ export function ConnectionPill() {
   const { kind, health } = useConnection();
   return (
     <span
-      className={`pill pill--${kind}`}
+      className={`chip chip--status pill--${kind}`}
+      data-connected={kind === "connected" ? "true" : "false"}
       role="status"
       aria-label={`Connection: ${LABEL[kind]}`}
       title={kind === "connected" && health ? health.project : undefined}
     >
       <span className="pill-dot" aria-hidden="true" />
-      {LABEL[kind]}
+      <span>{LABEL[kind]}</span>
     </span>
   );
 }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,15 @@ import { TASK_STATES } from "../api/states";
 import { samples } from "../api/contract";
 import { errorBody, startFakeServer, type FakeServer } from "../test/fakeServer";
 import { Providers } from "../test/render";
+import { AttentionCard } from "../components/AttentionCard";
+import { Badge } from "./Badge";
+import { Button } from "./Button";
+import { Card, CardHead } from "./Card";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Drawer } from "./Drawer";
+import { Segmented } from "./Segmented";
+import { Table } from "./Table";
+import { ToastProvider, useToast } from "./Toast";
 import { ResourceView } from "./ResourceView";
 import { StatusBadge, toneOf } from "./StatusBadge";
 import { useResource } from "./useResource";
@@ -155,5 +163,129 @@ describe("useResource and ResourceView", () => {
     server.emit(2, "task-state", { id: "M1" });
     expect(await screen.findByText("Renamed")).toBeInTheDocument();
     expect(server.requests.filter((r) => r.path === "/tasks").length).toBe(before + 1);
+  });
+});
+
+describe("shared primitives", () => {
+  it("Button: tones, solid, and an unavailable action is disabled with its reason", async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(
+      <>
+        <Button tone="emerald" solid onClick={onClick}>
+          Go
+        </Button>
+        <Button tone="coral">Stop</Button>
+        <Button unavailable="Not available yet" onClick={onClick}>
+          Export
+        </Button>
+      </>,
+    );
+    expect(screen.getByRole("button", { name: "Go" })).toHaveClass("btn", "btn--emerald", "btn--solid");
+    expect(screen.getByRole("button", { name: "Stop" })).toHaveClass("btn--coral");
+    const off = screen.getByRole("button", { name: /Export/ });
+    expect(off).toBeDisabled();
+    expect(off).toHaveAttribute("title", "Not available yet");
+    await user.click(off);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("Badge, Card and Table render their tone and their words", () => {
+    render(
+      <>
+        <Badge tone="violet" mono>
+          M1
+        </Badge>
+        <Card tone="amber" data-testid="card">
+          <CardHead title="Held" />
+        </Card>
+        <Table caption="Milestones">
+          <tbody>
+            <tr>
+              <td>M1</td>
+            </tr>
+          </tbody>
+        </Table>
+      </>,
+    );
+    expect(screen.getByText("M1", { selector: ".badge" })).toHaveClass("badge--violet", "badge--mono");
+    expect(screen.getByTestId("card")).toHaveClass("card", "card--tone", "tone-amber");
+    expect(screen.getByRole("heading", { name: "Held" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Milestones" })).toBeInTheDocument();
+  });
+
+  it("Segmented marks the chosen option and reports changes", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Segmented
+        label="View"
+        value="list"
+        onChange={onChange}
+        options={[
+          { value: "list", label: "List" },
+          { value: "graph", label: "Graph" },
+        ]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Graph" }));
+    expect(onChange).toHaveBeenCalledWith("graph");
+  });
+
+  it("Toast announces a message in a live region and removes it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    function Fire() {
+      const toast = useToast();
+      return <button onClick={() => toast("Saved", { tone: "emerald" })}>fire</button>;
+    }
+    render(
+      <ToastProvider>
+        <Fire />
+      </ToastProvider>,
+    );
+    act(() => screen.getByText("fire").click());
+    expect(within(screen.getByRole("status")).getByText("Saved")).toBeInTheDocument();
+    act(() => void vi.advanceTimersByTime(4000));
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("Drawer closes on Escape and gives focus back", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>open</button>
+          <Drawer open={open} title="Notifications" onClose={() => setOpen(false)}>
+            <p>inside</p>
+          </Drawer>
+        </>
+      );
+    }
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "open" });
+    await user.click(opener);
+    expect(screen.getByRole("dialog", { name: "Notifications" })).toHaveTextContent("inside");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
+  it("AttentionCard shows the item and hands it to onReview", async () => {
+    const user = userEvent.setup();
+    const onReview = vi.fn();
+    const it = { id: "x", kind: "failed", task: "M3", agent: "coder-1", title: "M3 failed", detail: "check failed", prompt: null, since: "", actions: [], uid: "u", sourceKey: "", projectName: "alpha" };
+    render(
+      <ul>
+        <AttentionCard item={it} onReview={onReview} />
+      </ul>,
+    );
+    expect(screen.getByRole("heading", { name: "M3 failed" })).toBeInTheDocument();
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByRole("listitem")).toHaveClass("tone-coral");
+    await user.click(screen.getByRole("button", { name: "Review M3 failed" }));
+    expect(onReview).toHaveBeenCalledWith(it);
   });
 });

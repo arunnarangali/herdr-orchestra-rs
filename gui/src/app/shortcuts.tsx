@@ -89,6 +89,12 @@ export function ShortcutList({ open, onClose }: { open: boolean; onClose: () => 
             ))}
           <tr>
             <td>
+              <kbd>Ctrl</kbd> <kbd>K</kbd>
+            </td>
+            <td>Open the command palette</td>
+          </tr>
+          <tr>
+            <td>
               <kbd>?</kbd>
             </td>
             <td>Show this list</td>
@@ -102,7 +108,7 @@ export function ShortcutList({ open, onClose }: { open: boolean; onClose: () => 
         </tbody>
       </table>
       <div className="modal-actions">
-        <button type="button" className="button" onClick={onClose}>
+        <button type="button" className="btn" onClick={onClose}>
           Close
         </button>
       </div>

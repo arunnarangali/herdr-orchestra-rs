@@ -1,79 +1,116 @@
 /*
  * The theme: the only file that contains colours. Everything else uses these variables.
- * Light is the default; dark follows the system unless the user picked a theme in the app
- * (`data-theme` on <html>). The focus ring colour is chosen for each theme so it is visible
- * on both the page and the surfaces.
+ *
+ * The first block of each theme holds the prototype's tokens (`prototype/css/theme.css`),
+ * exactly; `styles/colors.test.ts` compares them. Dark is the default; `data-theme="light"`
+ * on <html> overrides the same tokens. `app/theme.tsx` writes that attribute.
+ *
+ * Fonts, sizes and radii are not colours: they live in `styles/base.css`.
  */
 :root {
-  color-scheme: light;
-  --bg: #f4f6f8;
-  --surface: #ffffff;
-  --surface-2: #eceff3;
-  --border: #ccd3db;
-  --text: #1a1f26;
-  --text-muted: #4d5865;
-  --accent: #0a5bd1;
-  --accent-text: #ffffff;
-  --focus: #0a5bd1;
-  --success: #17692f;
-  --success-bg: #ddf3e4;
-  --warning: #805400;
-  --warning-bg: #fdf0cf;
-  --danger: #a4161a;
-  --danger-bg: #fbe1e1;
-  --info: #0a5bd1;
-  --info-bg: #dce9fc;
-  --muted-bg: #e4e8ed;
-  --overlay: rgba(15, 20, 28, 0.45);
-  --shadow: rgba(15, 20, 28, 0.18);
-}
+  --bg-canvas: #0D0F12;
+  --bg-panel: #14171D;
+  --bg-hover: #1C212B;
+  --border-subtle: #262B36;
+  --text-primary: #E6EDF3;
+  --text-muted: #8B949E;
 
-:root[data-theme="dark"] {
+  --accent-emerald: #3FB950;
+  --accent-cyan: #58A6FF;
+  --accent-amber: #D29922;
+  --accent-coral: #F85149;
+  --accent-violet: #BC8CFF;
+
+  --on-solid: #04130A;
+  --backdrop: rgb(0 0 0 / 0.55);
+
+  /* not in the prototype's token list, used by its shell: text on a coral count, shadows */
+  --on-alert: #FFFFFF;
+  --mix-light: #FFFFFF;
+  --shadow: rgb(0 0 0 / 0.5);
+
   color-scheme: dark;
-  --bg: #0e1116;
-  --surface: #161b22;
-  --surface-2: #1e252e;
-  --border: #323b47;
-  --text: #e8ecf1;
-  --text-muted: #a0aab6;
-  --accent: #6ca6ff;
-  --accent-text: #08111f;
-  --focus: #9cc2ff;
-  --success: #6fdc8c;
-  --success-bg: #12301c;
-  --warning: #f2c35b;
-  --warning-bg: #35280a;
-  --danger: #ff8d8d;
-  --danger-bg: #3a1416;
-  --info: #8fbbff;
-  --info-bg: #14284a;
-  --muted-bg: #232b35;
-  --overlay: rgba(0, 0, 0, 0.6);
-  --shadow: rgba(0, 0, 0, 0.5);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #0e1116;
-    --surface: #161b22;
-    --surface-2: #1e252e;
-    --border: #323b47;
-    --text: #e8ecf1;
-    --text-muted: #a0aab6;
-    --accent: #6ca6ff;
-    --accent-text: #08111f;
-    --focus: #9cc2ff;
-    --success: #6fdc8c;
-    --success-bg: #12301c;
-    --warning: #f2c35b;
-    --warning-bg: #35280a;
-    --danger: #ff8d8d;
-    --danger-bg: #3a1416;
-    --info: #8fbbff;
-    --info-bg: #14284a;
-    --muted-bg: #232b35;
-    --overlay: rgba(0, 0, 0, 0.6);
-    --shadow: rgba(0, 0, 0, 0.5);
-  }
+[data-theme="light"] {
+  --bg-canvas: #F6F8FA;
+  --bg-panel: #FFFFFF;
+  --bg-hover: #EAEEF2;
+  --border-subtle: #D0D7DE;
+  --text-primary: #1F2328;
+  --text-muted: #59636E;
+
+  --accent-emerald: #1A7F37;
+  --accent-cyan: #0969DA;
+  --accent-amber: #9A6700;
+  --accent-coral: #CF222E;
+  --accent-violet: #8250DF;
+
+  --on-solid: #FFFFFF;
+  --backdrop: rgb(31 35 40 / 0.35);
+
+  --on-alert: #FFFFFF;
+  --mix-light: #FFFFFF;
+  --shadow: rgb(31 35 40 / 0.18);
+
+  color-scheme: light;
+}
+
+/*
+ * Colours mixed from the tokens. Declared on <html>, they follow the theme because the
+ * attribute that switches it sits on the same element.
+ */
+:root {
+  --selection: color-mix(in srgb, var(--accent-cyan) 35%, transparent);
+  --input-hover-border: color-mix(in srgb, var(--text-muted) 60%, var(--border-subtle));
+  --idle: color-mix(in srgb, var(--text-muted) 70%, transparent);
+  --code-bg: color-mix(in srgb, var(--bg-canvas) 70%, var(--bg-panel));
+  --violet-soft: color-mix(in srgb, var(--accent-violet) 10%, transparent);
+  --violet-active-bg: color-mix(in srgb, var(--accent-violet) 16%, transparent);
+  --violet-pressed-bg: color-mix(in srgb, var(--accent-violet) 22%, transparent);
+  --violet-border: color-mix(in srgb, var(--accent-violet) 45%, transparent);
+  --violet-border-strong: color-mix(in srgb, var(--accent-violet) 65%, transparent);
+  --violet-tab-border: color-mix(in srgb, var(--accent-violet) 55%, var(--border-subtle));
+  --violet-chip-border: color-mix(in srgb, var(--accent-violet) 35%, var(--border-subtle));
+  --amber-dashed: color-mix(in srgb, var(--accent-amber) 60%, transparent);
+
+  /* the app's older names, kept for the screen stylesheets written before the prototype */
+  --bg: var(--bg-canvas);
+  --surface: var(--bg-panel);
+  --surface-2: var(--bg-hover);
+  --border: var(--border-subtle);
+  --text: var(--text-primary);
+  --accent: var(--accent-cyan);
+  --accent-text: var(--on-solid);
+  --focus: var(--accent-cyan);
+  --success: var(--accent-emerald);
+  --success-bg: color-mix(in srgb, var(--accent-emerald) 12%, var(--bg-panel));
+  --warning: var(--accent-amber);
+  --warning-bg: color-mix(in srgb, var(--accent-amber) 12%, var(--bg-panel));
+  --danger: var(--accent-coral);
+  --danger-bg: color-mix(in srgb, var(--accent-coral) 12%, var(--bg-panel));
+  --info: var(--accent-cyan);
+  --info-bg: color-mix(in srgb, var(--accent-cyan) 12%, var(--bg-panel));
+  --muted-bg: var(--bg-hover);
+  --overlay: var(--backdrop);
+}
+
+/*
+ * Tones. A component sets `--c` (through `.tone-*` or its own `--emerald`, `--cyan`, …
+ * modifier) and reads these shades of it. They are computed on every element so each one
+ * mixes its own `--c`.
+ */
+*,
+::before,
+::after {
+  --c-a6: color-mix(in srgb, var(--c) 6%, var(--bg-panel));
+  --c-a8: color-mix(in srgb, var(--c) 8%, transparent);
+  --c-a10: color-mix(in srgb, var(--c) 10%, transparent);
+  --c-a18: color-mix(in srgb, var(--c) 18%, transparent);
+  --c-b55: color-mix(in srgb, var(--c) 55%, transparent);
+  --c-b60: color-mix(in srgb, var(--c) 60%, transparent);
+  --c-b70: color-mix(in srgb, var(--c) 70%, transparent);
+  --c-b75: color-mix(in srgb, var(--c) 75%, transparent);
+  --c-edge: color-mix(in srgb, var(--c) 60%, var(--border-subtle));
+  --c-solid-hover: color-mix(in srgb, var(--c) 88%, var(--mix-light));
 }

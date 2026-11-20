@@ -4,7 +4,12 @@ import { useConnection } from "../app/connection";
 import type { AttentionAction } from "../api/types";
 import { useProjects } from "../app/projects";
 import { useAttentionStore, type AttentionSource, type AttentionStore, type TaggedItem } from "./attentionStore";
+import { NOTIFICATIONS_PATH } from "../app/paths";
+import { Button } from "../ui/Button";
+import { Drawer } from "../ui/Drawer";
+import { Icon } from "../ui/Icon";
 import { Modal } from "../ui/Modal";
+import { AttentionCard } from "./AttentionCard";
 
 type AttentionContextValue = Omit<AttentionStore, "watchers">;
 
@@ -38,7 +43,7 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
       {!multi && watchers}
       {children}
       <AttentionPopup />
-      <AttentionListModal />
+      <NotificationDrawer />
     </AttentionContext.Provider>
   );
 }
@@ -252,81 +257,60 @@ export function AttentionPopup() {
   );
 }
 
-export function AttentionIndicator() {
+/** The top bar's bell: how many items wait for the developer, and the way to the drawer. */
+export function NotificationBell() {
   const { waitingItems, openList } = useAttention();
   const count = waitingItems.length;
-
-  if (count === 0) return null;
-
   return (
     <button
       type="button"
-      className="attention-indicator"
+      className="topbar__icon-btn"
+      aria-haspopup="dialog"
+      aria-label={count === 0 ? "Notifications" : `Notifications, ${count} need attention`}
       onClick={openList}
-      aria-label={`Attention: ${count} item${count === 1 ? "" : "s"} waiting`}
     >
-      <span className="attention-indicator-icon" aria-hidden="true">
-        ⚠
-      </span>
-      <span className="attention-indicator-label">Attention</span>
-      <span className="attention-indicator-badge">{count}</span>
+      <Icon name="bell" />
+      {count > 0 && (
+        <span className="bell__count" aria-hidden="true">
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
-export function AttentionListModal() {
+/** The notification drawer: every item that waits, with a link to the Attention Center. */
+export function NotificationDrawer() {
   const { waitingItems, isListOpen, closeList, openItem } = useAttention();
-
-  if (!isListOpen) return null;
-
+  const navigate = useNavigate();
   return (
-    <Modal
-      open={true}
-      title={`Waiting Attention Items (${waitingItems.length})`}
+    <Drawer
+      open={isListOpen}
+      title="Notifications"
+      icon="bell"
       onClose={closeList}
+      footer={
+        <Button
+          block
+          onClick={() => {
+            closeList();
+            navigate(NOTIFICATIONS_PATH);
+          }}
+        >
+          Open Attention Center
+          <Icon name="external" />
+        </Button>
+      }
     >
-      <div className="attention-list-dialog">
-        {waitingItems.length === 0 ? (
-          <p className="muted">No open items need your attention.</p>
-        ) : (
-          <ul className="attention-items-list" aria-label="Waiting items">
-            {waitingItems.map((item) => (
-              <li key={item.uid} className="attention-item-row">
-                <div className="attention-item-info">
-                  <strong>{item.title}</strong>
-                  <div className="attention-item-badges">
-                    {item.projectName && (
-                      <span className="badge badge--neutral attention-project">{item.projectName}</span>
-                    )}
-                    {item.agent && (
-                      <span className="badge badge--info">{item.agent}</span>
-                    )}
-                    {item.task && (
-                      <span className="badge badge--info">{item.task}</span>
-                    )}
-                    <span className="badge badge--warning">{item.kind}</span>
-                  </div>
-                  {item.detail && <p className="muted attention-item-snippet">{item.detail}</p>}
-                </div>
-                <button
-                  type="button"
-                  className="button button--primary button--small"
-                  onClick={() => openItem(item)}
-                  aria-label={`Review ${item.title}`}
-                >
-                  Review
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="modal-actions">
-          <button type="button" className="button" onClick={closeList}>
-            Close
-          </button>
-        </div>
-      </div>
-    </Modal>
+      {waitingItems.length === 0 ? (
+        <p className="muted drawer__empty">All clear. Nothing needs your attention.</p>
+      ) : (
+        <ul className="att-list" aria-label="Waiting items">
+          {waitingItems.map((item) => (
+            <AttentionCard key={item.uid} item={item} onReview={openItem} />
+          ))}
+        </ul>
+      )}
+    </Drawer>
   );
 }

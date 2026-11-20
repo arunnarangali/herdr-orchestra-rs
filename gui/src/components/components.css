@@ -109,63 +109,8 @@
 }
 
 /* shared layout for screens */
-.screen-head {
-  display: flex;
-  align-items: center;
-  gap: var(--gap);
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
-}
-.screen-head h1 {
-  margin: 0;
-}
-.plain-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.5rem;
-}
-.table-wrap {
-  overflow-x: auto;
-}
-.table {
-  border-collapse: collapse;
-  width: 100%;
-}
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-}
 
-/* Attention indicator and modals */
-.attention-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: 9999px;
-  background: var(--warning-bg);
-  border: 1px solid var(--warning);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-.attention-indicator:hover {
-  filter: brightness(1.08);
-}
-.attention-indicator-badge {
-  background: var(--warning);
-  color: var(--bg);
-  border-radius: 9999px;
-  padding: 0.1rem 0.45rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-}
+/* Attention popup */
 .attention-dialog {
   display: grid;
   gap: 0.75rem;
@@ -199,119 +144,49 @@
   gap: 0.75rem;
   margin-top: 0.5rem;
 }
-.attention-list-dialog {
+/* Attention card: the notification drawer and the Attention Center */
+.att-list {
   display: grid;
-  gap: var(--gap);
-  width: min(36rem, 100%);
-}
-.attention-items-list {
+  gap: 12px;
   list-style: none;
-  padding: 0;
   margin: 0;
+  padding: 0;
+}
+.att {
   display: grid;
-  gap: 0.5rem;
-  max-height: 22rem;
-  overflow: auto;
+  gap: 8px;
+  padding: 12px;
 }
-.attention-item-row {
+.att__head {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  align-items: flex-start;
+  gap: 10px;
 }
-.attention-item-info {
-  display: grid;
-  gap: 0.2rem;
+.att__icon {
+  color: var(--c);
+  margin-top: 1px;
 }
-.attention-item-badges {
+.att__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.att__meta {
   display: flex;
-  gap: 0.35rem;
+  gap: 6px;
   flex-wrap: wrap;
 }
-.attention-item-snippet {
-  margin: 0.2rem 0 0;
-  font-size: 0.85rem;
-}
-
-
-/* ---- project bar: the open projects, one tab each ------------------------------------------ */
-.project-bar {
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-  padding: 0.3rem var(--gap) 0;
-}
-.project-tabs {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  gap: 0.25rem;
-  overflow-x: auto;
-  align-items: flex-end;
-}
-.project-tab {
-  display: flex;
-  align-items: stretch;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-bottom: 0;
-  border-radius: var(--radius) var(--radius) 0 0;
-  flex: 0 0 auto;
-}
-.project-tab--active {
-  border-top: 3px solid var(--accent);
-  font-weight: 650;
-  background: var(--bg);
-  margin-bottom: -1px;
-  padding-bottom: 1px;
-}
-.project-tab-open,
-.project-tab-close {
-  font: inherit;
-  color: var(--text);
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-.project-tab-open {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.4rem 0.35rem 0.7rem;
-  max-width: 16rem;
-}
-.project-tab-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-tab-close {
-  padding: 0 0.55rem;
+.att__body {
+  font: 400 12px/1.5 var(--font-mono);
   color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
-.project-tab-close:hover {
-  color: var(--danger);
+.att__actions {
+  display: flex;
+  gap: 8px;
 }
-.project-tab-add {
-  margin-left: 0.25rem;
-  padding-bottom: 0.2rem;
-}
-.project-tab-add .button {
-  padding: 0.15rem 0.6rem;
-  text-decoration: none;
-  display: inline-block;
-}
-.current-project {
-  font-weight: 650;
-  max-width: 14rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-problem {
-  max-width: 40rem;
+.att__actions .btn {
+  flex: 1;
 }
