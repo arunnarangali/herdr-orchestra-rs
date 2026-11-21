@@ -14,7 +14,7 @@ export function CopyCommand({ command }: { command: string }) {
   return (
     <div className="ob-command">
       <code>{command}</code>
-      <button type="button" className="button" onClick={() => void copy()} aria-label={`Copy ${command}`}>
+      <button type="button" className="btn btn--sm" onClick={() => void copy()} aria-label={`Copy ${command}`}>
         {state === "copied" ? "Copied" : "Copy"}
       </button>
       {state === "failed" && <span className="error-text"> Could not copy: select the text and copy it.</span>}

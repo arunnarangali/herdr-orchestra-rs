@@ -1,0 +1,334 @@
+/* Screen 11: Help & Reference. Colours come from the theme's tokens; tones through `--c`. */
+
+.hp.screen {
+  max-width: none;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.hp__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.hp__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  color: var(--accent-violet);
+}
+.hp__icon .icon {
+  width: 38px;
+  height: 38px;
+  stroke-width: 1.5;
+}
+.hp__title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+}
+.hp__sub {
+  font: 12.5px var(--font-mono);
+  color: var(--text-muted);
+}
+.hp__search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  color: var(--text-muted);
+}
+.hp__search:focus-within {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 1px var(--accent-cyan);
+}
+.hp__q {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  font-size: 14px;
+  background: transparent;
+  border: 0;
+}
+.hp__q:focus-visible {
+  outline: none;
+}
+.hp__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.hp__col {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.hp__none {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 20px;
+}
+
+.hsec {
+  overflow: hidden;
+}
+.hsec__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hsec__icon {
+  flex: none;
+  color: var(--text-muted);
+}
+.hsec__icon .icon {
+  width: 26px;
+  height: 26px;
+  stroke-width: 1.6;
+}
+.hsec__title {
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.hsec__sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.hsec.card--tone .hsec__title,
+.hsec.card--tone .hsec__icon {
+  color: var(--c);
+}
+.hsec__body {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+/* accordion groups */
+.grp {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+}
+.grp__btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+}
+.grp__btn:hover {
+  background: var(--bg-hover);
+}
+.grp__txt {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.grp__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.grp__sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.grp__chev {
+  color: var(--text-muted);
+}
+.grp__btn[aria-expanded="false"] .grp__chev {
+  rotate: -90deg;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .grp__chev {
+    transition: rotate 0.15s;
+  }
+}
+.grp__panel {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.grp__panel[hidden] {
+  display: none;
+}
+.cli {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cli pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 10px;
+  overflow-x: auto;
+  white-space: normal;
+  font: 12.5px/1.5 var(--font-mono);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.cli code {
+  font-size: inherit;
+}
+.cli .cmd {
+  color: var(--accent-cyan);
+  white-space: pre;
+}
+.cli .cm {
+  margin-left: 12px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.copybtn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.copybtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.copybtn[data-copied="true"] {
+  color: var(--accent-emerald);
+}
+
+/* tables */
+.hp .table th,
+.hp .table td {
+  padding: 7px 10px;
+}
+.hp .table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+.codebox {
+  --c: var(--accent-cyan);
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  height: 28px;
+  padding: 0 8px;
+  font: 700 13px var(--font-mono);
+  color: var(--c);
+  background: var(--bg-canvas);
+  border: 1.5px solid var(--c);
+  border-radius: var(--radius-sm);
+}
+.codebox--0 { --c: var(--accent-emerald); }
+.codebox--1,
+.codebox--4,
+.codebox--6 { --c: var(--accent-coral); }
+.codebox--2,
+.codebox--3,
+.codebox--7 { --c: var(--accent-amber); }
+.codebox--5 { --c: var(--accent-violet); }
+.meaning {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.meaning strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.envvar {
+  display: inline-block;
+  padding: 3px 10px;
+  font: 12.5px var(--font-mono);
+  color: var(--accent-violet);
+  background: var(--violet-soft);
+  border: 1px solid var(--violet-chip-border);
+  border-radius: var(--radius-sm);
+}
+.envval {
+  font: 13px var(--font-mono);
+}
+.hp .table td.act {
+  width: 1%;
+  text-align: right;
+}
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.keys__part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.keys kbd {
+  padding: 3px 9px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+.keys span span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.act-title {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.act-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.guar {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.guar li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12.5px;
+}
+.guar .icon {
+  color: var(--accent-emerald);
+  width: 22px;
+  height: 22px;
+}
+
+@media (max-width: 1100px) {
+  .hp__grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .hp__col--wide {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 640px) {
+  .hp__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cli .cm {
+    display: none;
+  }
+}
+
+/* The shared `.card--tone` resets `--c` after the tone helpers; restate the tone here. */
+.hsec.card--tone.tone-emerald {
+  --c: var(--accent-emerald);
+}
