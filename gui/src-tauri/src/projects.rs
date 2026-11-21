@@ -161,6 +161,68 @@ impl ProjectStore {
         Ok(f)
     }
 
+    /// Update a project's folder: old path is replaced with new path across projects, active,
+    /// and open lists. Refuses unknown old path, non-folder, or non-git repository.
+    pub fn update_folder(&self, old_path: &str, new_path: &str) -> Result<String, String> {
+        let old_canonical = canonical(old_path);
+        let mut f = self.load().value;
+        if !f.projects.contains(&old_canonical) {
+            return Err(format!("{old_path} is not in the project list"));
+        }
+        store::check_value(new_path)?;
+        let p = Path::new(new_path);
+        if !p.is_dir() {
+            return Err(format!("{new_path} is not a folder"));
+        }
+        if !p.join(".git").exists() {
+            return Err(format!(
+                "{new_path} is not a git repository: choose the folder that contains .git (run `git init` there first if it is new)"
+            ));
+        }
+        let resolved = std::fs::canonicalize(p)
+            .map_err(|e| format!("cannot open {new_path}: {e}"))?
+            .display()
+            .to_string();
+
+        if resolved == old_canonical {
+            return Ok(resolved);
+        }
+
+        let mut new_projects = Vec::new();
+        for proj in &f.projects {
+            if proj == &old_canonical {
+                if !new_projects.contains(&resolved) {
+                    new_projects.push(resolved.clone());
+                }
+            } else if !new_projects.contains(proj) {
+                new_projects.push(proj.clone());
+            }
+        }
+        if !new_projects.contains(&resolved) {
+            new_projects.push(resolved.clone());
+        }
+        f.projects = new_projects;
+
+        if f.active.as_deref() == Some(&old_canonical) {
+            f.active = Some(resolved.clone());
+        }
+
+        let mut new_open = Vec::new();
+        for op in &f.open {
+            if op == &old_canonical {
+                if !new_open.contains(&resolved) {
+                    new_open.push(resolved.clone());
+                }
+            } else if !new_open.contains(op) {
+                new_open.push(op.clone());
+            }
+        }
+        f.open = new_open;
+
+        self.save(&f)?;
+        Ok(resolved)
+    }
+
     /// Make `path` the active project. It must be in the list and still exist.
     pub fn set_active(&self, path: &str) -> Result<ProjectFile, String> {
         let path = &canonical(path);
@@ -545,5 +607,51 @@ mod tests {
         let wt = scratch("wt");
         std::fs::write(wt.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
         assert_eq!(inspect(&wt).branch.as_deref(), Some("wt-branch"));
+    }
+
+    #[test]
+    fn update_folder_keeps_consistency_and_validates_repo() {
+        let s = store("update-folder-test");
+        let r1 = repo("uf-r1", "main");
+        let r2 = repo("uf-r2", "main");
+        let r3 = repo("uf-r3", "main");
+        let (r1_s, r2_s, r3_s) = (
+            r1.display().to_string(),
+            r2.display().to_string(),
+            r3.display().to_string(),
+        );
+
+        s.add(&r1_s).unwrap();
+        s.add(&r2_s).unwrap();
+        s.set_active(&r1_s).unwrap();
+        s.set_open(&r1_s, true).unwrap();
+        s.set_open(&r2_s, true).unwrap();
+
+        // AC4: Unknown old path is refused
+        let err_unknown = s.update_folder("/nonexistent/repo", &r3_s).unwrap_err();
+        assert!(err_unknown.contains("is not in the project list"));
+
+        // AC4: Non-folder is refused
+        let err_not_folder = s.update_folder(&r1_s, "/nonexistent/new_repo").unwrap_err();
+        assert!(err_not_folder.contains("is not a folder"));
+
+        // AC4: Folder without .git is refused
+        let not_git = scratch("not-git-dir");
+        let err_not_git = s.update_folder(&r1_s, &not_git.display().to_string()).unwrap_err();
+        assert!(err_not_git.contains("is not a git repository"));
+
+        // Updating r1 to r3 updates projects, active, and open consistently
+        let updated = s.update_folder(&r1_s, &r3_s).unwrap();
+        assert_eq!(updated, r3_s);
+        let list = s.load().value;
+        assert_eq!(list.projects, vec![r3_s.clone(), r2_s.clone()]);
+        assert_eq!(list.active, Some(r3_s.clone()));
+        assert_eq!(list.open, vec![r3_s.clone(), r2_s.clone()]);
+
+        // Updating r2 to r3 replaces r2 without duplicating r3
+        s.update_folder(&r2_s, &r3_s).unwrap();
+        let list2 = s.load().value;
+        assert_eq!(list2.projects, vec![r3_s.clone()]);
+        assert_eq!(list2.open, vec![r3_s.clone()]);
     }
 }
