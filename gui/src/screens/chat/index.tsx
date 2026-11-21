@@ -92,7 +92,16 @@ export function ChatScreen() {
 
             {chat.state === "ready" && (
               <ol className="chat-log" role="log" aria-label="Conversation with the lead" aria-live="polite" tabIndex={0}>
-                {count === 0 && (
+                {count === 0 && chat.noRun && (
+                  <li className="chat-empty chat-empty--calm">
+                    <strong>No run in this project yet.</strong>
+                    <span>
+                      That is normal for a new project. Once the lead is running here it can plan one: send it a{" "}
+                      <strong>New feature request</strong>.
+                    </span>
+                  </li>
+                )}
+                {count === 0 && !chat.noRun && (
                   <li className="chat-empty muted">
                     Nothing here yet. Write to the lead below, or send a <strong>new feature request</strong> to get a plan.
                   </li>

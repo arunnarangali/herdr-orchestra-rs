@@ -149,21 +149,21 @@ describe("Reports screen", () => {
     expect(screen.getByText(/Run Report:/)).toHaveTextContent("RUNNING");
   });
 
-  it("no run yet: an error that says how to create one", async () => {
+  it("no run yet: a calm note in plain words", async () => {
     server.respond("GET", "/report", 404, errorBody("no_run", "no run exists"));
     server.respond("GET", "/plan", 404, errorBody("no_run", "no run exists"));
     server.respond("GET", "/tasks", 404, errorBody("no_run", "no run exists"));
     renderApp({ route: "/reports", initial: server });
     expect(await screen.findByText("This project has no run yet")).toBeInTheDocument();
     expect(screen.getByText("No report yet")).toBeInTheDocument();
-    expect(screen.getByText(/orch sync/)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("orch sync");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument(); // a normal state, not an error
   });
 
   it("a run with no milestones shows the empty state", async () => {
     show({ ...finishedReport(), tasks: [], models: [] });
     expect(await screen.findByText(/This run has no milestones/)).toBeInTheDocument();
-    expect(screen.getByText(/orch sync/)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("orch sync");
   });
 
   it("a server that is down shows an error with a retry", async () => {

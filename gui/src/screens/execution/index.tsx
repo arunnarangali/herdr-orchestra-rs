@@ -86,7 +86,7 @@ export function ExecutionScreen() {
       {tasks.state === "error" && tasks.error?.isNoRun && (
         <div className="panel" role="status">
           <p className="panel-title">No run in this project yet</p>
-          <p className="muted">Write .orchestrate/plan.md and run `orch sync`; this page fills in by itself.</p>
+          <p className="muted">Plan a feature with the lead in Chat; this page fills in by itself once the run starts.</p>
         </div>
       )}
       {tasks.state === "error" && tasks.error && !tasks.error.isNoRun && <ErrorPanel error={tasks.error} onRetry={tasks.reload} />}

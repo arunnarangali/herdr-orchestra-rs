@@ -67,8 +67,7 @@ export function OverviewScreen() {
           <Icon name="rocket" size={32} />
           <p className="panel-title">No run in this project yet</p>
           <p className="muted">
-            Plan a feature with the lead, or write <code>.orchestrate/plan.md</code> and run <code>orch sync</code>. This
-            page fills in by itself once the run exists.
+            Plan a feature with the lead. This page fills in by itself once the run exists.
           </p>
           <div className="ov-norun__actions">
             <Link className="btn btn--emerald btn--solid" to="/chat">

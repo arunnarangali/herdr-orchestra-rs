@@ -710,7 +710,7 @@ export function WorkflowsScreen() {
       <h1 id="screen-title" className="visually-hidden">Workflows</h1>
       <ResourceView
         resource={resource}
-        empty="The plan has no milestones. Write them in .orchestrate/plan.md and run `orch sync`."
+        empty="The plan has no milestones yet. Ask the lead to plan them in Chat."
       >
         {renderContent}
       </ResourceView>

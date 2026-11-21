@@ -1,6 +1,7 @@
 /* Screen 01 — Chat / Home. Colours come only from the theme variables. */
 .screen.chat-home {
-  max-width: none;
+  max-width: 100%;
+  min-width: 0;
   height: 100%;
   min-height: 0;
 }
@@ -647,4 +648,15 @@
   .agent__icon {
     display: none;
   }
+}
+
+.chat-empty--calm {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
 }

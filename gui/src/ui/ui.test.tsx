@@ -132,13 +132,22 @@ describe("useResource and ResourceView", () => {
     expect(await screen.findByText("No milestones yet.")).toBeInTheDocument();
   });
 
-  it("error with what to do, and a retry that works", async () => {
-    const user = userEvent.setup();
+  it("no run yet is a calm state: no error styling, no terminal command, no retry", async () => {
     server.respond("GET", "/tasks", 404, errorBody("no_run", "no run exists"));
     show();
+    const note = await screen.findByText("No run in this project yet");
+    expect(note.closest(".panel")).not.toHaveClass("panel--error");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("orch sync");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("error with what to do, and a retry that works", async () => {
+    const user = userEvent.setup();
+    server.respond("GET", "/tasks", 500, errorBody("internal", "the store is locked"));
+    show();
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("This project has no run yet");
-    expect(alert).toHaveTextContent("orch sync");
+    expect(alert).toHaveTextContent("the store is locked");
 
     server.respond("GET", "/tasks", 200, samples.tasks);
     await user.click(screen.getByRole("button", { name: "Try again" }));

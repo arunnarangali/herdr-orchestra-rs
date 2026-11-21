@@ -272,7 +272,7 @@ export function SettingsScreen() {
       {noRun && (
         <Card className="set-note" role="status">
           <p className="panel-title">No run in this project yet</p>
-          <p className="muted">The run's settings appear here once `.orchestrate/plan.md` exists and you have run `orch sync`. The app settings work already.</p>
+          <p className="muted">The run's settings appear here once the lead has planned a run. The app settings work already.</p>
         </Card>
       )}
       {plan.state === "error" && plan.error && !noRun && <ErrorPanel error={plan.error} onRetry={plan.reload} />}
@@ -342,7 +342,7 @@ export function SettingsScreen() {
               <Icon name="sync" size={14} />
               Reset to Defaults
             </Button>
-            <span className="muted spanel__hint">App settings save as you change them. Run settings change in plan.md, then `orch sync`.</span>
+            <span className="muted spanel__hint">App settings save as you change them. Run settings come from the plan and are read-only here.</span>
             <Button tone="emerald" solid unavailable={`${NOT_AVAILABLE}: the app does not write config.toml`}>
               Save to config.toml
             </Button>

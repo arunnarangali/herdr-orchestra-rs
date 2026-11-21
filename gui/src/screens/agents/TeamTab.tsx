@@ -23,7 +23,7 @@ export function TeamTab({ data, status, plan, onOpenOutput }: TeamTabProps) {
       <Card as="section" className="sect" aria-labelledby="ag-h-roles">
         <CardHead title={<span id="ag-h-roles">Role Assignments ({team.length})</span>} icon={<Icon name="robot" />} />
         {team.length === 0 ? (
-          <p className="muted sect__empty">There is no run in this project yet, so there is no team. It is set when you run `orch sync`.</p>
+          <p className="muted sect__empty">There is no run in this project yet, so there is no team. It is set when the lead plans a run.</p>
         ) : (
           <Table caption="Team">
             <thead>

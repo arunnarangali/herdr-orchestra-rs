@@ -127,21 +127,22 @@ describe("Workflows screen", () => {
     expect(screen.getAllByRole("listitem").filter((li) => li.hasAttribute("data-milestone"))).toHaveLength(12);
   });
 
-  it("an empty plan says how to create one", async () => {
+  it("an empty plan says what to do in plain words", async () => {
     show({ ...oneMilestonePlan(), milestones: [] });
     expect(
       await screen.findByText(/The plan has no milestones/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/orch sync/)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("orch sync");
   });
 
-  it("no run yet: an error that says what to do", async () => {
+  it("no run yet: a calm note, not an error", async () => {
     server.respond("GET", "/plan", 404, errorBody("no_run", "no run exists"));
     server.respond("GET", "/tasks", 404, errorBody("no_run", "no run exists"));
     renderApp({ route: "/workflows", initial: server });
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("This project has no run yet");
-    expect(alert).toHaveTextContent("orch sync");
+    expect(await screen.findByText("No run in this project yet")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(document.querySelector(".panel--error")).toBeNull();
+    expect(document.body).not.toHaveTextContent("orch sync");
   });
 
   it("a server that is down shows an error with a retry", async () => {
