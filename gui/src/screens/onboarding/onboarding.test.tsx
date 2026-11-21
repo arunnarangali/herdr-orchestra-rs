@@ -15,7 +15,10 @@ let server: FakeServer;
 beforeEach(async () => {
   server = await startFakeServer();
   server.respond("GET", "/agents", 200, {
-    agents: [kind({ kind: "claude", display_name: "Claude Code" }), kind({ kind: "codex", display_name: "Codex", installed: false, launch: "codex" })],
+    agents: [
+      kind({ kind: "claude", display_name: "Claude Code", skills: { status: "current", problems: [] } }),
+      kind({ kind: "codex", display_name: "Codex", installed: false, launch: "codex" }),
+    ],
     team: [],
   });
 });
@@ -34,18 +37,19 @@ const step = () => screen.getByRole("article");
 const indicator = () => screen.getByRole("navigation", { name: "Setup steps" });
 
 describe("first launch", () => {
-  it("opens the flow with a step indicator and all five steps", () => {
+  it("opens the flow with a step indicator and all six steps", () => {
     show({ shell: fakeShell() });
     const items = within(indicator()).getAllByRole("button");
     expect(items.map((b) => b.textContent)).toEqual([
       expect.stringContaining("1. orch"),
       expect.stringContaining("2. Herdr"),
       expect.stringContaining("3. Agents"),
-      expect.stringContaining("4. Project"),
-      expect.stringContaining("5. Start"),
+      expect.stringContaining("4. Skills"),
+      expect.stringContaining("5. Project"),
+      expect.stringContaining("6. Start"),
     ]);
     expect(items[0]).toHaveAttribute("aria-current", "step");
-    expect(screen.getByText("Step 1 of 5")).toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 6")).toBeInTheDocument();
   });
 
   it("is where the app lands when no project is chosen", async () => {
@@ -73,6 +77,9 @@ describe("everything missing", () => {
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(step()).toHaveTextContent("Choose a project folder");
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(step()).toHaveTextContent("The skills are checked by the orch server");
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(step()).toHaveTextContent("No project is chosen yet");
@@ -105,6 +112,28 @@ describe("everything missing", () => {
 });
 
 describe("everything present", () => {
+  it("skills that are outdated need action, with the command that installs them", async () => {
+    server.respond("GET", "/agents", 200, {
+      agents: [kind({ kind: "codex", display_name: "Codex", skills: { status: "missing", problems: ["~/.codex/skills"] } })],
+      team: [],
+    });
+    const user = userEvent.setup();
+    show({ shell: fakeShell(), initial: server });
+    await user.click(screen.getByRole("button", { name: /4\. Skills/ }));
+    expect(await screen.findByText(/Skills missing for Codex \(~\/\.codex\/skills\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy orch agents sync" })).toBeInTheDocument();
+    expect(within(indicator()).getByRole("button", { name: /4\. Skills/ })).toHaveTextContent("needs attention");
+  });
+
+  it("finishing offers the way to Chat / Home", async () => {
+    const user = userEvent.setup();
+    show({ shell: fakeShell(), initial: server });
+    await user.click(screen.getByRole("button", { name: /6\. Start/ }));
+    await user.click(screen.getByRole("button", { name: "Finish setup" }));
+    await user.click(screen.getByRole("link", { name: /Go to Chat \/ Home/ }));
+    expect(await screen.findByRole("heading", { name: "Chat" })).toBeInTheDocument();
+  });
+
   it("shows what was found at each step and walks to the end", async () => {
     const user = userEvent.setup();
     show({ shell: fakeShell({ findOrch: async () => "/usr/bin/orch", findHerdr: async () => "/usr/bin/herdr" }), initial: server });
@@ -115,6 +144,8 @@ describe("everything present", () => {
     expect(await screen.findByText(/1 of 2 agents found: Claude Code\. Missing: Codex \(optional\)/)).toBeInTheDocument();
     const missing = screen.getByRole("list", { name: "Missing agents" });
     expect(missing).toHaveTextContent("Codex is not installed");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText(/orch skills are installed and current for Claude Code/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText(/Project: \/home\/me\/project/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
@@ -135,7 +166,7 @@ describe("everything present", () => {
 });
 
 describe("choosing a project", () => {
-  const goToProject = async (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole("button", { name: /4\. Project/ }));
+  const goToProject = async (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole("button", { name: /5\. Project/ }));
 
   it("a folder that is not a git repository is refused with what to do, and no server is started", async () => {
     const user = userEvent.setup();
@@ -147,7 +178,7 @@ describe("choosing a project", () => {
     expect(await screen.findByText(/\/work\/plain is not a git repository/)).toBeInTheDocument();
     expect(step()).toHaveTextContent("git init");
     expect(startServer).not.toHaveBeenCalled();
-    expect(within(indicator()).getByRole("button", { name: /4\. Project/ })).toHaveTextContent("needs attention");
+    expect(within(indicator()).getByRole("button", { name: /5\. Project/ })).toHaveTextContent("needs attention");
   });
 
   it("a git repository starts the server, connects, and the agents step then runs", async () => {
@@ -206,7 +237,7 @@ describe("skipping, finishing and reopening", () => {
   it("finishing is remembered: a completed first run is not shown again", async () => {
     const user = userEvent.setup();
     const first = show({ shell: fakeShell() });
-    await user.click(screen.getByRole("button", { name: /5\. Start/ }));
+    await user.click(screen.getByRole("button", { name: /6\. Start/ }));
     await user.click(screen.getByRole("button", { name: "Finish setup" }));
     expect(screen.getByText("Setup is complete.")).toBeInTheDocument();
     expect(window.localStorage.getItem("orch.onboarding")).toBe("done");

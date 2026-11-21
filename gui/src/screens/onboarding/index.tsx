@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useConnection } from "../../app/connection";
 import { useProjects } from "../../app/projects";
 import type { AgentsResponse } from "../../api/types";
 import { CopyCommand } from "./CopyCommand";
 import { checkGitRepository } from "./git";
 import { readProgress, writeProgress, type Progress } from "./progress";
-import { agentsResult, checking, finalCommands, herdrResult, orchResult, type StepResult } from "./steps";
+import { Badge } from "../../ui/Badge";
+import { Button, buttonClass, type Tone } from "../../ui/Button";
+import { Card } from "../../ui/Card";
+import { Icon, type IconName } from "../../ui/Icon";
+import { agentsResult, checking, finalCommands, herdrResult, orchResult, skillsResult, type StepResult } from "./steps";
 import "./onboarding.css";
 
 const STEPS = [
-  { id: "orch", label: "orch" },
-  { id: "herdr", label: "Herdr" },
-  { id: "agents", label: "Agents" },
-  { id: "project", label: "Project" },
-  { id: "start", label: "Start" },
-] as const;
+  { id: "orch", label: "orch", icon: "keyboard", desc: "Check that the orch CLI is installed and available in your PATH." },
+  { id: "herdr", label: "Herdr", icon: "pulse", desc: "Check that the Herdr terminal runtime is installed." },
+  { id: "agents", label: "Agents", icon: "robot", desc: "Detect the coding-agent CLIs and their login state." },
+  { id: "skills", label: "Skills", icon: "cube", desc: "Make sure the orch skill wrappers are installed for every agent." },
+  { id: "project", label: "Project", icon: "branch", desc: "Choose your project: an existing git repository." },
+  { id: "start", label: "Start", icon: "rocket", desc: "Prepare the team and start the orchestration lead." },
+] as const satisfies readonly { id: string; label: string; icon: IconName; desc: string }[];
 type StepId = (typeof STEPS)[number]["id"];
 
 const RESUME_KEY = "orch.onboarding.step";
@@ -28,6 +33,8 @@ function takeResumeStep(): number {
 }
 
 const STATE_WORD = { checking: "checking", ok: "done", problem: "needs attention", unknown: "not checked" } as const;
+const STATE_TONE: Record<StepResult["state"], Tone> = { checking: "cyan", ok: "emerald", problem: "amber", unknown: "neutral" };
+const STATE_HEAD: Record<StepResult["state"], string> = { checking: "Checking…", ok: "Passed", problem: "Action Needed", unknown: "Not checked" };
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -40,19 +47,28 @@ export function OnboardingScreen() {
 
   if (!open) {
     return (
-      <section className="screen onboarding" aria-labelledby="screen-title">
-        <h1 id="screen-title">Getting started</h1>
-        <div className="panel ob-card">
-          <p className="panel-title">{progress === "done" ? "Setup is complete." : "Setup was skipped."}</p>
-          <p className="muted">
-            {progress === "done"
-              ? "You will not be walked through it again. You can run the checks any time."
-              : "You can run the guided setup whenever you like; it is also in the Help menu."}
-          </p>
-          <button type="button" className="button button--primary" onClick={() => setOpen(true)}>
-            {progress === "done" ? "Run the checks again" : "Start the guided setup"}
-          </button>
-        </div>
+      <section className="screen ob" aria-labelledby="screen-title">
+        <Head />
+        <Card tone={progress === "done" ? "emerald" : undefined} className="ob__done">
+          <Icon name={progress === "done" ? "check" : "rocket"} size={30} />
+          <div className="ob__done-text">
+            <p className="panel-title">{progress === "done" ? "Setup is complete." : "Setup was skipped."}</p>
+            <p className="muted">
+              {progress === "done"
+                ? "You will not be walked through it again. You can run the checks any time."
+                : "You can run the guided setup whenever you like; Onboarding stays in the sidebar."}
+            </p>
+          </div>
+          <div className="ob__done-actions">
+            <Button tone={progress === "done" ? undefined : "violet"} onClick={() => setOpen(true)}>
+              {progress === "done" ? "Run the checks again" : "Start the guided setup"}
+            </Button>
+            <Link className={buttonClass({ tone: "emerald", solid: true })} to="/chat">
+              <Icon name="chat" size={14} />
+              Go to Chat / Home
+            </Link>
+          </div>
+        </Card>
       </section>
     );
   }
@@ -73,13 +89,30 @@ export function OnboardingScreen() {
   );
 }
 
+function Head({ children }: { children?: React.ReactNode }) {
+  return (
+    <header className="ob__head">
+      <span className="ob__icon">
+        <Icon name="rocket" />
+      </span>
+      <div className="ob__who">
+        <h1 id="screen-title" className="ob__title">
+          Getting started
+        </h1>
+        <p className="ob__sub">Workspace preflight &amp; environment check. Nothing is installed automatically: verify your local toolchain below.</p>
+      </div>
+      {children}
+    </header>
+  );
+}
+
 function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }) {
   const { shell, health, client, kind, connect, recheck } = useConnection();
   const { multi, openFolder } = useProjects();
   const navigate = useNavigate();
   const [index, setIndex] = useState(takeResumeStep);
   const heading = useRef<HTMLHeadingElement>(null);
-  const [nonce, setNonce] = useState({ orch: 0, herdr: 0, agents: 0 });
+  const [nonce, setNonce] = useState({ orch: 0, herdr: 0, agents: 0, skills: 0 });
   const rerun = (id: keyof typeof nonce) => setNonce((n) => ({ ...n, [id]: n[id] + 1 }));
 
   const [orch, setOrch] = useState<{ path: string | null; error: string | null } | null>(null);
@@ -139,12 +172,13 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
       (e: unknown) => !abort.signal.aborted && setAgents({ data: null, error: messageOf(e) }),
     );
     return () => abort.abort();
-  }, [client, connected, nonce.agents]);
+  }, [client, connected, nonce.agents, nonce.skills]);
 
   const results: Record<StepId, StepResult> = {
     orch: shell && !orch ? checking("Looking for orch…") : orchResult(orch?.path ?? null, orch?.error ?? null, health, shell !== null),
     herdr: shell && !herdr ? checking("Looking for Herdr…") : herdrResult(herdr?.path ?? null, herdr?.error ?? null, shell !== null),
     agents: agentsResult(agents?.data ?? null, connected, agents?.error ?? null),
+    skills: skillsResult(agents?.data ?? null, connected, agents?.error ?? null),
     project: projectResult(),
     start: { state: "ok", found: "", next: "", commands: [] },
   };
@@ -215,122 +249,156 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
   const attention = STEPS.filter((s) => s.id !== "start" && results[s.id].state === "problem");
   const last = index === STEPS.length - 1;
 
+  const checks = STEPS.filter((s) => s.id !== "start");
+  const passed = checks.filter((s) => results[s.id].state === "ok").length;
+  const rerunAll = () => {
+    setNonce((n) => ({ orch: n.orch + 1, herdr: n.herdr + 1, agents: n.agents + 1, skills: n.skills + 1 }));
+    recheck();
+  };
+
   return (
-    <section className="screen onboarding" aria-labelledby="screen-title">
-      <h1 id="screen-title">Getting started</h1>
-      <nav aria-label="Setup steps">
-        <ol className="ob-indicator">
-          {STEPS.map((s, i) => (
-            <li key={s.id}>
-              <button
-                type="button"
-                className="ob-step-btn"
-                aria-current={i === index ? "step" : undefined}
-                onClick={() => setIndex(i)}
-              >
-                <span>
-                  {i + 1}. {s.label}
-                </span>
-                <span className={`badge badge--${results[s.id].state === "ok" ? "success" : results[s.id].state === "problem" ? "warning" : "muted"}`}>
-                  {s.id === "start" ? "last" : STATE_WORD[results[s.id].state]}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ol>
-      </nav>
-      <p className="muted" role="status">
-        Step {index + 1} of {STEPS.length}
-      </p>
+    <section className="screen ob" aria-labelledby="screen-title">
+      <Head>
+        <div className="ob__head-actions">
+          <Button onClick={rerunAll}>
+            <Icon name="sync" size={14} />
+            Re-run All Checks
+          </Button>
+        </div>
+      </Head>
 
-      <article className="panel ob-card" aria-labelledby="ob-step-title">
-        <h2 id="ob-step-title" className="panel-title" tabIndex={-1} ref={heading}>
-          {index + 1}. {titleOf(step.id)}
-        </h2>
-
-        {last ? (
-          <>
-            {attention.length > 0 ? (
-              <p className="ob-msg" role="note">
-                Still open: {attention.map((s) => s.label).join(", ")}. You can read on, and come back to those steps.
-              </p>
-            ) : (
-              <p>Everything checked is in place.</p>
-            )}
-            <ol className="ob-list">
-              <li>
-                Prepare the team and open the panes in Herdr (the lead builds a team from what is installed):
-                {finalCommands(firstAgent).map((c) => (
-                  <CopyCommand key={c} command={c} />
-                ))}
-              </li>
-              <li>Open a lead pane in Herdr (any installed agent) and describe the feature to the lead.</li>
-              <li>Read the plan the lead writes: the Overview and Execution screens show it as it runs.</li>
-              <li>Say <strong>go</strong>. The event manager runs the milestones and wakes the lead when you are needed.</li>
-            </ol>
-            <p className="muted">The app only shows these commands; it never runs them or installs anything.</p>
-          </>
-        ) : (
-          <>
-            <p className="ob-found" role="status">
-              <span className={`badge badge--${r.state === "ok" ? "success" : r.state === "problem" ? "warning" : "muted"}`}>
-                {STATE_WORD[r.state]}
-              </span>{" "}
-              {r.found}
-            </p>
-            {r.next && <p>{r.next}</p>}
-            {r.commands.map((c) => (
-              <CopyCommand key={c} command={c} />
-            ))}
-            {step.id === "agents" && agents?.data && agents.data.agents.some((a) => !a.installed) && (
-              <ul className="ob-list" aria-label="Missing agents">
-                {agents.data.agents
-                  .filter((a) => !a.installed)
-                  .map((a) => (
-                    <li key={a.kind}>
-                      {a.display_name ?? a.kind} is not installed; to use it, install it so <code>{a.launch}</code> works in a terminal.
-                    </li>
-                  ))}
-              </ul>
-            )}
-            {step.id === "project" && shell && (
-              <p>
-                <button type="button" className="button button--primary" disabled={busy} onClick={() => void choose()}>
-                  {busy ? "Starting…" : kind === "unconfigured" ? "Choose your git repository…" : "Choose another repository…"}
-                </button>
-              </p>
-            )}
-          </>
-        )}
-
-        <div className="ob-actions">
-          {!last && step.id !== "start" && (
-            <button
-              type="button"
-              className="button"
-              onClick={() => (step.id === "project" ? recheck() : rerun(step.id as keyof typeof nonce))}
-            >
-              Check again
-            </button>
-          )}
-          <span className="ob-spacer" />
-          <button type="button" className="button" onClick={onSkip}>
-            Skip setup
-          </button>
-          <button type="button" className="button" disabled={index === 0} onClick={() => setIndex(index - 1)}>
+      <Card as="section" className="ob__bar" aria-label="Progress">
+        <div className="ob__progress">
+          <strong>
+            {passed} of {checks.length} checks passed
+          </strong>
+          <div className="ob__track" role="progressbar" aria-label="Preflight progress" aria-valuemin={0} aria-valuemax={checks.length} aria-valuenow={passed}>
+            <i style={{ width: `${(passed / checks.length) * 100}%` }} />
+          </div>
+          <span className="muted" role="status">
+            Step {index + 1} of {STEPS.length}
+          </span>
+        </div>
+        <div className="ob__nav">
+          <Button disabled={index === 0} onClick={() => setIndex(index - 1)}>
             Back
-          </button>
+          </Button>
+          <Button onClick={onSkip}>Skip setup</Button>
           {last ? (
-            <button type="button" className="button button--primary" onClick={onFinish}>
+            <Button tone="emerald" solid onClick={onFinish}>
               Finish setup
-            </button>
+            </Button>
           ) : (
-            <button type="button" className="button button--primary" onClick={() => setIndex(index + 1)}>
+            <Button tone="violet" onClick={() => setIndex(index + 1)}>
               Next
-            </button>
+            </Button>
           )}
         </div>
-      </article>
+      </Card>
+
+      <div className="ob__grid">
+        <nav aria-label="Setup steps">
+          <ol className="steps">
+            {STEPS.map((s, i) => {
+              const st = results[s.id].state;
+              const tone = s.id === "start" ? "violet" : STATE_TONE[st];
+              return (
+                <li key={s.id} className={`step tone-${tone}${i === index ? " step--on" : ""}`}>
+                  <span className="step__no" aria-hidden="true">
+                    {i + 1}
+                  </span>
+                  <Card className="step__card">
+                    <span className="step__icon">
+                      <Icon name={s.icon} />
+                    </span>
+                    <div className="step__main">
+                      <button type="button" className="ob-step-btn" aria-current={i === index ? "step" : undefined} onClick={() => setIndex(i)}>
+                        <span>
+                          {i + 1}. {s.label}
+                        </span>
+                        <Badge tone={tone}>{s.id === "start" ? "last" : STATE_WORD[st]}</Badge>
+                      </button>
+                      <p className="step__desc">{s.desc}</p>
+                    </div>
+                    {s.id !== "start" && (
+                      <p className="step__state">
+                        <strong>{STATE_HEAD[st]}</strong>
+                      </p>
+                    )}
+                  </Card>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+
+        <Card as="article" tone={step.id === "start" ? "violet" : r.state === "problem" ? "amber" : undefined} className="ob-card" aria-labelledby="ob-step-title">
+          <h2 id="ob-step-title" className="ob-card__title" tabIndex={-1} ref={heading}>
+            {index + 1}. {titleOf(step.id)}
+          </h2>
+
+          {last ? (
+            <>
+              {attention.length > 0 ? (
+                <p className="ob-msg" role="note">
+                  Still open: {attention.map((s) => s.label).join(", ")}. You can read on, and come back to those steps.
+                </p>
+              ) : (
+                <p>Everything checked is in place.</p>
+              )}
+              <ol className="ob-list">
+                <li>
+                  Prepare the team and open the panes in Herdr (the lead builds a team from what is installed):
+                  {finalCommands(firstAgent).map((c) => (
+                    <CopyCommand key={c} command={c} />
+                  ))}
+                </li>
+                <li>Open a lead pane in Herdr (any installed agent) and describe the feature to the lead.</li>
+                <li>Read the plan the lead writes: the Overview and Execution screens show it as it runs.</li>
+                <li>
+                  Say <strong>go</strong>. The event manager runs the milestones and wakes the lead when you are needed.
+                </li>
+              </ol>
+              <p className="muted">The app only shows these commands; it never runs them or installs anything. Finish setup, then chat with the lead from Chat / Home.</p>
+            </>
+          ) : (
+            <>
+              <p className="ob-found" role="status">
+                <Badge tone={STATE_TONE[r.state]}>{STATE_WORD[r.state]}</Badge> {r.found}
+              </p>
+              {r.next && <p>{r.next}</p>}
+              {r.commands.map((c) => (
+                <CopyCommand key={c} command={c} />
+              ))}
+              {step.id === "agents" && agents?.data && agents.data.agents.some((a) => !a.installed) && (
+                <ul className="ob-list" aria-label="Missing agents">
+                  {agents.data.agents
+                    .filter((a) => !a.installed)
+                    .map((a) => (
+                      <li key={a.kind}>
+                        {a.display_name ?? a.kind} is not installed; to use it, install it so <code>{a.launch}</code> works in a terminal.
+                      </li>
+                    ))}
+                </ul>
+              )}
+              {step.id === "project" && shell && (
+                <p>
+                  <Button tone="emerald" solid disabled={busy} onClick={() => void choose()}>
+                    <Icon name="folder" size={14} />
+                    {busy ? "Starting…" : kind === "unconfigured" ? "Choose your git repository…" : "Choose another repository…"}
+                  </Button>
+                </p>
+              )}
+              <div className="ob-actions">
+                <Button onClick={() => (step.id === "project" ? recheck() : rerun(step.id as keyof typeof nonce))}>
+                  <Icon name="sync" size={14} />
+                  Check again
+                </Button>
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
     </section>
   );
 }
@@ -338,14 +406,16 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
 function titleOf(id: StepId): string {
   switch (id) {
     case "orch":
-      return "The orch program";
+      return "Orchestra Binary (orch)";
     case "herdr":
-      return "Herdr";
+      return "Herdr Terminal Runtime";
     case "agents":
-      return "Coding agents";
+      return "Installed AI Coding Agents";
+    case "skills":
+      return "Orchestration Skill Wrappers";
     case "project":
-      return "Your project";
+      return "Git Repository & Project";
     case "start":
-      return "Start your first task";
+      return "Start the Lead";
   }
 }

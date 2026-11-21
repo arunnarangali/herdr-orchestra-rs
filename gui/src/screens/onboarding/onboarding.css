@@ -1,65 +1,270 @@
-.ob-indicator {
-  list-style: none;
+/* Screen 10: Onboarding (workspace preflight). Colours come from the theme's tokens; tones through `--c`. */
+
+.ob.screen {
+  max-width: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0 0 var(--gap);
-  padding: 0;
+  flex-direction: column;
+  gap: 12px;
 }
-.ob-step-btn {
-  font: inherit;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.3rem 0.7rem;
-  cursor: pointer;
-  display: inline-flex;
-  gap: 0.4rem;
+.ob__head {
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
-.ob-step-btn[aria-current="step"] {
-  border-color: var(--accent);
-  background: var(--info-bg);
+.ob__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  color: var(--accent-violet);
+}
+.ob__icon .icon {
+  width: 36px;
+  height: 36px;
+  stroke-width: 1.5;
+}
+.ob__who {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.ob__title {
+  margin: 0;
+  font-size: 21px;
   font-weight: 600;
 }
+.ob__sub {
+  font: 12.5px var(--font-mono);
+  color: var(--text-muted);
+}
+.ob__head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* progress bar card */
+.ob__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 12px 16px;
+}
+.ob__progress {
+  flex: 1 1 320px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-width: 0;
+}
+.ob__track {
+  flex: 1 1 160px;
+  height: 8px;
+  overflow: hidden;
+  background: var(--bg-hover);
+  border-radius: 999px;
+}
+.ob__track i {
+  display: block;
+  height: 100%;
+  background: var(--accent-emerald);
+  border-radius: inherit;
+}
+.ob__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* steps and the open step */
+.ob__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.steps {
+  position: relative;
+  display: grid;
+  gap: 10px;
+}
+.step {
+  --c: var(--text-muted);
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 17px;
+  top: calc(50% + 18px);
+  height: calc(100% - 26px);
+  width: 2px;
+  background: var(--c-b55);
+}
+.step__no {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  font: 700 14px var(--font-mono);
+  color: var(--c);
+  background: var(--bg-canvas);
+  border: 2px solid var(--c);
+  border-radius: 50%;
+}
+.step__card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+.step--on .step__card {
+  border-color: var(--c-b75);
+  background: var(--c-a6);
+  box-shadow: 0 0 0 1px var(--c-b55);
+}
+.step__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  color: var(--text-primary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.step__icon .icon {
+  width: 20px;
+  height: 20px;
+}
+.step__main {
+  flex: 1;
+  min-width: 0;
+}
+.ob-step-btn {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  font: 600 14.5px var(--font-sans);
+  text-align: left;
+  color: var(--text-primary);
+  background: none;
+  border: 0;
+}
+.ob-step-btn:hover > span:first-child {
+  text-decoration: underline;
+}
+.step__desc {
+  margin-top: 2px;
+  font: 11.5px var(--font-mono);
+  color: var(--text-muted);
+}
+.step__state {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--c);
+}
+
 .ob-card {
-  max-width: 44rem;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+.ob-card__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.ob-card__title:focus-visible {
+  outline-offset: 4px;
 }
 .ob-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin-top: var(--gap);
-}
-.ob-spacer {
-  flex: 1;
+  gap: 8px;
 }
 .ob-command {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  margin: 0.3rem 0;
+  gap: 8px;
+  margin: 4px 0;
 }
 .ob-command code {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.2rem 0.5rem;
+  padding: 4px 10px;
   overflow-wrap: anywhere;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 .ob-found {
-  margin: 0.4rem 0;
+  margin: 0;
 }
 .ob-msg {
-  margin: 0.5rem 0;
-  padding: 0.4rem 0.6rem;
-  border-radius: var(--radius);
-  background: var(--danger-bg);
-  border: 1px solid var(--danger);
+  --c: var(--accent-amber);
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--c-b60);
+  border-radius: var(--radius-sm);
+  background: var(--c-a8);
 }
 .ob-list {
-  margin: 0.4rem 0;
+  display: grid;
+  gap: 6px;
   padding-left: 1.2rem;
+  list-style: decimal;
 }
+ul.ob-list {
+  list-style: disc;
+}
+
+/* finished or skipped */
+.ob__done {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 16px;
+}
+.ob__done > .icon {
+  color: var(--accent-emerald);
+}
+.ob__done-text {
+  flex: 1 1 260px;
+}
+.ob__done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 1100px) {
+  .ob__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .step__state {
+    display: none;
+  }
+  .ob__nav {
+    flex: 1 1 100%;
+  }
+  .ob__nav .btn {
+    flex: 1;
+  }
+}
+
+/* The shared `.card--tone` resets `--c` after the tone helpers; restate the tones used here. */
+.ob .card--tone.tone-emerald { --c: var(--accent-emerald); }
+.ob .card--tone.tone-amber { --c: var(--accent-amber); }
+.ob .card--tone.tone-violet { --c: var(--accent-violet); }

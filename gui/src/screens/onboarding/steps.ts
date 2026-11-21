@@ -105,3 +105,33 @@ export function finalCommands(installedKind: string | null): string[] {
     "orch team up",
   ];
 }
+
+/** Are the orch skills (the skill wrappers) in place for every installed agent? From `/agents`. */
+export function skillsResult(data: AgentsResponse | null, connected: boolean, error: string | null): StepResult {
+  if (!connected) {
+    return {
+      state: "unknown",
+      found: "The skills are checked by the orch server, which starts once a project is chosen.",
+      next: "Choose a project folder. This check then runs by itself.",
+      commands: [],
+    };
+  }
+  if (error) return { state: "problem", found: `The agent list could not be read: ${error}`, next: "Check the connection, then check again.", commands: ["orch agents check"] };
+  if (!data) return checking("Looking at the skills…");
+  const installed = data.agents.filter((a) => a.installed && a.skills.status !== "none");
+  if (installed.length === 0) {
+    return { state: "unknown", found: "No installed agent uses the orch skills yet.", next: "Install an agent first (the step before).", commands: [] };
+  }
+  const bad = installed.filter((a) => a.skills.status === "missing" || a.skills.status === "outdated");
+  if (bad.length === 0) {
+    return { state: "ok", found: `The orch skills are installed and current for ${installed.map((a) => a.display_name ?? a.kind).join(", ")}.`, next: "Nothing to do.", commands: [] };
+  }
+  return {
+    state: "problem",
+    found: bad
+      .map((a) => `Skills ${a.skills.status} for ${a.display_name ?? a.kind}${a.skills.problems.length ? ` (${a.skills.problems.join(", ")})` : ""}`)
+      .join(". ") + ".",
+    next: "Install them with `orch agents sync` in a terminal (it records what it installs), then check again. The app does not install anything.",
+    commands: ["orch agents sync"],
+  };
+}

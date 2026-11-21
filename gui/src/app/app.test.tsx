@@ -60,7 +60,8 @@ describe("registry and sidebar", () => {
       await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: s.label }));
       expect(await screen.findByRole("heading", { name: HEADING[s.id] })).toBeInTheDocument();
     }
-    expect(screen.getByText("Nothing here yet.")).toBeInTheDocument(); // Help, M5 builds it
+    // the last one visited, Help, is built: its reference is there, not the placeholder
+    expect(screen.getByRole("region", { name: /Keyboard Shortcuts/ })).toBeInTheDocument();
   }, 15_000); // it visits all ten screens, each loading its data
 
   it("the Attention Center has a route and a placeholder body", async () => {

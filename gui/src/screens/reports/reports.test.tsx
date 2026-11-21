@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { samples } from "../../api/contract";
@@ -39,12 +39,16 @@ describe("Reports screen", () => {
 
   it("shows the finished run's numbers, including time against estimate", async () => {
     show(finishedReport());
-    expect(await screen.findByRole("heading", { name: "Run report" })).toBeInTheDocument();
-    expect(screen.getAllByText("orch/desktop").length).toBeGreaterThan(0);
+    const metrics = await screen.findByRole("region", { name: "First-Pass Rate" });
+    expect(metrics).toHaveTextContent("50%");
+    expect(screen.getByText(/Branch: orch\/desktop/)).toBeInTheDocument();
     expect(screen.getByText("1h 0m of about 3h 0m planned")).toBeInTheDocument();
     expect(screen.getByText(/2 merged of 3/)).toBeInTheDocument();
-    expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(screen.getByText("1 lost attempts, 1 fix rounds, 0 conflict rounds, 0 extra attempts")).toBeInTheDocument();
+    const wasted = screen.getByRole("region", { name: "Wasted Work" });
+    expect(wasted).toHaveTextContent("1 lost attempt");
+    expect(wasted).toHaveTextContent("1 fix round, 0 conflict rounds, 0 extra attempts");
+    // the run did not merge everything: partial, not ALL_DONE
+    expect(screen.getByText(/Run Report:/)).toHaveTextContent(/PARTIAL|FAILED/);
   });
 
   it("the per-model table shows the tiers and the escalations", async () => {
@@ -102,12 +106,47 @@ describe("Reports screen", () => {
     expect(await screen.findByText(/could not load M1/)).toBeInTheDocument();
   });
 
+  it("lists files outside the likely files and the reviewer's suggestions, and creates a follow-up fix from one", async () => {
+    const user = userEvent.setup();
+    server.respond("GET", "/tasks/M1", 200, samples.taskDetail);
+    server.respond("POST", "/tasks/M1/fix", 200, { ...samples.action, message: "M1-fix-1 created" });
+    show(finishedReport());
+    const scope = await screen.findByRole("region", { name: /Scope Warnings/ });
+    await waitFor(() => expect(scope).toHaveTextContent("docs/x.md"));
+    const sugg = screen.getByRole("region", { name: "Unapplied Reviewer Suggestions" });
+    const button = within(sugg).getAllByRole("button", { name: /Create a follow-up fix/ })[0]!;
+    await user.click(button);
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Create fix" }));
+    await waitFor(() => expect(server.requests.some((r) => r.method === "POST" && r.path === "/tasks/M1/fix")).toBe(true));
+    expect(await within(sugg).findByText("M1-fix-1 created")).toBeInTheDocument();
+    expect(button).toBeDisabled();
+  });
+
+  it("filters the milestones to rework, and the actions the API lacks say why", async () => {
+    const user = userEvent.setup();
+    show(finishedReport());
+    const table = await screen.findByRole("table", { name: /Each milestone's result/ });
+    const ids = () => [...table.querySelectorAll("tr[data-milestone]")].map((r) => r.getAttribute("data-milestone"));
+    expect(ids()).toEqual(["M1", "M2", "M3"]);
+    // rework: more than one try, a fix round, a second review or a conflict
+    await user.click(screen.getByRole("button", { name: "Rework" }));
+    expect(ids()).toEqual(["M2", "M3"]);
+    await user.click(screen.getByRole("button", { name: "Escalated" }));
+    expect(table).toHaveTextContent("No milestone matches this filter.");
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(ids()).toHaveLength(3);
+    expect(screen.getByRole("button", { name: /View summary\.md/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Finish & Create PR/ })).toHaveAttribute("title", expect.stringContaining("orch finish"));
+    expect(screen.getByRole("button", { name: "Export JSON" })).toBeEnabled();
+  });
+
   it("a run in progress says so and still shows the partial numbers", async () => {
     show(runningReport(), parallelPlan(), runningTasks());
     expect(await screen.findByText("Run in progress — the numbers below are partial.")).toBeInTheDocument();
     expect(screen.getByText("1 merged of 3")).toBeInTheDocument();
-    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "First-Pass Rate" })).toHaveTextContent("100%");
     expect(screen.getByText("Elapsed so far")).toBeInTheDocument();
+    expect(screen.getByText(/Run Report:/)).toHaveTextContent("RUNNING");
   });
 
   it("no run yet: an error that says how to create one", async () => {
@@ -116,7 +155,9 @@ describe("Reports screen", () => {
     server.respond("GET", "/tasks", 404, errorBody("no_run", "no run exists"));
     renderApp({ route: "/reports", initial: server });
     expect(await screen.findByText("This project has no run yet")).toBeInTheDocument();
+    expect(screen.getByText("No report yet")).toBeInTheDocument();
     expect(screen.getByText(/orch sync/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument(); // a normal state, not an error
   });
 
   it("a run with no milestones shows the empty state", async () => {
@@ -146,7 +187,7 @@ describe("Reports contract sample", () => {
       server.respond("GET", "/plan", 200, samples.plan);
       server.respond("GET", "/tasks", 200, samples.tasks);
       renderApp({ route: "/reports", initial: server });
-      expect(await screen.findByText("50%")).toBeInTheDocument();
+      expect(await screen.findByRole("region", { name: "First-Pass Rate" })).toHaveTextContent("50%");
       expect(screen.getByRole("table", { name: /What each model did/ })).toHaveTextContent(
         "claude-sonnet-5-5",
       );
