@@ -1,22 +1,41 @@
-import type { ReactNode } from "react";
+import type React from "react";
 import type { PlanMilestone, TaskInfo } from "../../api/types";
-import { StatusBadge } from "../../ui/StatusBadge";
+import { WfIcon } from "./icons";
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="ms-detail-section">
-      <h3>{title}</h3>
-      {children}
-    </section>
-  );
+const KW = /\b(?:pub|trait|async|fn|impl|struct|let|CREATE|TABLE|PRIMARY|KEY|NOT|NULL|UNIQUE|DEFAULT|GET|POST|PUT|DELETE)\b/;
+const TY = /\b(?:Result|Vec|Uuid|UUID|TEXT|TIMESTAMPTZ|Category\w*|CreateCategory|UpdateCategory)\b/;
+
+function highlightSyntax(line: string) {
+  const cm = line.search(/(\/\/|--)/);
+  const code = cm >= 0 ? line.slice(0, cm) : line;
+  const comment = cm >= 0 ? line.slice(cm) : "";
+  const parts: React.ReactNode[] = [];
+  const re = new RegExp(`${KW.source}|${TY.source}`, "g");
+  const kwOnly = new RegExp(`^${KW.source}$`);
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    if (m.index > last) parts.push(code.slice(last, m.index));
+    parts.push(
+      <span key={m.index} className={kwOnly.test(m[0]) ? "tok-kw" : "tok-ty"}>
+        {m[0]}
+      </span>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < code.length) parts.push(code.slice(last));
+  if (comment) parts.push(<span key="comment" className="tok-cm">{comment}</span>);
+  return parts;
 }
 
-function Text({ lines }: { lines: string }) {
-  if (!lines.trim()) return <p className="muted">not in the plan</p>;
-  return <p className="prewrap">{lines}</p>;
-}
+const STATE_CONFIG: Record<string, { label: string; tone: string }> = {
+  merged: { label: "Merged", tone: "emerald" },
+  coding: { label: "Coding", tone: "cyan" },
+  verifying: { label: "Verifying", tone: "amber" },
+  failed: { label: "Failed", tone: "coral" },
+  pending: { label: "Pending", tone: "neutral" },
+};
 
-/** One milestone of the plan, with everything the lead wrote and how the run stands. */
 export function MilestoneDetail({
   milestone,
   task,
@@ -24,141 +43,180 @@ export function MilestoneDetail({
   milestone: PlanMilestone;
   task: TaskInfo | undefined;
 }) {
-  return (
-    <div className="ms-detail">
-      <p className="ms-detail-head">
-        <StatusBadge state={task?.state ?? "pending"} />
-        {task ? (
-          <span>
-            worker <code>{task.worker ?? task.last_worker ?? "—"}</code>
-            {task.model && (
-              <>
-                {" "}
-                · model <code>{task.model}</code>
-              </>
-            )}
-            {task.escalated && <> · escalated</>}
-          </span>
-        ) : (
-          <span className="muted">not in the run yet</span>
-        )}
-      </p>
+  const state = task?.state ?? "pending";
+  const st = STATE_CONFIG[state] ?? STATE_CONFIG["pending"]!;
+  const busy = state === "coding" || state === "verifying";
+  const lines = milestone.interfaces ? milestone.interfaces.split("\n") : [];
+  const criteria = milestone.acceptance_criteria ?? [];
+  const doneCount = criteria.filter((c) => (c as { met?: boolean; done?: boolean }).met || (c as { met?: boolean; done?: boolean }).done).length;
 
-      <Section title="Goal">
-        <Text lines={milestone.goal} />
-      </Section>
-      <Section title="Why">
-        <Text lines={milestone.why} />
-      </Section>
-      {milestone.why_separate && (
-        <Section title="Why separate">
-          <p>{milestone.why_separate}</p>
-        </Section>
-      )}
-      {milestone.depends_on.length > 0 && (
-        <Section title="Depends on">
-          <ul>
-            {milestone.depends_on.map((d) => (
-              <li key={d.id}>
-                <code>{d.id}</code>
-                {d.reason ? ` — ${d.reason}` : ""}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-      <dl className="ms-facts">
+  return (
+    <>
+      <div className="detail__head">
+        <span className="detail__id">{milestone.id}</span>
+        <h2 className="detail__title" id="detail-title">
+          {milestone.title}
+        </h2>
+        <span className={`badge ${st.tone === "neutral" ? "" : `badge--${st.tone}`}`}>
+          {busy && <WfIcon name="spinner" size={13} className="spin" />}
+          {st.label}
+        </span>
+      </div>
+
+      <dl className="detail__facts">
+        <WfIcon name="target" />
+        <dt>Goal</dt>
+        <dd>{milestone.goal || "—"}</dd>
+
+        <WfIcon name="help" />
+        <dt>Why</dt>
+        <dd>{milestone.why || "—"}</dd>
+
+        {milestone.why_separate && (
+          <>
+            <WfIcon name="help" />
+            <dt>Why separate</dt>
+            <dd>{milestone.why_separate}</dd>
+          </>
+        )}
+
+        {milestone.depends_on.length > 0 && (
+          <>
+            <WfIcon name="branch" />
+            <dt>Depends on</dt>
+            <dd>
+              {milestone.depends_on.map((d) => (
+                <span key={d.id} className="path-chip">
+                  {d.id}
+                  {d.reason ? ` — ${d.reason}` : ""}
+                </span>
+              ))}
+            </dd>
+          </>
+        )}
+
         {milestone.tier && (
           <>
+            <WfIcon name="package" />
             <dt>Tier</dt>
             <dd>{milestone.tier}</dd>
           </>
         )}
-        {milestone.needs.length > 0 && (
-          <>
-            <dt>Needs</dt>
-            <dd>{milestone.needs.join(", ")}</dd>
-          </>
-        )}
+
+        <WfIcon name="package" />
+        <dt>Needs</dt>
+        <dd>
+          {milestone.needs.length > 0 ? milestone.needs.join(", ") : "—"}
+        </dd>
+
         {milestone.model_why && (
           <>
+            <WfIcon name="help" />
             <dt>Model why</dt>
             <dd>{milestone.model_why}</dd>
           </>
         )}
+
         {milestone.estimate && (
           <>
+            <WfIcon name="package" />
             <dt>Estimate</dt>
             <dd>{milestone.estimate}</dd>
           </>
         )}
+
         {milestone.role && (
           <>
+            <WfIcon name="user" />
             <dt>Role</dt>
             <dd>{milestone.role}</dd>
           </>
         )}
+
         {milestone.review && (
           <>
+            <WfIcon name="checkcircle" />
             <dt>Review</dt>
             <dd>{milestone.review}</dd>
           </>
         )}
-        <dt>Parallel</dt>
-        <dd>{milestone.parallel ? "yes" : "no"}</dd>
-        {!milestone.enabled && (
+
+        <WfIcon name="file" />
+        <dt>Likely files</dt>
+        <dd>
+          {milestone.likely_files.length > 0
+            ? milestone.likely_files.map((f) => (
+                <span key={f} className="path-chip">
+                  {f}
+                </span>
+              ))
+            : "—"}
+        </dd>
+
+        {milestone.has_open_questions && milestone.open_questions && (
           <>
-            <dt>Enabled</dt>
-            <dd>no</dd>
+            <WfIcon name="warning" />
+            <dt>Open questions</dt>
+            <dd>{milestone.open_questions}</dd>
           </>
         )}
       </dl>
-      {milestone.likely_files.length > 0 && (
-        <Section title="Likely files">
-          <ul className="file-list">
-            {milestone.likely_files.map((f) => (
-              <li key={f}>
-                <code>{f}</code>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-      {milestone.acceptance_criteria.length > 0 && (
-        <Section title="Acceptance criteria">
-          <ol className="ac-list">
-            {milestone.acceptance_criteria.map((c) => (
-              <li key={c.id}>
-                <span className="ac-id">{c.id}</span> {c.text}
-              </li>
-            ))}
-          </ol>
-        </Section>
-      )}
-      <Section title="Constraints">
-        <Text lines={milestone.constraints} />
-      </Section>
-      <Section title="Interfaces">
-        <Text lines={milestone.interfaces} />
-      </Section>
-      <Section title="Context">
-        <Text lines={milestone.context} />
-      </Section>
-      <Section title="Out of scope">
-        <Text lines={milestone.out_of_scope} />
-      </Section>
-      <Section title="Open questions">
-        {milestone.has_open_questions ? (
-          <Text lines={milestone.open_questions} />
-        ) : (
-          <p className="muted">none</p>
-        )}
-      </Section>
-      {milestone.notes_from_user.trim() && (
-        <Section title="Notes from user">
-          <Text lines={milestone.notes_from_user} />
-        </Section>
-      )}
-    </div>
+
+      <div className="detail__cols">
+        <div className="detail__col">
+          <h3 className="detail__h">
+            <WfIcon name="checkcircle" />
+            Acceptance Criteria ({criteria.length})
+            <span className="muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}>
+              {doneCount} met
+            </span>
+          </h3>
+          <div className="ac">
+            {criteria.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>No acceptance criteria listed.</p>
+            ) : (
+              criteria.map((c) => {
+                const isMet = Boolean((c as { met?: boolean; done?: boolean }).met || (c as { met?: boolean; done?: boolean }).done);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="ac__btn"
+                    aria-pressed={isMet}
+                    disabled
+                    title="Not available yet"
+                  >
+                    <WfIcon name={isMet ? "checkcircle" : "circle"} />
+                    <span>
+                      <b>{c.id}:</b>
+                      {c.text}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="detail__col">
+          <h3 className="detail__h detail__h--code">
+            <WfIcon name="code" />
+            Interfaces (API Contract)
+          </h3>
+          {lines.length === 0 || (lines.length === 1 && !lines[0]?.trim()) ? (
+            <p className="muted" style={{ fontSize: 13 }}>No interfaces documented in the plan.</p>
+          ) : (
+            <pre className="code" tabIndex={0} aria-label={`${milestone.id} interfaces`}>
+              {lines.map((line, i) => (
+                <span key={i} className="code__line">
+                  <span className="code__no">{i + 1}</span>
+                  <span>{highlightSyntax(line)}</span>
+                </span>
+              ))}
+            </pre>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

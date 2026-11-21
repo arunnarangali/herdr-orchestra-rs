@@ -337,3 +337,165 @@ describe("states", () => {
     expect(await screen.findByLabelText("Your answer to M1")).toBeInTheDocument();
   });
 });
+
+describe("AC4: Execution Monitor controls, progress, elapsed and budget", () => {
+  it("shows state badge, progress bar, elapsed vs budget, and pause/resume/stop with stop confirmation", async () => {
+    serve(server, {
+      tasks: [
+        task({ id: "M1", state: "merged" }),
+        task({ id: "M2", state: "coding", worker: "rs-claude-1" }),
+      ],
+    });
+    server.respond("POST", "/run/pause", 200, { ...samples.runControl, run_control: "paused", message: "Run paused." });
+    server.respond("POST", "/run/resume", 200, { ...samples.runControl, run_control: "running", message: "Run resumed." });
+    server.respond("POST", "/run/stop", 200, { ...samples.runControl, run_control: "stopped", message: "Run stopped." });
+
+    const user = userEvent.setup();
+    renderApp({ route: "/execution", initial: server });
+
+    // State badge
+    const badge = await screen.findByText("Live", { selector: "#mon-live" });
+    expect(badge).toBeInTheDocument();
+
+    // Progress bar and counts
+    const progBar = screen.getByRole("progressbar", { name: "Run progress" });
+    expect(progBar).toBeInTheDocument();
+    expect(screen.getByText(/50% \(1\/2 Merged, 1 Coding\)/)).toBeInTheDocument();
+
+    // Elapsed vs budget
+    expect(screen.getByText(/Budget:/)).toBeInTheDocument();
+    expect(document.getElementById("elapsed")).toBeInTheDocument();
+    expect(document.getElementById("budget")).toBeInTheDocument();
+
+    // Pause
+    const pauseBtn = screen.getByRole("button", { name: "Pause" });
+    await user.click(pauseBtn);
+    const pauseDialog = screen.getByRole("alertdialog", { name: "Pause the run?" });
+    await user.click(within(pauseDialog).getByRole("button", { name: "Pause" }));
+    expect(post("/run/pause")).toHaveLength(1);
+
+    // Resume
+    server.emit(1, "run-state", { run_control: "paused" });
+    const resumeBtn = await screen.findByRole("button", { name: "Resume" });
+    await user.click(resumeBtn);
+    const resumeDialog = screen.getByRole("alertdialog", { name: "Resume the run?" });
+    await user.click(within(resumeDialog).getByRole("button", { name: "Resume" }));
+    expect(post("/run/resume")).toHaveLength(1);
+
+    // Stop with confirmation
+    server.emit(2, "run-state", { run_control: "running" });
+    const stopBtn = await screen.findByRole("button", { name: "Stop" });
+    await user.click(stopBtn);
+    const stopDialog = screen.getByRole("alertdialog", { name: "Stop the run?" });
+    expect(stopDialog).toHaveTextContent("running coder's work is saved");
+    expect(post("/run/stop")).toHaveLength(0);
+    await user.click(within(stopDialog).getByRole("button", { name: "Stop the run" }));
+    expect(post("/run/stop")).toHaveLength(1);
+  });
+});
+
+describe("AC5: Agent cards, output tabs and timeline without stealing focus", () => {
+  it("renders agent cards, output tabs navigable by keyboard, timeline ack and open actions, preserving focus during live updates", async () => {
+    serve(server, {
+      tasks: [
+        task({ id: "M1", title: "Foundation", state: "merged", worker: "rs-claude-1", model: "claude-sonnet-5-5" }),
+        task({ id: "M2", title: "Review", state: "coding", worker: "rs-codex-1", model: "gpt-5-codex" }),
+      ],
+      events: events({
+        new: [
+          {
+            id: 101,
+            ts: 1700000200,
+            kind: "VerificationPassed",
+            task: "M1",
+            task_title: "Foundation",
+            text: "check passed",
+            read: false,
+            open: false,
+            help: "",
+          },
+        ],
+      }),
+    });
+
+    const user = userEvent.setup();
+    renderApp({ route: "/execution", initial: server });
+
+    // Agent cards
+    const agentClaude = await screen.findByRole("article", { name: "rs-claude-1" });
+    expect(agentClaude).toBeInTheDocument();
+    expect(within(agentClaude).getByText(/M1: Foundation/)).toBeInTheDocument();
+    expect(within(agentClaude).queryByText(/Worktree/)).toBeNull();
+
+    // Output tabs & keyboard navigation
+    const tabsList = screen.getByRole("tablist", { name: "Output sources" });
+    const autopilotTab = within(tabsList).getByRole("tab", { name: "autopilot.log" });
+    expect(autopilotTab).toHaveAttribute("aria-selected", "true");
+
+    // Click tab focuses and selects it
+    const claudeTab = within(tabsList).getByRole("tab", { name: "rs-claude-1.log" });
+    await user.click(claudeTab);
+    expect(claudeTab).toHaveAttribute("aria-selected", "true");
+
+    // Arrow keys move between tabs
+    claudeTab.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(autopilotTab).toHaveAttribute("aria-selected", "true");
+
+    // Event timeline: Ack has no API call, so it is disabled with a reason and never claims success
+    const queue = screen.getByRole("region", { name: "Lead's queue" });
+    const ackBtn = within(queue).getByRole("button", { name: "Acknowledge VerificationPassed" });
+    expect(ackBtn).toBeDisabled();
+    expect(within(queue).getByText(/Acknowledge and Replay are not available yet/)).toBeInTheDocument();
+    expect(within(queue).queryByText("Acked")).toBeNull();
+    // Open goes to the milestone
+    await user.click(within(queue).getAllByRole("button", { name: "Open M1" })[0]!);
+    expect(await screen.findByRole("button", { name: /M1 Foundation/, expanded: true })).toBeInTheDocument();
+
+    // Verify live stream update does NOT move keyboard focus
+    claudeTab.focus();
+    expect(document.activeElement).toBe(claudeTab);
+    server.respond(
+      "GET",
+      "/events",
+      200,
+      events({
+        new: [
+          {
+            id: 102,
+            ts: 1700000300,
+            kind: "TaskReady",
+            task: "M3",
+            task_title: "Reports",
+            text: "ready for review",
+            read: false,
+            open: false,
+            help: "",
+          },
+        ],
+      }),
+    );
+    server.emit(10, "lead-event", { id: 102, ts: 1700000300, kind: "TaskReady", task: "M3", text: "ready for review" });
+    await waitFor(() => expect(screen.getByText("ready for review")).toBeInTheDocument());
+    expect(document.activeElement).toBe(claudeTab);
+  });
+});
+
+describe("output tabs use real output", () => {
+  it("autopilot shows /logs; an agent tab shows that agent's output and keeps focus on a live update", async () => {
+    serve(server, { tasks: [task({ id: "M2", state: "coding", worker: "rs-claude-1" })], logs: ["12:00 dispatched M2"] });
+    server.respond("GET", "/agents/rs-claude-1/output", 200, { agent: "rs-claude-1", lines: 2, text: "compiling\ntests ok", ts: "now" });
+    const user = userEvent.setup();
+    renderApp({ route: "/execution", initial: server });
+    const log = await screen.findByRole("tabpanel");
+    expect(await within(log).findByText(/dispatched M2/)).toBeInTheDocument();
+    const tab = screen.getByRole("tab", { name: "rs-claude-1.log" });
+    await user.click(tab);
+    expect(await within(screen.getByRole("tabpanel")).findByText(/tests ok/)).toBeInTheDocument();
+    tab.focus();
+    await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
+    server.emit(5, "task-state", { id: "M2", to: "verifying" });
+    await waitFor(() => expect(count("GET", "/agents/rs-claude-1/output")).toBeGreaterThan(1));
+    expect(document.activeElement).toBe(tab);
+  });
+});

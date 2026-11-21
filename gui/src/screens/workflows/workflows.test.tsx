@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { samples } from "../../api/contract";
@@ -103,17 +103,18 @@ describe("Workflows screen", () => {
     ).toBeInTheDocument();
   });
 
-  it("selecting a node opens its detail and Escape closes it again", async () => {
+  it("selecting a node shows its detail and updates the address", async () => {
     const user = userEvent.setup();
     show(parallelPlan());
     await screen.findByRole("group", { name: "Milestone dependency graph" });
     await user.click(screen.getByRole("button", { name: "M2 Left side (pending)" }));
-    const dialog = screen.getByRole("dialog", { name: "M2: Left side" });
-    expect(dialog).toHaveTextContent("Goal of M2.");
-    expect(dialog).toHaveTextContent("Why M2 exists.");
-    expect(dialog).toHaveTextContent("needs the shared base");
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const detail = document.getElementById("detail");
+    expect(detail).toBeInTheDocument();
+    expect(detail).toHaveTextContent("Goal of M2.");
+    expect(detail).toHaveTextContent("Why M2 exists.");
+    expect(detail).toHaveTextContent("needs the shared base");
+    // the address is the route's query, never the router's hash (the app routes by hash)
+    expect(window.location.hash).toBe("");
   });
 
   it("stays readable with twelve milestones: twelve nodes, twelve cards", async () => {
@@ -160,6 +161,118 @@ describe("Workflows screen", () => {
     server.respond("GET", "/tasks", 401, errorBody("unauthorized", "wrong token"));
     renderApp({ route: "/workflows", initial: server });
     expect(await screen.findByText("The server refused the token")).toBeInTheDocument();
+  });
+
+  it("AC1: keyboard switchable between graph and list views, elbow connectors rendered, deep link via ?milestone=", async () => {
+    const user = userEvent.setup();
+    server.respond("GET", "/plan", 200, parallelPlan());
+    server.respond("GET", "/tasks", 200, samples.tasks);
+    renderApp({ route: "/workflows?milestone=M3", initial: server });
+    await screen.findByRole("group", { name: "Milestone dependency graph" });
+
+    // Deep link selection: M3 is selected initially from hash
+    const detail = document.getElementById("detail");
+    expect(detail).toHaveTextContent("Goal of M3.");
+
+    // Elbow connectors in SVG: check path elements with rounded elbow bezier commands (Q)
+    const paths = Array.from(document.querySelectorAll("svg.dag__edges path"));
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.some((p) => (p.getAttribute("d") ?? "").includes("Q"))).toBe(true);
+
+    // Initial view is DAG, no table
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+
+    // Keyboard navigation switch between DAG and List
+    const dagBtn = screen.getByRole("button", { name: /DAG/ });
+    dagBtn.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("table")).toBeInTheDocument();
+
+    // ArrowLeft switches back to DAG
+    const listBtn = screen.getByRole("button", { name: /List/ });
+    listBtn.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("AC2: include checkboxes, edit-plan dialog, and Sync Plan are disabled with honest reasons", async () => {
+    const user = userEvent.setup();
+    show(oneMilestonePlan());
+    await screen.findByRole("heading", { name: "Plan settings" });
+
+    // Include checkboxes disabled with short reason
+    const check = screen.getByRole("checkbox", { name: "Include M1 in the run" });
+    expect(check).toBeDisabled();
+    expect(check).toHaveAttribute("title", "Not available yet");
+
+    // Sync Plan disabled with short reason
+    const syncBtn = screen.getByRole("button", { name: "Sync Plan" });
+    expect(syncBtn).toBeDisabled();
+    expect(syncBtn).toHaveAttribute("title", "Not available yet");
+
+    // Edit Plan button opens dialog with disabled fields and honest explanation
+    const editBtn = screen.getByRole("button", { name: "Edit Plan" });
+    await user.click(editBtn);
+    const dialog = await screen.findByRole("dialog", { name: "Edit plan settings" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(dialog).toHaveTextContent("Not available yet");
+    const saveBtn = screen.getByRole("button", { name: "Save plan" });
+    expect(saveBtn).toBeDisabled();
+    expect(saveBtn).toHaveAttribute("title", "Not available yet");
+    // Escape closes it and focus goes back to the button that opened it
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(editBtn).toHaveFocus();
+  });
+
+  it("AC3: reports 'already live' without navigating when run is already running", async () => {
+    const user = userEvent.setup();
+    show(oneMilestonePlan(), {
+      tasks: [{ ...samples.tasks.tasks[0], id: "M1", state: "coding" }],
+    });
+    await screen.findByRole("heading", { name: "Plan settings" });
+    const startBtn = screen.getByRole("button", { name: "Start Run" });
+    await user.click(startBtn);
+    // Should show toast "already live", send nothing and stay on workflows
+    expect(await screen.findByText(/already live/i)).toBeInTheDocument();
+    expect(server.requests.filter((r) => r.method === "POST" && r.path === "/dispatch")).toHaveLength(0);
+    expect(screen.getByRole("heading", { name: "Plan settings" })).toBeInTheDocument();
+  });
+
+  it.each(["reviewing", "awaiting-review", "needs-fix", "held", "needs-answer", "committed"])(
+    "AC3: a milestone in %s means the run is already live",
+    async (state) => {
+      const user = userEvent.setup();
+      show(oneMilestonePlan(), { tasks: [{ ...samples.tasks.tasks[0], id: "M1", state }] });
+      await screen.findByRole("heading", { name: "Plan settings" });
+      await user.click(screen.getByRole("button", { name: "Start Run" }));
+      expect(await screen.findByText(/already live/i)).toBeInTheDocument();
+      expect(server.requests.filter((r) => r.method === "POST" && r.path === "/dispatch")).toHaveLength(0);
+    },
+  );
+
+  it("AC3: merged work is never re-dispatched", async () => {
+    const user = userEvent.setup();
+    show(oneMilestonePlan(), { tasks: [{ ...samples.tasks.tasks[0], id: "M1", state: "merged" }] });
+    await screen.findByRole("heading", { name: "Plan settings" });
+    await user.click(screen.getByRole("button", { name: "Start Run" }));
+    expect(await screen.findByText(/Nothing to run/)).toBeInTheDocument();
+    expect(server.requests.filter((r) => r.method === "POST" && r.path === "/dispatch")).toHaveLength(0);
+  });
+
+  it("AC3: Start Run uses real dispatch when run is not running", async () => {
+    const user = userEvent.setup();
+    server.respond("POST", "/dispatch", 200, samples.action);
+    show(oneMilestonePlan(), {
+      tasks: [{ ...samples.tasks.tasks[0], id: "M1", state: "pending" }],
+    });
+    await screen.findByRole("heading", { name: "Plan settings" });
+    const idleStartBtn = screen.getByRole("button", { name: "Start Run" });
+    await user.click(idleStartBtn);
+    const calls = server.requests.filter((r) => r.method === "POST" && r.path === "/dispatch");
+    expect(calls.length).toBe(1);
+    expect(JSON.parse(calls[0]?.body as string)).toEqual({ ids: ["M1"] });
   });
 });
 
