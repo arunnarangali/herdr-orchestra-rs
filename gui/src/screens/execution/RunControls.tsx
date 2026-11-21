@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { useApi } from "../../app/connection";
 import { ActionResult } from "../../components/ActionResult";
-import { RunStateBadge } from "../../components/RunStateBadge";
 import { useAction } from "../../components/useAction";
-import { useRunControl } from "../../components/useRunControl";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
+import { ExecIcon } from "./icons";
 
 type Which = "pause" | "resume" | "stop";
 
-const COPY: Record<Which, { button: string; title: string; body: string; confirm: string; destructive: boolean }> = {
+const COPY: Record<Which, { button: string; icon: string; title: string; body: string; confirm: string; destructive: boolean }> = {
   pause: {
     button: "Pause",
+    icon: "pause",
     title: "Pause the run?",
     body: "No new work starts. Milestones that are running finish their current step.",
     confirm: "Pause",
@@ -18,6 +18,7 @@ const COPY: Record<Which, { button: string; title: string; body: string; confirm
   },
   resume: {
     button: "Resume",
+    icon: "play",
     title: "Resume the run?",
     body: "The run carries on: ready milestones start again.",
     confirm: "Resume",
@@ -25,6 +26,7 @@ const COPY: Record<Which, { button: string; title: string; body: string; confirm
   },
   stop: {
     button: "Stop",
+    icon: "stop",
     title: "Stop the run?",
     body: "Each running coder's work is saved and the event manager ends. Nothing new starts until you start the event manager again.",
     confirm: "Stop the run",
@@ -41,10 +43,20 @@ export function disabledReason(which: Which, control: string | null): string | n
   return null;
 }
 
-/** Pause, resume and stop, each behind a confirmation, with the current control state. */
-export function RunControls({ onChange }: { onChange: () => void }) {
+/**
+ * Pause, Resume and Stop, each behind a confirmation. `control` is the run's control state as
+ * the stream last said it; `onControl` records what the server answered.
+ */
+export function RunControls({
+  control,
+  onControl,
+  onChange,
+}: {
+  control: string | null;
+  onControl: (state: string) => void;
+  onChange: () => void;
+}) {
   const api = useApi();
-  const { control, set } = useRunControl();
   const { outcome, run, pending } = useAction(onChange);
   const [asking, setAsking] = useState<Which | null>(null);
 
@@ -55,30 +67,27 @@ export function RunControls({ onChange }: { onChange: () => void }) {
     const call = which === "pause" ? api.pauseRun : which === "resume" ? api.resumeRun : api.stopRun;
     await run(async () => {
       const r = await call();
-      set(r.run_control);
+      onControl(r.run_control);
       return r;
     });
   };
 
   return (
-    <section className="panel" aria-label="Run controls">
-      <h2 className="panel-title">Run controls</h2>
-      <p>
-        Run control:{" "}
-        {control ? <RunStateBadge runState={control} /> : <span className="muted">unknown until the live stream reports it</span>}
-      </p>
-      <div className="button-row">
+    <>
+      <div className="progress__actions">
         {(["pause", "resume", "stop"] as const).map((w) => {
           const reason = disabledReason(w, control);
           return (
             <span key={w} className="control">
               <button
                 type="button"
-                className={w === "stop" ? "button button--danger" : "button"}
+                className={w === "stop" ? "btn btn--coral" : "btn"}
+                aria-haspopup="dialog"
                 disabled={pending || reason !== null}
                 aria-describedby={reason ? `why-${w}` : undefined}
                 onClick={() => setAsking(w)}
               >
+                <ExecIcon name={COPY[w].icon} />
                 {COPY[w].button}
               </button>
               {reason && (
@@ -89,6 +98,15 @@ export function RunControls({ onChange }: { onChange: () => void }) {
             </span>
           );
         })}
+        <span className="control">
+          <button type="button" className="btn btn--emerald btn--solid" disabled aria-describedby="why-herdr">
+            <ExecIcon name="external" />
+            Open in Herdr
+          </button>
+          <span id="why-herdr" className="muted control-why">
+            Not available yet
+          </span>
+        </span>
       </div>
       <ActionResult outcome={outcome} />
       {asking && (
@@ -103,6 +121,6 @@ export function RunControls({ onChange }: { onChange: () => void }) {
           {COPY[asking].body}
         </ConfirmDialog>
       )}
-    </section>
+    </>
   );
 }

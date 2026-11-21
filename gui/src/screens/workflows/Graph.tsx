@@ -1,141 +1,229 @@
-import { useState } from "react";
-import { isTaskState } from "../../api/states";
+import { useMemo, useState } from "react";
 import type { PlanMilestone, TaskInfo } from "../../api/types";
-import { layoutGraph, wrapTitle, type GraphEdge } from "./layout";
+import { WfIcon } from "./icons";
 
-const NODE_W = 148;
-const NODE_H = 56;
-
-/** The tone colours come from the theme, the same ones the state badges use. */
-function toneOf(state: string): string {
-  switch (isTaskState(state) ? state : "pending") {
-    case "merged":
-      return "success";
-    case "failed":
-    case "conflict":
-      return "danger";
-    case "needs-answer":
-    case "needs-fix":
-    case "held":
-    case "paused":
-      return "warning";
-    case "skipped":
-      return "muted";
-    case "pending":
-      return "neutral";
-    default:
-      return "info";
-  }
+interface EdgeCoord {
+  from: string;
+  to: string;
+  d: string;
+  polygon: string;
+  hot: boolean;
+  reason?: string | null;
 }
 
-function edgeLabel(e: GraphEdge): string {
-  return `${e.to} depends on ${e.from}`;
+const TIER_TONE: Record<string, string> = {
+  small: "neutral",
+  medium: "amber",
+  high: "coral",
+};
+
+const STATE_CONFIG: Record<string, { label: string; tone: string }> = {
+  merged: { label: "Merged", tone: "emerald" },
+  coding: { label: "Coding", tone: "cyan" },
+  verifying: { label: "Verifying", tone: "amber" },
+  failed: { label: "Failed", tone: "coral" },
+  pending: { label: "Pending", tone: "neutral" },
+};
+
+function stateBadge(state: string) {
+  const st = STATE_CONFIG[state] ?? STATE_CONFIG["pending"]!;
+  const cls = st.tone === "neutral" ? "badge" : `badge badge--${st.tone}`;
+  return (
+    <span className={cls}>
+      {st.label}
+      {state === "merged" ? " ✓" : ""}
+    </span>
+  );
 }
 
-/**
- * The milestone dependency graph as an SVG the layout module computed. Nodes are buttons
- * (keyboard reachable, Enter opens the detail); edges are focusable too and their reason is
- * shown as text under the graph, not a tooltip that needs a mouse. A plain list with the
- * same information is rendered next to it by the screen for screen readers.
- */
+function stateIcon(state: string, small?: boolean) {
+  const iconName =
+    state === "merged"
+      ? "check"
+      : state === "coding" || state === "verifying"
+        ? "spinner"
+        : state === "failed"
+          ? "warning"
+          : "circle";
+  const label = (STATE_CONFIG[state] ?? STATE_CONFIG["pending"]!).label;
+  return (
+    <span
+      className={`sicon sicon--${state}${small ? " sicon--sm" : ""}`}
+      role="img"
+      aria-label={label}
+    >
+      <WfIcon
+        name={iconName}
+        size={small ? 14 : 18}
+        className={iconName === "spinner" ? "spin" : ""}
+      />
+    </span>
+  );
+}
+
+function tierBadge(tier: string | null) {
+  if (!tier) return null;
+  const tone = TIER_TONE[tier] ?? "neutral";
+  const cls = tone === "neutral" ? "badge" : `badge badge--${tone}`;
+  return <span className={cls}>Tier: {tier}</span>;
+}
+
 export function MilestoneGraph({
   milestones,
   tasks,
+  selected,
   onSelect,
+  showDeps = true,
 }: {
   milestones: PlanMilestone[];
   tasks: TaskInfo[];
+  selected: string | null;
   onSelect: (id: string) => void;
+  showDeps?: boolean;
 }) {
-  const states = new Map(tasks.map((t) => [t.id, t.state]));
-  const layout = layoutGraph(milestones, states);
-  const width = Math.max(1, ...layout.nodes.map((n) => n.x)) + NODE_W + 16;
-  const height = Math.max(1, ...layout.nodes.map((n) => n.y)) + NODE_H + 16;
-  const [active, setActive] = useState<string | null>(null);
-  const activeEdge = layout.edges.find((e) => `${e.from}->${e.to}` === active) ?? null;
-  const byId = new Map(layout.nodes.map((n) => [n.id, n]));
-  const nodeLabel = (id: string) => {
-    const m = milestones.find((o) => o.id === id);
-    const state = states.get(id) ?? "pending";
-    return `${id} ${m?.title ?? ""} (${state})`;
-  };
+  const [activeEdge, setActiveEdge] = useState<EdgeCoord | null>(null);
+
+  const states = useMemo(() => new Map(tasks.map((t) => [t.id, t.state])), [tasks]);
+  const workers = useMemo(
+    () => new Map(tasks.map((t) => [t.id, t.worker ?? t.last_worker ?? null])),
+    [tasks],
+  );
+
+  // Group milestones into columns by depth
+  const cols = useMemo(() => {
+    const memo: Record<string, number> = {};
+    function depthOf(m: PlanMilestone): number {
+      if (memo[m.id] !== undefined) return memo[m.id]!;
+      memo[m.id] = 0;
+      if (m.depends_on.length > 0) {
+        let maxDep = 0;
+        for (const d of m.depends_on) {
+          const found = milestones.find((x) => x.id === d.id);
+          if (found) maxDep = Math.max(maxDep, depthOf(found));
+        }
+        memo[m.id] = 1 + maxDep;
+      }
+      return memo[m.id]!;
+    }
+
+    const result: PlanMilestone[][] = [];
+    milestones.forEach((m) => {
+      const d = depthOf(m);
+      if (!result[d]) result[d] = [];
+      result[d]!.push(m);
+    });
+    return result;
+  }, [milestones]);
+
+  // Compute elbow connector edges from the column layout positions
+  const edges = useMemo(() => {
+    if (!showDeps || milestones.length === 0) return [];
+
+    const nodePos = new Map<string, { l: number; r: number; y: number }>();
+    cols.forEach((col, c) => {
+      const colLeft = c * (250 + 64) + 28;
+      const colRight = colLeft + 250;
+      col.forEach((m, r) => {
+        const centerY = 22 + r * (72 + 14) + 36;
+        nodePos.set(m.id, { l: colLeft, r: colRight, y: centerY });
+      });
+    });
+
+    const result: EdgeCoord[] = [];
+    milestones.forEach((m) => {
+      const to = nodePos.get(m.id);
+      m.depends_on.forEach((dep) => {
+        const from = nodePos.get(dep.id);
+        if (!from || !to) return;
+        const hot = m.id === selected || dep.id === selected;
+        const x1 = from.r;
+        const y1 = from.y;
+        const x2 = to.l - 8;
+        const y2 = to.y;
+        const xm = x1 + (to.l - x1) / 2;
+        const dy = y2 - y1;
+        let d: string;
+        if (Math.abs(dy) < 2) {
+          d = `M${x1} ${y1} H${x2}`;
+        } else {
+          const r = Math.min(10, Math.abs(dy) / 2);
+          const k = Math.sign(dy);
+          d = `M${x1} ${y1} H${xm - r} Q${xm} ${y1} ${xm} ${y1 + k * r} V${y2 - k * r} Q${xm} ${y2} ${xm + r} ${y2} H${x2}`;
+        }
+        const polygon = `${x2},${y2 - 5} ${x2 + 8},${y2} ${x2},${y2 + 5}`;
+        result.push({ from: dep.id, to: m.id, d, polygon, hot, reason: dep.reason });
+      });
+    });
+    return result;
+  }, [milestones, cols, selected, showDeps]);
+
   return (
-    <div className="graph-wrap">
-      <svg
-        className="graph"
-        viewBox={`0 0 ${width} ${height}`}
-        role="group"
-        aria-label="Milestone dependency graph"
-        style={{ aspectRatio: `${width} / ${height}` }}
-      >
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" className="graph-arrow" />
-          </marker>
-        </defs>
-        {layout.edges.map((e) => {
-          const from = byId.get(e.from);
-          const to = byId.get(e.to);
-          if (!from || !to) return null;
-          const x1 = from.x + NODE_W;
-          const y1 = from.y + NODE_H / 2;
-          const x2 = to.x;
-          const y2 = to.y + NODE_H / 2;
-          const bend = y2 > y1 ? Math.min(y1 + 28, (y1 + y2) / 2) : Math.max(y1 - 28, (y1 + y2) / 2);
-          const d =
-            y1 === y2
-              ? `M ${x1} ${y1} L ${x2} ${y2}`
-              : `M ${x1} ${y1} C ${x1} ${bend}, ${x2} ${bend}, ${x2} ${y2}`;
-          const label = edgeLabel(e);
-          return (
-            <path
-              key={`${e.from}->${e.to}`}
-              d={d}
-              className={`graph-edge${active === `${e.from}->${e.to}` ? " graph-edge--active" : ""}`}
-              markerEnd="url(#arrow)"
-              tabIndex={0}
-              aria-label={label + (e.reason ? `, because ${e.reason}` : "")}
-              onMouseEnter={() => setActive(`${e.from}->${e.to}`)}
-              onMouseLeave={() => setActive(null)}
-              onFocus={() => setActive(`${e.from}->${e.to}`)}
-              onBlur={() => setActive(null)}
-            >
-              <title>{e.reason ? `Because: ${e.reason}` : label}</title>
-            </path>
-          );
-        })}
-        {layout.nodes.map((n) => {
-          const lines = wrapTitle(n.title, 20, 2);
-          const tone = toneOf(n.state);
-          return (
-            <g
-              key={n.id}
-              className={`graph-node graph-node--${tone}${n.enabled ? "" : " graph-node--disabled"}`}
-              transform={`translate(${n.x + 8}, ${n.y + 8})`}
-              role="button"
-              tabIndex={0}
-              aria-label={nodeLabel(n.id)}
-              onClick={() => onSelect(n.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(n.id);
-                }
-              }}
-            >
-              <rect width={NODE_W} height={NODE_H} rx={8} className="graph-node-box" />
-              <text className="graph-node-id" x={10} y={18}>
-                {n.id}
-              </text>
-              {lines.map((line, i) => (
-                <text key={i} className="graph-node-title" x={10} y={34 + i * 15}>
-                  {line}
-                </text>
-              ))}
-            </g>
-          );
-        })}
+    <div
+      className="dag__body"
+      id="dag-body"
+      role="group"
+      aria-label="Milestone dependency graph"
+    >
+      <svg className="dag__edges" aria-hidden="true" focusable="false">
+        {showDeps &&
+          edges.map((e) => {
+            const label = `${e.to} depends on ${e.from}${e.reason ? `, because ${e.reason}` : ""}`;
+            return (
+              <g key={`${e.from}->${e.to}`}>
+                <path
+                  className={e.hot || activeEdge === e ? "on" : ""}
+                  d={e.d}
+                  tabIndex={0}
+                  aria-label={label}
+                  onFocus={() => setActiveEdge(e)}
+                  onBlur={() => setActiveEdge(null)}
+                  onMouseEnter={() => setActiveEdge(e)}
+                  onMouseLeave={() => setActiveEdge(null)}
+                >
+                  <title>{e.reason ? `Because: ${e.reason}` : `${e.to} depends on ${e.from}`}</title>
+                </path>
+                <polygon className={e.hot || activeEdge === e ? "on" : ""} points={e.polygon} />
+              </g>
+            );
+          })}
       </svg>
+      <div className="dag__cols">
+        {cols.map((col, ci) => (
+          <div key={ci} className="dag__col">
+            {col.map((m) => {
+              const state = states.get(m.id) ?? "pending";
+              const worker = workers.get(m.id);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`dnode dnode--${state}${m.enabled ? "" : " dnode--excluded"}`}
+                  aria-pressed={selected === m.id}
+                  aria-label={`${m.id} ${m.title} (${state})`}
+                  data-id={m.id}
+                  onClick={() => onSelect(m.id)}
+                >
+                  {stateIcon(state)}
+                  <span>
+                    <span className="dnode__title">{`${m.id}: ${m.title}`}</span>
+                    <span className="dnode__badges">
+                      {stateBadge(state)}
+                      {worker && (
+                        <span className="badge badge--mono">
+                          <WfIcon name="user" size={12} />
+                          {worker}
+                        </span>
+                      )}
+                      {tierBadge(m.tier)}
+                      {!m.enabled && <span className="badge">Excluded</span>}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
       <p className="graph-caption" aria-live="polite">
         {activeEdge?.reason
           ? `${activeEdge.to} depends on ${activeEdge.from}: ${activeEdge.reason}`
