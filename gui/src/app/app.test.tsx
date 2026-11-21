@@ -64,10 +64,10 @@ describe("registry and sidebar", () => {
     expect(screen.getByRole("region", { name: /Keyboard Shortcuts/ })).toBeInTheDocument();
   }, 15_000); // it visits all ten screens, each loading its data
 
-  it("the Attention Center has a route and a placeholder body", async () => {
+  it("the Attention Center has a route and its body", async () => {
     renderApp({ route: "/notifications", initial: server });
     expect(await screen.findByRole("heading", { name: "Notifications / Attention Center" })).toBeInTheDocument();
-    expect(screen.getByText("Nothing here yet.")).toBeInTheDocument();
+    expect(await screen.findByText("All clear. Nothing needs your attention.")).toBeInTheDocument();
   });
 
   it("an unknown address goes to the first screen", async () => {

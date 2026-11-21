@@ -1,10 +1,20 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { Button } from "../../ui/Button";
+import { Icon } from "../../ui/Icon";
 
 /**
  * The message box. Enter sends, Shift+Enter starts a new line. The text is cleared only when
  * the send is accepted, so a refused message (no lead running) is never lost.
  */
-export function Composer({ onSend, disabled }: { onSend: (text: string) => Promise<boolean>; disabled?: boolean }) {
+export function Composer({
+  onSend,
+  onNewRequest,
+  disabled,
+}: {
+  onSend: (text: string) => Promise<boolean>;
+  onNewRequest?: () => void;
+  disabled?: boolean;
+}) {
   const [text, setText] = useState("");
   const id = useId();
   const box = useRef<HTMLTextAreaElement>(null);
@@ -30,6 +40,18 @@ export function Composer({ onSend, disabled }: { onSend: (text: string) => Promi
         void submit();
       }}
     >
+      {onNewRequest && (
+        <Button
+          className="composer__new"
+          icon
+          aria-label="Open feature request form"
+          title="New feature request"
+          onClick={onNewRequest}
+          disabled={disabled}
+        >
+          <Icon name="plus" />
+        </Button>
+      )}
       <label htmlFor={id} className="visually-hidden">
         Message to the lead
       </label>
@@ -43,7 +65,7 @@ export function Composer({ onSend, disabled }: { onSend: (text: string) => Promi
         onKeyDown={onKey}
         aria-describedby={`${id}-hint`}
       />
-      <button type="submit" className="button button--primary" disabled={disabled || text.trim() === ""}>
+      <button type="submit" className="button button--primary composer__send" disabled={disabled || text.trim() === ""} aria-label="Send">
         Send
       </button>
       <p id={`${id}-hint`} className="muted chat-hint">

@@ -282,3 +282,247 @@ describe("the Chat screen in the app", () => {
     expect(await screen.findByRole("heading", { name: "Chat" })).toBeInTheDocument();
   });
 });
+
+describe("the plan and the team", () => {
+  const pendingTask = (id: string, title: string) => ({
+    id,
+    title,
+    state: "pending",
+    reason: "",
+    deps: [],
+    worker: null,
+    last_worker: null,
+    model: null,
+    tier: "medium",
+    needs: [],
+    ready: true,
+    attempt: 0,
+    fix_rounds: 0,
+    review_rounds: 0,
+    conflict_rounds: 0,
+    lost: 0,
+    escalated: false,
+  });
+
+  it("shows the plan and approves it through the chat endpoint", async () => {
+    const user = userEvent.setup();
+    server.respond("GET", "/chat", 200, { messages: [] });
+    server.respond("GET", "/plan", 200, {
+      title: "Dark mode",
+      header: {
+        branch: "orch/dark-mode",
+        base: "main",
+        check_command: "npm test",
+        setup_command: null,
+        isolation: "worktree",
+        max_parallel: "2",
+        scope: null,
+        budget: null,
+        commits: null,
+        lead: "claude",
+        lead_mode: "manual",
+        workers: "rs-claude-1",
+        reviewer: null,
+        risk_hold: null,
+        setup_inputs: null,
+        extra: [],
+      },
+      feature_breakdown: "one milestone",
+      milestones: [
+        {
+          id: "M1",
+          title: "Add the toggle",
+          enabled: true,
+          goal: "a toggle",
+          why: "people work at night",
+          why_separate: null,
+          depends_on: [],
+          prefer: null,
+          tier: "small",
+          needs: ["coding"],
+          model_why: null,
+          estimate: null,
+          role: null,
+          review: null,
+          parallel: false,
+          likely_files: [],
+          acceptance_criteria: [],
+          constraints: "",
+          interfaces: "",
+          context: "",
+          out_of_scope: "",
+          open_questions: "",
+          has_open_questions: false,
+          notes_from_user: "",
+        },
+      ],
+    });
+    server.respond("GET", "/tasks", 200, { tasks: [pendingTask("M1", "Add the toggle")] });
+    server.respond("POST", "/chat", 201, msg(1, { kind: "plan_approval", text: "Plan approved" }));
+    renderApp({ route: "/chat", initial: server });
+
+    expect(await screen.findByText("Plan: Dark mode")).toBeInTheDocument();
+    expect(screen.getByText("Add the toggle")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve & Start" }));
+
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(bodyOf()).toEqual({ kind: "plan_approval", text: "", request: null });
+    expect((await screen.findAllByText("Plan approved")).length).toBeGreaterThan(0);
+  });
+
+  it("strips terminal colour codes from agent output and offers Open in Herdr", async () => {
+    const user = userEvent.setup();
+    server.respond("GET", "/chat", 200, { messages: [] });
+    server.respond("GET", "/agents", 200, {
+      agents: [],
+      team: [
+        {
+          name: "rs-claude-1",
+          role: "worker",
+          kind: "claude",
+          model: "claude-sonnet-5-5",
+          tier: "medium",
+          detect: true,
+          working_on: { task: "M1", state: "coding" },
+        },
+      ],
+    });
+    server.respond("GET", "/agents/rs-claude-1/output", 200, {
+      agent: "rs-claude-1",
+      lines: 2,
+      text: "\u001b[31mred\u001b[0m plain\n\u001b]0;title\u0007done",
+      ts: "2026-11-15T09:30:00Z",
+    });
+    renderApp({ route: "/chat", initial: server });
+
+    expect(await screen.findByRole("heading", { name: "Attention Inbox (0)" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Agents at Work/ })).toBeInTheDocument();
+    const head = await screen.findByRole("button", { name: /rs-claude-1/ });
+    await user.click(head);
+    const output = await screen.findByLabelText("rs-claude-1 recent output");
+    expect(output).toHaveTextContent("red plain");
+    expect(output).toHaveTextContent("done");
+    expect(output.textContent).not.toContain("\u001b");
+    expect(screen.getByRole("button", { name: /Open in Herdr/ })).toBeDisabled();
+  });
+
+  it("AC1: Screen 01 has the prototype layout with chat column, plan card, attention inbox and agents at work", async () => {
+    server.respond("GET", "/chat", 200, { messages: [] });
+    server.respond("GET", "/plan", 200, {
+      title: "Dark mode",
+      header: {
+        branch: "orch/dark-mode",
+        base: "main",
+        check_command: "npm test",
+        setup_command: null,
+        isolation: "worktree",
+        max_parallel: "2",
+        scope: null,
+        budget: null,
+        commits: null,
+        lead: "claude",
+        lead_mode: "manual",
+        workers: "rs-claude-1",
+        reviewer: null,
+        risk_hold: null,
+        setup_inputs: null,
+        extra: [],
+      },
+      feature_breakdown: "one milestone",
+      milestones: [
+        {
+          id: "M1",
+          title: "Add the toggle",
+          enabled: true,
+          goal: "a toggle",
+          why: "people work at night",
+          why_separate: null,
+          depends_on: [],
+          prefer: null,
+          tier: "small",
+          needs: ["coding"],
+          model_why: null,
+          estimate: null,
+          role: null,
+          review: null,
+          parallel: false,
+          likely_files: [],
+          acceptance_criteria: [],
+          constraints: "",
+          interfaces: "",
+          context: "",
+          out_of_scope: "",
+          open_questions: "",
+          has_open_questions: false,
+          notes_from_user: "",
+        },
+      ],
+    });
+    server.respond("GET", "/tasks", 200, { tasks: [pendingTask("M1", "Add the toggle")] });
+    server.respond("GET", "/attention", 200, { items: [] });
+    server.respond("GET", "/agents", 200, {
+      agents: [],
+      team: [
+        {
+          name: "rs-claude-1",
+          role: "worker",
+          kind: "claude",
+          model: "claude-sonnet-5-5",
+          tier: "medium",
+          detect: true,
+          working_on: { task: "M1", state: "coding" },
+        },
+      ],
+    });
+
+    renderApp({ route: "/chat", initial: server });
+
+    expect(await screen.findByRole("heading", { name: "Lead" })).toBeInTheDocument();
+    expect(await screen.findByText("Plan: Dark mode")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Attention Inbox (0)" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Agents at Work/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Message to the lead")).toBeInTheDocument();
+  });
+
+  it("AC3: the feature-request dialog and composer send through the real chat endpoint and the lead's reply appears in the chat", async () => {
+    const user = userEvent.setup();
+    open([]);
+    await screen.findByText(/Nothing here yet/);
+    await waitFor(() => expect(server.streamRequests().length).toBeGreaterThan(0));
+
+    // 1. Feature request dialog send
+    await user.click(screen.getByRole("button", { name: "New feature request" }));
+    const form = screen.getByRole("form", { name: "New feature request" });
+    await user.type(within(form).getByLabelText(/^Feature/), "User Authentication");
+    await user.type(within(form).getByLabelText(/^Why/), "Security and personalization");
+    stored(msg(1, { kind: "feature_request", text: "Feature request: User Authentication" }));
+    await user.click(within(form).getByRole("button", { name: "Send feature request" }));
+
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(bodyOf(0)).toEqual({
+      kind: "feature_request",
+      text: "",
+      request: expect.objectContaining({ feature: "User Authentication", why: "Security and personalization" }),
+    });
+
+    // Lead's reply appears in the chat via stream
+    await act(async () => {
+      server.emit(1, "chat", lead(2, { text: "I have prepared the plan for User Authentication." }));
+    });
+    expect(await screen.findByText("I have prepared the plan for User Authentication.")).toBeInTheDocument();
+
+    // 2. Composer send
+    stored(msg(3, { text: "Looks great, please proceed" }));
+    const box = screen.getByLabelText("Message to the lead");
+    await user.type(box, "Looks great, please proceed{Enter}");
+
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(bodyOf(1)).toEqual({ kind: "message", text: "Looks great, please proceed", request: null });
+
+    // Lead's second reply appears in the chat
+    await act(async () => {
+      server.emit(2, "chat", lead(4, { text: "Starting milestone execution now." }));
+    });
+    expect(await screen.findByText("Starting milestone execution now.")).toBeInTheDocument();
+  });
+});
