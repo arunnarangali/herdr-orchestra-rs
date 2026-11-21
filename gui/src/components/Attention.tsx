@@ -49,7 +49,7 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
 }
 
 export function AttentionPopup() {
-  const { currentItem, dismissCurrent, clientFor } = useAttention();
+  const { currentItem, dismissCurrent, clientFor, resolveItem } = useAttention();
   const { select } = useProjects();
   const navigate = useNavigate();
 
@@ -76,12 +76,12 @@ export function AttentionPopup() {
   const item: TaggedItem = currentItem;
   const actions: AttentionAction[] = (item.actions ?? []) as AttentionAction[];
 
-  const runAction = async (fn: () => Promise<unknown>) => {
+  const runAction = async (fn: () => Promise<unknown>, resolution: string) => {
     setPending(true);
     setError(null);
     try {
       await fn();
-      dismissCurrent();
+      resolveItem(item, resolution);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -95,12 +95,16 @@ export function AttentionPopup() {
       setError("Please write an answer first.");
       return;
     }
-    void runAction(() => client.answer(item.task!, { text: answer }));
+    void runAction(() => client.answer(item.task!, { text: answer }), "Answered");
   };
 
   const handleApprove = () => {
-    if (!item.task) return;
-    void runAction(() => client.approve(item.task!));
+    // A plan is approved by telling the lead to go; a milestone is approved through its task.
+    if (item.kind === "plan_approval" || !item.task) {
+      void runAction(() => client.sendChat({ kind: "plan_approval", text: "", request: null }), "Approved");
+      return;
+    }
+    void runAction(() => client.approve(item.task!), "Approved");
   };
 
   const handleFix = () => {
@@ -109,12 +113,12 @@ export function AttentionPopup() {
       setError("Please describe the fix first.");
       return;
     }
-    void runAction(() => client.fix(item.task!, { text: fix }));
+    void runAction(() => client.fix(item.task!, { text: fix }), "Fix requested");
   };
 
   const handleDispatch = () => {
     if (!item.task) return;
-    void runAction(() => client.dispatch({ ids: [item.task!] }));
+    void runAction(() => client.dispatch({ ids: [item.task!] }), "Retried");
   };
 
   const handleOpenChat = () => {

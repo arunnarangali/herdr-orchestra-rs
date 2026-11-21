@@ -119,6 +119,47 @@ describe("Attention popup for each item kind", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   });
 
+  it("queuing two items and acting on the first shows the second item in the popup", async () => {
+    const user = userEvent.setup();
+    server.respond("POST", "/tasks/M1/answer", 200, { status: "ok" });
+    server.respond("POST", "/tasks/M2/approve", 200, { status: "ok" });
+    renderApp({ route: "/overview", initial: server });
+    await waitFor(() => expect(server.streamRequests()).toHaveLength(1));
+
+    server.emit(10, "attention", {
+      op: "add",
+      item: makeItem({
+        id: "q-1",
+        kind: "question",
+        task: "M1",
+        title: "Question: API route name",
+        actions: ["answer"],
+      }),
+    });
+    server.emit(11, "attention", {
+      op: "add",
+      item: makeItem({
+        id: "h-2",
+        kind: "held",
+        task: "M2",
+        title: "Milestone M2 held: risk hold",
+        actions: ["approve"],
+      }),
+    });
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Question: API route name");
+
+    const textarea = within(dialog).getByLabelText("Your answer:");
+    await user.type(textarea, "Use /v1/agents");
+    await user.click(within(dialog).getByRole("button", { name: "Send answer" }));
+
+    // Second item should pop up next without being dropped
+    await waitFor(() => expect(dialog).toHaveTextContent("Milestone M2 held: risk hold"));
+    await user.click(within(dialog).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  });
+
   it("opens popup for 'failed' item with fix and dispatch actions", async () => {
     const user = userEvent.setup();
     server.respond("POST", "/tasks/M3/fix", 200, { status: "ok" });

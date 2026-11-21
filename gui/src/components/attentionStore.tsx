@@ -22,6 +22,14 @@ export type TaggedItem = AttentionItem & {
   projectName: string | null;
 };
 
+/** An item that no longer waits. The API only returns open items, so the app keeps this short history. */
+export type ResolvedItem = TaggedItem & {
+  /** When the app saw it resolved. */
+  resolvedAt: string;
+  /** What was done, in the words the developer saw ("Approved", "Answered", "Resolved"). */
+  resolution: string;
+};
+
 const tag = (s: AttentionSource, item: AttentionItem): TaggedItem => ({
   ...item,
   uid: `${s.key}\u0000${item.id}`,
@@ -47,7 +55,12 @@ async function notifyDesktop(item: TaggedItem) {
 }
 
 export interface AttentionStore {
+  /** Items that still need the developer, across every source. */
   waitingItems: TaggedItem[];
+  /** Items this app saw resolved, newest first. */
+  resolvedItems: ResolvedItem[];
+  /** Take an item out of the waiting list (after its action succeeded) and keep it in the history. */
+  resolveItem: (item: TaggedItem, resolution?: string) => void;
   currentItem: TaggedItem | null;
   dismissCurrent: () => void;
   openItem: (item: TaggedItem) => void;
@@ -122,43 +135,80 @@ function SourceWatcher({
  */
 export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
   const [items, setItems] = useState<TaggedItem[]>([]);
+  const [resolved, setResolved] = useState<ResolvedItem[]>([]);
   const [queue, setQueue] = useState<TaggedItem[]>([]);
   const [isListOpen, setIsListOpen] = useState(false);
   const seen = useRef(new Set<string>());
   const previousFocus = useRef<HTMLElement | null>(null);
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
+  // The event and reload callbacks need the items as they are now, not as their closure saw them.
+  const itemsRef = useRef<TaggedItem[]>(items);
+  itemsRef.current = items;
 
-  const onLoaded = useCallback((s: AttentionSource, loaded: AttentionItem[]) => {
-    const tagged = loaded.map((i) => tag(s, i));
-    for (const t of tagged) seen.current.add(t.uid);
-    // replace this source's items (an item already shown by an event stays one item)
-    setItems((prev) => [...prev.filter((x) => x.sourceKey !== s.key), ...tagged]);
+  const addResolved = useCallback((item: TaggedItem, resolution: string) => {
+    setResolved((prev) =>
+      prev.some((x) => x.uid === item.uid)
+        ? prev
+        : [{ ...item, resolvedAt: new Date().toISOString(), resolution }, ...prev],
+    );
   }, []);
 
-  const onEvent = useCallback((s: AttentionSource, op: string, item: AttentionItem) => {
-    const t = tag(s, item);
-    if (op === "add") {
-      setItems((prev) => (prev.some((x) => x.uid === t.uid) ? prev : [...prev, t]));
-      if (!seen.current.has(t.uid)) {
-        seen.current.add(t.uid);
-        if (document.activeElement instanceof HTMLElement && !previousFocus.current) {
-          previousFocus.current = document.activeElement;
-        }
-        setQueue((q) => (q.some((x) => x.uid === t.uid) ? q : [...q, t]));
-        void notifyDesktop(t);
+  const resolveItem = useCallback(
+    (item: TaggedItem, resolution = "Resolved") => {
+      setItems((prev) => prev.filter((x) => x.uid !== item.uid));
+      setQueue((q) => q.filter((x) => x.uid !== item.uid));
+      addResolved(item, resolution);
+    },
+    [addResolved],
+  );
+
+  const onLoaded = useCallback(
+    (s: AttentionSource, loaded: AttentionItem[]) => {
+      const tagged = loaded.map((i) => tag(s, i));
+      for (const t of tagged) seen.current.add(t.uid);
+      // An item of this source that disappeared was resolved elsewhere (the API only lists open items).
+      const still = new Set(tagged.map((t) => t.uid));
+      for (const gone of itemsRef.current.filter((x) => x.sourceKey === s.key && !still.has(x.uid))) {
+        addResolved(gone, "Resolved");
       }
-    } else if (op === "remove") {
-      setItems((prev) => prev.filter((x) => x.uid !== t.uid));
-      setQueue((q) => q.filter((x) => x.uid !== t.uid));
-    }
-  }, []);
+      setResolved((prev) => prev.filter((x) => !still.has(x.uid)));
+      // replace this source's items (an item already shown by an event stays one item)
+      setItems((prev) => [...prev.filter((x) => x.sourceKey !== s.key), ...tagged]);
+    },
+    [addResolved],
+  );
+
+  const onEvent = useCallback(
+    (s: AttentionSource, op: string, item: AttentionItem) => {
+      const t = tag(s, item);
+      if (op === "add") {
+        setItems((prev) => (prev.some((x) => x.uid === t.uid) ? prev : [...prev, t]));
+        setResolved((prev) => prev.filter((x) => x.uid !== t.uid));
+        if (!seen.current.has(t.uid)) {
+          seen.current.add(t.uid);
+          if (document.activeElement instanceof HTMLElement && !previousFocus.current) {
+            previousFocus.current = document.activeElement;
+          }
+          setQueue((q) => (q.some((x) => x.uid === t.uid) ? q : [...q, t]));
+          void notifyDesktop(t);
+        }
+      } else if (op === "remove") {
+        const gone = itemsRef.current.find((x) => x.uid === t.uid);
+        setItems((prev) => prev.filter((x) => x.uid !== t.uid));
+        setQueue((q) => q.filter((x) => x.uid !== t.uid));
+        if (gone) addResolved(gone, "Resolved");
+      }
+    },
+    [addResolved],
+  );
 
   // A project that is no longer a source (closed) takes its items with it.
   const keys = sources.map((s) => s.key).join("\u0001");
   useEffect(() => {
     const live = new Set(keys.split("\u0001"));
     setItems((prev) => (prev.every((x) => live.has(x.sourceKey)) ? prev : prev.filter((x) => live.has(x.sourceKey))));
+    setResolved((prev) => (prev.every((x) => live.has(x.sourceKey)) ? prev : prev.filter((x) => live.has(x.sourceKey))));
     setQueue((prev) => (prev.every((x) => live.has(x.sourceKey)) ? prev : prev.filter((x) => live.has(x.sourceKey))));
     for (const uid of [...seen.current]) if (!live.has(uid.split("\u0000")[0] ?? "")) seen.current.delete(uid);
   }, [keys]);
@@ -202,6 +252,8 @@ export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
 
   return {
     waitingItems: items,
+    resolvedItems: resolved,
+    resolveItem,
     currentItem: queue[0] ?? null,
     dismissCurrent,
     openItem,
