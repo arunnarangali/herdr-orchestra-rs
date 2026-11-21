@@ -7,6 +7,7 @@
 mod app_commands;
 mod app_settings;
 mod create;
+mod project_settings;
 mod projects;
 mod serve;
 mod server;
@@ -98,7 +99,10 @@ fn main() {
             app_commands::restore_projects,
             app_commands::create_project,
             app_commands::get_app_settings,
-            app_commands::save_app_settings
+            app_commands::save_app_settings,
+            app_commands::detect_agent_clis,
+            app_commands::get_project_settings,
+            app_commands::save_project_settings
         ])
         .on_window_event(|window, event| {
             // Closing the window ends every server the app started.

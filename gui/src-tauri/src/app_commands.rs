@@ -5,7 +5,11 @@
 
 use crate::app_settings::{AppSettings, SettingsStore};
 use crate::create::{self, Created};
-use crate::projects::{ProjectList, ProjectStore};
+use crate::project_settings::{
+    detect_agent_clis_with, validate_lead_agent, AgentCli, ProjectSettings, ProjectSettingsStore,
+    SaveProjectSettingsInput,
+};
+use crate::projects::{canonical, ProjectList, ProjectStore};
 use crate::server::{Connection, Servers};
 use crate::store::Loaded;
 use serde::Serialize;
@@ -185,6 +189,62 @@ pub fn get_app_settings(app: AppHandle) -> Result<Loaded<AppSettings>, String> {
 #[tauri::command]
 pub fn save_app_settings(app: AppHandle, settings_in: AppSettings) -> Result<AppSettings, String> {
     settings(&app)?.save(&settings_in)
+}
+
+#[tauri::command]
+pub fn detect_agent_clis() -> Result<Vec<AgentCli>, String> {
+    let registry = orch_config::agents::load(None).map_err(|e| e.to_string())?;
+    Ok(detect_agent_clis_with(
+        &registry,
+        std::env::var_os("PATH").as_deref(),
+    ))
+}
+
+#[tauri::command]
+pub fn get_project_settings(app: AppHandle, path: String) -> Result<ProjectSettings, String> {
+    let canon = canonical(&path);
+    let store = projects(&app)?;
+    if !store.load().value.projects.contains(&canon) {
+        return Err(format!("{path} is not in the project list"));
+    }
+    let p_store = ProjectSettingsStore::new(config_dir(&app)?);
+    let loaded = p_store.load(&canon);
+    Ok(loaded.value)
+}
+
+#[tauri::command]
+pub fn save_project_settings(
+    app: AppHandle,
+    path: String,
+    settings: SaveProjectSettingsInput,
+) -> Result<ProjectSettings, String> {
+    let old_canonical = canonical(&path);
+    let proj_store = projects(&app)?;
+    if !proj_store.load().value.projects.contains(&old_canonical) {
+        return Err(format!("{path} is not in the project list"));
+    }
+
+    let registry = orch_config::agents::load(None).map_err(|e| e.to_string())?;
+    let validated_lead = validate_lead_agent(
+        settings.lead_agent.as_deref(),
+        &registry,
+        std::env::var_os("PATH").as_deref(),
+    )?;
+
+    let new_canonical = proj_store.update_folder(&old_canonical, &settings.folder)?;
+
+    let p_store = ProjectSettingsStore::new(config_dir(&app)?);
+    if new_canonical != old_canonical {
+        app.state::<Servers>().stop(&PathBuf::from(&old_canonical));
+        let _ = p_store.remove(&old_canonical);
+    }
+
+    let to_save = ProjectSettings {
+        lead_agent: validated_lead,
+        folder: new_canonical.clone(),
+        warning: None,
+    };
+    p_store.save(&new_canonical, &to_save)
 }
 
 #[cfg(test)]
