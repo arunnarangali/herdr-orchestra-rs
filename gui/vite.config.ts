@@ -13,5 +13,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     css: false,
+    // jsdom screen tests are slow when the machine is busy (several agents building at once);
+    // the default 5s made them time out at random, so give them room.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });

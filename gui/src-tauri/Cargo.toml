@@ -13,6 +13,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
+orch-config = { path = "../../crates/orch-config" }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
