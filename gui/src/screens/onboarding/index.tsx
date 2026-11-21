@@ -297,7 +297,7 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
       </Card>
 
       <div className="ob__grid">
-        <nav aria-label="Setup steps">
+        <nav aria-label="Setup steps" className="ob__steps-nav">
           <ol className="steps">
             {STEPS.map((s, i) => {
               const st = results[s.id].state;
@@ -307,7 +307,7 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
                   <span className="step__no" aria-hidden="true">
                     {i + 1}
                   </span>
-                  <Card className="step__card">
+                  <Card className="step__card" onClick={() => setIndex(i)} style={{ cursor: "pointer" }}>
                     <span className="step__icon">
                       <Icon name={s.icon} />
                     </span>

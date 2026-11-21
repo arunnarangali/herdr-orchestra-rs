@@ -271,3 +271,35 @@ describe("a browser", () => {
     expect(screen.getByRole("heading", { name: /2\. Herdr/ })).toHaveFocus();
   });
 });
+
+describe("layout and step cards", () => {
+  it("renders equal-width step cards with title, status badge, one-line desc, and card click switches step", async () => {
+    const user = userEvent.setup();
+    show({ shell: fakeShell(), initial: server });
+
+    const nav = screen.getByRole("navigation", { name: "Setup steps" });
+    expect(nav).toHaveClass("ob__steps-nav");
+
+    const list = within(nav).getByRole("list");
+    expect(list).toHaveClass("steps");
+
+    const listItems = within(list).getAllByRole("listitem");
+    expect(listItems).toHaveLength(6);
+    for (const li of listItems) {
+      expect(li).toHaveClass("step");
+      const card = li.querySelector(".step__card");
+      expect(card).not.toBeNull();
+      expect(card?.querySelector(".step__desc")).not.toBeNull();
+    }
+
+    // Step 1 is active initially
+    expect(listItems[0]).toHaveClass("step--on");
+
+    // Clicking anywhere on step 3's card switches to step 3
+    const step3Card = listItems[2]!.querySelector(".step__card") as HTMLElement;
+    await user.click(step3Card);
+    expect(listItems[2]).toHaveClass("step--on");
+    expect(screen.getByRole("heading", { name: /3\. Installed AI Coding Agents/ })).toBeInTheDocument();
+  });
+});
+
