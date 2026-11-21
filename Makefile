@@ -71,8 +71,9 @@ dev-gui: ## Start Vite GUI development server
 dev-tauri: ## Start Tauri desktop GUI app in dev mode
 	export ORCH_BIN="$${ORCH_BIN:-$(PWD)/target/release/orch}" && cd gui && $(NPM) run tauri dev
 
-run-desktop: ## Launch the compiled desktop GUI app window directly
-	export ORCH_BIN="$${ORCH_BIN:-$(PWD)/target/release/orch}" && ./gui/src-tauri/target/debug/herdr-orchestra-gui
+run-desktop: ## Launch the standalone desktop GUI app window directly
+	@echo "Launching Herdr Orchestra Desktop GUI..."
+	@export ORCH_BIN="$${ORCH_BIN:-$(PWD)/target/release/orch}" && ./gui/src-tauri/target/release/herdr-orchestra-gui
 
 status: ## Check current orchestration run status
 	$(CARGO) run -p orch -- status
