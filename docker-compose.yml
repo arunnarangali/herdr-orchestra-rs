@@ -1,0 +1,14 @@
+services:
+  orch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: herdr-orchestra:latest
+    container_name: herdr-orchestra
+    # orch serve binds specifically to loopback (127.0.0.1); host network mode allows loopback binding
+    network_mode: "host"
+    volumes:
+      - ./:/workspace
+      - ${HOME}/.config/herdr-orchestra:/root/.config/herdr-orchestra
+    working_dir: /workspace
+    command: ["serve", "--port", "8787", "--allow-origin", "http://127.0.0.1:5173"]
