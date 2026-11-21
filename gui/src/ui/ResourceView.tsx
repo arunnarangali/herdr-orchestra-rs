@@ -18,8 +18,8 @@ export function describeError(error: ApiError): { title: string; hint: string } 
   }
   if (error.isNoRun) {
     return {
-      title: "This project has no run yet",
-      hint: "Write .orchestrate/plan.md and run `orch sync`, then try again.",
+      title: "No run in this project yet",
+      hint: "This page fills in by itself once the lead has planned a run.",
     };
   }
   return { title: error.message, hint: error.requestId ? `Request ${error.requestId}` : "" };
@@ -27,6 +27,8 @@ export function describeError(error: ApiError): { title: string; hint: string } 
 
 export function ErrorPanel({ error, onRetry }: { error: ApiError; onRetry?: () => void }) {
   const { title, hint } = describeError(error);
+  // No run yet is a normal state, not a failure: no error styling and nothing to retry.
+  if (error.isNoRun) return <NoRunPanel title={title} hint={hint} />;
   return (
     <div className="panel panel--error" role="alert">
       <p className="panel-title">{title}</p>
@@ -36,6 +38,16 @@ export function ErrorPanel({ error, onRetry }: { error: ApiError; onRetry?: () =
           Try again
         </button>
       )}
+    </div>
+  );
+}
+
+/** The calm panel for a project that has no run yet. */
+export function NoRunPanel({ title = "No run in this project yet", hint }: { title?: string; hint?: string }) {
+  return (
+    <div className="panel" role="status">
+      <p className="panel-title">{title}</p>
+      {hint && <p className="muted">{hint}</p>}
     </div>
   );
 }

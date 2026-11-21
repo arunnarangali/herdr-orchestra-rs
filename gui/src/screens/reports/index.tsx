@@ -291,8 +291,7 @@ export function ReportsScreen() {
           <p className="panel-title">No report yet</p>
           <p>This project has no run yet</p>
           <p className="muted">
-            The report fills in while a run goes. Write <code>.orchestrate/plan.md</code> (or ask the lead to) and run{" "}
-            <code>orch sync</code>.
+            The report fills in while a run goes. Ask the lead to plan one in Chat.
           </p>
         </Card>
       )}
@@ -300,7 +299,7 @@ export function ReportsScreen() {
       {resource.state === "empty" && (
         <Card className="rep-none" role="status">
           <p className="panel-title">No milestones</p>
-          <p className="muted">This run has no milestones. Write them in .orchestrate/plan.md and run `orch sync`.</p>
+          <p className="muted">This run has no milestones yet. Ask the lead to add them in Chat.</p>
         </Card>
       )}
       {resource.state === "ready" && bundle && <Report bundle={bundle} />}

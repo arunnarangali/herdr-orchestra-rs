@@ -34,8 +34,8 @@ export function advice(kind: ConnectionKind, url: string | null): { title: strin
       };
     case "no-run":
       return {
-        title: "The server works, but this project has no run yet.",
-        hint: "Write .orchestrate/plan.md and run `orch sync`. This page keeps checking.",
+        title: "This project has no run yet.",
+        hint: "Start one with a new feature request in Chat. This page keeps checking.",
       };
     default:
       return null;
@@ -64,7 +64,8 @@ export function ConnectionBanner() {
   const { kind, credentials, recheck, disconnect } = useConnection();
   const { multi, selected, retry } = useProjects();
   const info = advice(kind, credentials?.url ?? null);
-  if (!info || kind === "unconfigured") return null;
+  // No run yet is a normal state, not a problem: the top bar pill says so and Chat explains it.
+  if (!info || kind === "unconfigured" || kind === "no-run") return null;
   return (
     <div className={`banner banner--${kind}`} role="alert">
       <p className="banner-text">

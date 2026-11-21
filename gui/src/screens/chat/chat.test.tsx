@@ -55,10 +55,37 @@ describe("the conversation", () => {
     expect(await screen.findByText(/Nothing here yet/)).toBeInTheDocument();
   });
 
-  it("explains a failed read and can try again", async () => {
+  it("a project with no run yet opens as a calm chat: no error, no terminal instructions, New feature request ready", async () => {
     server.respond("GET", "/chat", 404, errorBody("no_run", "no run"));
     renderApp({ route: "/chat", initial: server });
-    expect(await screen.findByText("This project has no run yet")).toBeInTheDocument();
+    const log = await screen.findByRole("log", { name: /Conversation with the lead/ });
+    expect(within(log).getByText("No run in this project yet.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("orch sync");
+    expect(document.body).not.toHaveTextContent("plan.md");
+    expect(screen.queryByText("This project has no run yet")).not.toBeInTheDocument();
+    expect(document.querySelector(".panel--error")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "New feature request" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: /message/i })).toBeInTheDocument();
+  });
+
+  it("with no run, a send says so in plain words and never shows the server's terminal advice", async () => {
+    server.respond("GET", "/chat", 404, errorBody("no_run", "no run"));
+    server.respond("POST", "/chat", 404, errorBody("no_run", "no run exists in this project: write .orchestrate/plan.md and run `orch sync`"));
+    const user = userEvent.setup();
+    renderApp({ route: "/chat", initial: server });
+    await screen.findByText("No run in this project yet.");
+    await user.type(screen.getByRole("textbox", { name: /message/i }), "build a login page");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText(/Not sent: this project has no run yet/)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("orch sync");
+    expect(document.body).not.toHaveTextContent("plan.md");
+  });
+
+  it("explains a failed read and can try again", async () => {
+    server.respond("GET", "/chat", 500, errorBody("internal", "boom"));
+    renderApp({ route: "/chat", initial: server });
+    expect(await screen.findByText("boom")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 

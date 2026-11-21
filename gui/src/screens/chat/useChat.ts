@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatBody, ChatMessage } from "../../api/types";
 import { useConnection } from "../../app/connection";
-import { useSendChat } from "../../components/useSendChat";
+import { useSendChat, type SendResult } from "../../components/useSendChat";
+
+/** The server's wording for a project without a run. */
+const NO_RUN_TEXT = /\bno run\b/i;
+/** What a send says when the project has no run yet. */
+export const NO_RUN_SEND =
+  "Not sent: this project has no run yet, so there is no lead to take messages here. Once the lead is running for this project, send it again.";
 import type { ApiError } from "../../api/errors";
 import { isApiError } from "../../api/errors";
 
@@ -16,6 +22,8 @@ export interface OutboxEntry {
 export interface Chat {
   state: "loading" | "ready" | "error";
   error: ApiError | null;
+  /** The project has no run yet: a normal state, shown as an empty conversation, not an error. */
+  noRun: boolean;
   /** The stored conversation, oldest first. */
   messages: ChatMessage[];
   outbox: OutboxEntry[];
@@ -43,18 +51,46 @@ export interface Chat {
  */
 export function useChat(): Chat {
   const { client, stream } = useConnection();
-  const { send, pending } = useSendChat();
+  const { send: rawSend, pending } = useSendChat();
   const [byId, setById] = useState<Map<number, ChatMessage>>(new Map());
   const [state, setState] = useState<Chat["state"]>("loading");
   const [error, setError] = useState<ApiError | null>(null);
   const [outbox, setOutbox] = useState<OutboxEntry[]>([]);
   const [leadProblem, setLeadProblem] = useState<string | null>(null);
+  const [noRun, setNoRun] = useState(false);
+  const noRunRef = useRef(false);
+  noRunRef.current = noRun;
+
+  // Without a run the server takes no chat messages (404 no_run) and its answer names a
+  // terminal command. Say it in plain words instead; the message was not stored.
+  const send = useCallback(
+    async (body: ChatBody): Promise<SendResult> => {
+      const r = await rawSend(body);
+      if (!r.ok && r.kind === "error" && (noRunRef.current || NO_RUN_TEXT.test(r.text))) {
+        setNoRun(true);
+        return { ok: false, kind: "error", text: NO_RUN_SEND };
+      }
+      return r;
+    },
+    [rawSend],
+  );
   const [nonce, setNonce] = useState(0);
+  const { kind } = useConnection();
   const streamSeq = useRef(0);
   const streamedAt = useRef(new Map<number, number>());
   const keys = useRef(0);
   const subscribe = stream.subscribe;
   const status = stream.status;
+
+  // The connection check keeps polling a project with no run; read again once a run exists.
+  const wasNoRun = useRef(false);
+  useEffect(() => {
+    if (kind === "no-run") wasNoRun.current = true;
+    else if (kind === "connected" && wasNoRun.current) {
+      wasNoRun.current = false;
+      setNonce((n) => n + 1);
+    }
+  }, [kind]);
 
   const merge = useCallback((list: ChatMessage[], skipStreamedAfter?: number) => {
     setById((prev) => {
@@ -85,10 +121,18 @@ export function useChat(): Chat {
         if (abort.signal.aborted) return;
         merge(r.messages, started);
         setError(null);
+        setNoRun(false);
         setState("ready");
       })
       .catch((e: unknown) => {
         if (abort.signal.aborted) return;
+        if (isApiError(e) && e.isNoRun) {
+          // Before the first run there is nothing stored: an empty conversation, not a failure.
+          setError(null);
+          setNoRun(true);
+          setState("ready");
+          return;
+        }
         if (isApiError(e)) setError(e);
         setState((s) => (s === "ready" ? s : "error"));
       });
@@ -158,6 +202,7 @@ export function useChat(): Chat {
   return {
     state,
     error,
+    noRun,
     messages,
     outbox,
     leadProblem,

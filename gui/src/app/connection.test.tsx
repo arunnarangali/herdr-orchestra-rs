@@ -68,7 +68,9 @@ describe("connection state in the app frame", () => {
     open.push(noRun);
     renderApp({ route: "/workflows", initial: noRun });
     await waitPill("No run");
-    expect(banner()).toHaveTextContent("orch sync");
+    // a project with no run is normal: the pill says so, but there is no warning banner or terminal advice
+    expect(document.querySelector(".banner")).toBeNull();
+    expect(document.body).not.toHaveTextContent("orch sync");
     expect(noRun.streamRequests()).toHaveLength(0);
   });
 
