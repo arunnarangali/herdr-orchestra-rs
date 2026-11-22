@@ -16,7 +16,8 @@
 use crate::error::ApiError;
 use crate::routes::stream::StreamHub;
 use axum::http::StatusCode;
-use orch_config::agents::{self, Registry, Role};
+use orch_config::agents::{self, AgentKind, Registry, Role};
+use orch_config::discovery::skills::{self, AssetState};
 use orch_config::launch::launch_command;
 use orch_config::models::Catalog;
 use orch_config::tunables::Tunables;
@@ -99,6 +100,8 @@ pub struct LeadOptions {
     pub registry: Option<Registry>,
     /// The model catalog; `None` reads it on every start.
     pub catalog: Option<Catalog>,
+    /// The home directory; `None` reads `$HOME`.
+    pub home: Option<PathBuf>,
     /// Seconds Herdr has to come up after the launcher started it.
     pub server_wait_s: f64,
     /// Seconds herdr has to see the agent start (`ORCH_TEAM_WAIT_S`, default 90).
@@ -115,6 +118,7 @@ impl LeadOptions {
         LeadOptions {
             registry: None,
             catalog: None,
+            home: None,
             server_wait_s: 15.0,
             agent_wait_s: t.team_wait_s.max(0.0),
             ready_wait_s: t.team_wait_s.max(0.0),
@@ -181,25 +185,70 @@ fn pane_status(s: AgentStatus) -> Option<LeadStatus> {
     }
 }
 
-/// The one prompt a new Lead gets: the planning playbook, how it was started, then the
-/// developer's first message exactly as written (or that there is none yet).
-pub fn first_prompt(kind: &str, name: &str, pane: &str, message: Option<&str>) -> String {
-    let mut p = orch_config::playbooks::render("plan").expect("the plan playbook is shipped");
-    p.push_str(&format!(
+/// The one prompt a new Lead gets: that kind's planning skill command plus the developer's
+/// first message as written (or waiting instructions when there is none yet), and how it was
+/// started in Herdr. The full playbook is no longer typed into the pane.
+pub fn first_prompt(
+    kind: &str,
+    name: &str,
+    pane: &str,
+    message: Option<&str>,
+    invoke: Option<&str>,
+) -> String {
+    let header = format!(
         "\n---\nThe herdr-orchestra app started you in Herdr pane {pane} and already named it \
 `{name}`: skip `orch lead whoami`, and write `Lead: {name} ({kind})` in the plan header.\n"
-    ));
+    );
     match message {
         Some(m) => {
-            p.push_str("\nThe developer's first message to you:\n\n");
-            p.push_str(m);
-            p.push('\n');
+            let cmd = match invoke {
+                Some(inv) if inv.contains("<feature>") => inv.replace("<feature>", m),
+                Some(inv) => format!("{inv} {m}"),
+                None => format!("use the orch-plan skill: {m}"),
+            };
+            format!("{cmd}{header}")
         }
-        None => p.push_str(
-            "\nThe developer has not written anything yet: say that you are ready, then wait for them.\n",
+        None => format!(
+            "---\nThe herdr-orchestra app started you in Herdr pane {pane} and already named it \
+`{name}`: skip `orch lead whoami`, and write `Lead: {name} ({kind})` in the plan header.\n\n\
+The developer has not written anything yet: say that you are ready, then wait for them.\n"
         ),
     }
-    p
+}
+
+/// Whether the kind's orch skills and slash commands are already installed.
+fn skills_installed(ak: &AgentKind, home: &Path) -> bool {
+    let assets = skills::agent_assets(ak, home);
+    if assets.is_empty() {
+        return true;
+    }
+    assets.iter().all(|a| a.state != AssetState::Missing)
+}
+
+/// Install the kind's orch skills and slash commands through orch's own skill installer.
+fn install_skills(ak: &AgentKind, home: &Path) -> Result<(), String> {
+    let flavor = ak
+        .commands_from
+        .as_deref()
+        .unwrap_or(skills::DEFAULT_FLAVOR);
+    let mut recs = Vec::new();
+    for d in &ak.skills_dirs {
+        let path = skills::expand(d, home);
+        let (_, r) = skills::sync_skills(&path)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        recs.extend(r);
+    }
+    for d in &ak.commands_dirs {
+        let path = skills::expand(d, home);
+        let (_, r) = skills::sync_commands(&path, flavor)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        recs.extend(r);
+    }
+    if !recs.is_empty() {
+        skills::manifest_record(home, &recs)
+            .map_err(|e| format!("cannot write {}: {e}", skills::manifest_path(home).display()))?;
+    }
+    Ok(())
 }
 
 impl LeadLauncher {
@@ -384,7 +433,7 @@ impl LeadLauncher {
                 "`agent` is required: the agent kind to start as the Lead, e.g. `claude`",
             ));
         }
-        let command = self.check_kind(&kind)?;
+        let (command, invoke) = self.check_kind(&kind)?;
         {
             let mut slot = self.slot.lock().unwrap();
             if let Some(s) = &slot.starting {
@@ -422,7 +471,7 @@ impl LeadLauncher {
         let message = message.filter(|m| !m.trim().is_empty());
         std::thread::spawn(move || {
             let run = std::panic::AssertUnwindSafe(|| {
-                me.launch(&kind, &name, &command, message.as_deref(), resume)
+                me.launch(&kind, &name, &command, &invoke, message.as_deref(), resume)
             });
             if std::panic::catch_unwind(run).is_err() {
                 // never leave the one Lead slot claimed
@@ -449,8 +498,13 @@ impl LeadLauncher {
         self.herdr.pane(&pane).ok().map(|p| p.pane_id)
     }
 
-    /// The kind's launch command, or why it cannot be the Lead.
-    fn check_kind(&self, kind: &str) -> Result<String, ApiError> {
+    /// The home directory: `self.opts.home` or `$HOME`.
+    pub fn home(&self) -> PathBuf {
+        self.opts.home.clone().unwrap_or_else(skills::home)
+    }
+
+    /// The kind's launch command and its invoke command, or why it cannot be the Lead.
+    fn check_kind(&self, kind: &str) -> Result<(String, String), ApiError> {
         let reg = match &self.opts.registry {
             Some(r) => r.clone(),
             None => agents::load(None)
@@ -494,14 +548,27 @@ install it, or choose an installed agent",
 working (herdr_detect = false)"
             )));
         }
+        let Some(invoke) = ak.invoke.as_deref().filter(|s| !s.trim().is_empty()) else {
+            return Err(ApiError::bad_request(format!(
+                "agent kind `{kind}` cannot be the Lead: no `invoke` command configured in the registry"
+            )));
+        };
+        let invoke = invoke.to_string();
+        let home = self.home();
+        if !skills_installed(ak, &home) {
+            install_skills(ak, &home).map_err(|e| {
+                ApiError::bad_request(format!("agent kind `{kind}`: cannot install skills: {e}"))
+            })?;
+        }
         let cat = match &self.opts.catalog {
             Some(c) => c.clone(),
             None => orch_config::models::load(None)
                 .map_err(|e| ApiError::internal(format!("model catalog: {e}")))?,
         };
-        launch_command(&reg, &cat, kind, None, false)
+        let command = launch_command(&reg, &cat, kind, None, false)
             .map(|l| l.command)
-            .map_err(|e| ApiError::bad_request(format!("agent kind `{kind}`: {e}")))
+            .map_err(|e| ApiError::bad_request(format!("agent kind `{kind}`: {e}")))?;
+        Ok((command, invoke))
     }
 
     /// Herdr is reachable, or it was started headless and came up within the bound.
@@ -628,6 +695,7 @@ Lead by that name: close that agent (or its project's Lead) in Herdr, then start
         kind: &str,
         name: &str,
         command: &str,
+        invoke: &str,
         message: Option<&str>,
         resume: Option<String>,
     ) {
@@ -713,7 +781,7 @@ then start the Lead again: it picks that pane up",
         let _ = self.herdr.rename_pane(&pane, name);
         self.set_starting(None, &format!("waiting for {kind} to be ready"));
         self.publish();
-        let prompt = first_prompt(kind, name, &pane, message);
+        let prompt = first_prompt(kind, name, &pane, message, Some(invoke));
         let note = self.hand_over(name, &prompt);
         self.finish(Some((kind, &pane)), note, false);
     }
