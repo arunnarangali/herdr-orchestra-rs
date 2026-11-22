@@ -131,6 +131,8 @@ export function ChatScreen() {
             onSend={(text) => chat.sendQueued({ kind: "message", text, request: null })}
             onNewRequest={() => setFormOpen(true)}
             disabled={lead.starting}
+            text={chat.draft}
+            onText={chat.setDraft}
           />
         </section>
 

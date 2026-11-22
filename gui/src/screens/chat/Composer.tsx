@@ -10,12 +10,19 @@ export function Composer({
   onSend,
   onNewRequest,
   disabled,
+  text: kept,
+  onText,
 }: {
   onSend: (text: string) => Promise<boolean>;
   onNewRequest?: () => void;
   disabled?: boolean;
+  /** The unsent text, when the screen keeps it (so it survives leaving the page). */
+  text?: string;
+  onText?: (text: string) => void;
 }) {
-  const [text, setText] = useState("");
+  const [own, setOwn] = useState("");
+  const text = kept ?? own;
+  const setText = onText ?? setOwn;
   const id = useId();
   const box = useRef<HTMLTextAreaElement>(null);
 

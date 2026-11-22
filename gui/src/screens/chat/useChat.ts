@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChatBody, ChatMessage } from "../../api/types";
 import { useConnection } from "../../app/connection";
 import { useProjects } from "../../app/projects";
 import { useSendChat, type SendResult } from "../../components/useSendChat";
+import { chatMemoryFor, UNKNOWN_PROJECT, type ChatSnapshot, type OutboxEntry } from "./chatMemory";
 import { startMessageFor, type LeadControl } from "./useLead";
+
+export type { OutboxEntry };
 
 /** The server's wording for a project without a run. */
 const NO_RUN_TEXT = /\bno run\b/i;
@@ -11,15 +14,6 @@ import type { ApiError } from "../../api/errors";
 import { isApiError } from "../../api/errors";
 
 type Inner = SendResult | { ok: false; kind: "no_run"; text: string };
-
-/** A message of the developer's that has not been stored yet, or could not be sent. */
-export interface OutboxEntry {
-  key: number;
-  body: ChatBody;
-  /** `waiting`: no run exists yet, so it is held and sent by itself once the run is there. */
-  state: "sending" | "failed" | "waiting";
-  error: string | null;
-}
 
 /**
  * First messages that started the Lead are kept on this machine: with no run the server has no
@@ -65,6 +59,9 @@ export interface Chat {
   /** Called when a stored message came back from a send. */
   adopt: (m: ChatMessage) => void;
   clearLeadProblem: () => void;
+  /** What is typed in the message box and not sent yet (kept while Chat is not on screen). */
+  draft: string;
+  setDraft: (text: string) => void;
 }
 
 /**
@@ -76,12 +73,29 @@ export interface Chat {
 export function useChat(lead?: LeadControl): Chat {
   const { client, stream } = useConnection();
   const { send: rawSend, pending } = useSendChat();
-  const [byId, setById] = useState<Map<number, ChatMessage>>(new Map());
-  const [state, setState] = useState<Chat["state"]>("loading");
-  const [error, setError] = useState<ApiError | null>(null);
-  const [outbox, setOutbox] = useState<OutboxEntry[]>([]);
-  const [leadProblem, setLeadProblem] = useState<string | null>(null);
-  const [noRun, setNoRun] = useState(false);
+  // The conversation lives in the project's chat memory, not in this screen: see chatMemory.ts.
+  const { selected } = useProjects();
+  const { health } = useConnection();
+  const projectKey = (selected ?? health?.project ?? "") || UNKNOWN_PROJECT;
+  const memory = useMemo(() => chatMemoryFor(projectKey), [projectKey]);
+  const snap = useSyncExternalStore(memory.subscribe, memory.get);
+  const { byId, state, error, outbox, leadProblem, noRun } = snap;
+  const setters = useMemo(() => {
+    const patch =
+      <K extends keyof ChatSnapshot>(key: K) =>
+      (v: ChatSnapshot[K] | ((prev: ChatSnapshot[K]) => ChatSnapshot[K])) =>
+        memory.update((s) => ({ [key]: typeof v === "function" ? (v as (p: ChatSnapshot[K]) => ChatSnapshot[K])(s[key]) : v }) as Partial<ChatSnapshot>);
+    return {
+      setById: patch("byId"),
+      setState: patch("state"),
+      setError: patch("error"),
+      setOutbox: patch("outbox"),
+      setLeadProblem: patch("leadProblem"),
+      setNoRun: patch("noRun"),
+      setDraft: patch("draft"),
+    };
+  }, [memory]);
+  const { setById, setState, setError, setOutbox, setLeadProblem, setNoRun, setDraft } = setters;
   const noRunRef = useRef(false);
   noRunRef.current = noRun;
   // the stored conversation was read and a run exists (so the chat routes take messages)
@@ -90,9 +104,7 @@ export function useChat(lead?: LeadControl): Chat {
 
   // Without a run the server takes no chat messages (404 no_run) and its answer names a
   // terminal command. Say it in plain words instead; the message was not stored.
-  const { selected } = useProjects();
-  const { health } = useConnection();
-  const storeKey = `orch.chat.started:${(selected ?? health?.project ?? "") || "project"}`;
+  const storeKey = `orch.chat.started:${projectKey}`;
   const storeKeyRef = useRef(storeKey);
   storeKeyRef.current = storeKey;
   const leadRef = useRef(lead);
@@ -141,7 +153,7 @@ export function useChat(lead?: LeadControl): Chat {
       }
       return r;
     },
-    [rawSend],
+    [rawSend, setNoRun],
   );
   // for the form and the approval, which show the result themselves
   const sendNow = useCallback(
@@ -158,7 +170,6 @@ export function useChat(lead?: LeadControl): Chat {
   const { kind } = useConnection();
   const streamSeq = useRef(0);
   const streamedAt = useRef(new Map<number, number>());
-  const keys = useRef(0);
   const subscribe = stream.subscribe;
   const status = stream.status;
 
@@ -186,7 +197,7 @@ export function useChat(lead?: LeadControl): Chat {
       }
       return next;
     });
-  }, []);
+  }, [setById]);
 
   // read the conversation: on mount, after a reconnect, and on `reload`
   const wasConnected = useRef(false);
@@ -222,7 +233,7 @@ export function useChat(lead?: LeadControl): Chat {
         setState((s) => (s === "ready" ? s : "error"));
       });
     return () => abort.abort();
-  }, [client, nonce, merge]);
+  }, [client, nonce, merge, setError, setNoRun, setState]);
 
   useEffect(
     () =>
@@ -259,7 +270,7 @@ export function useChat(lead?: LeadControl): Chat {
       setOutbox((o) => o.map((e) => (e.key === key ? { ...e, state: "failed", error: r.text } : e)));
       return false;
     },
-    [send, merge],
+    [send, merge, setOutbox, setLeadProblem],
   );
 
   // a held message goes out as soon as the run exists
@@ -269,15 +280,15 @@ export function useChat(lead?: LeadControl): Chat {
     if (held.length === 0) return;
     setOutbox((o) => o.map((e) => (e.state === "waiting" ? { ...e, state: "sending" } : e)));
     for (const e of held) void attempt(e.key, e.body);
-  }, [noRun, outbox, attempt]);
+  }, [noRun, outbox, attempt, setOutbox]);
 
   const sendQueued = useCallback(
     (body: ChatBody) => {
-      const key = ++keys.current;
+      const key = memory.nextKey();
       setOutbox((o) => [...o, { key, body, state: "sending", error: null }]);
       return attempt(key, body);
     },
-    [attempt],
+    [attempt, memory],
   );
 
   const retryOutbox = useCallback(
@@ -287,7 +298,7 @@ export function useChat(lead?: LeadControl): Chat {
       setOutbox((o) => o.map((e) => (e.key === key ? { ...e, state: "sending", error: null } : e)));
       void attempt(key, entry.body);
     },
-    [outbox, attempt],
+    [outbox, attempt, setOutbox],
   );
 
   const resend = useCallback(
@@ -313,5 +324,7 @@ export function useChat(lead?: LeadControl): Chat {
     reload: () => setNonce((n) => n + 1),
     adopt: (m) => merge([m]),
     clearLeadProblem: () => setLeadProblem(null),
+    draft: snap.draft,
+    setDraft,
   };
 }

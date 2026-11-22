@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { resetChatMemoryForTests } from "../screens/chat/chatMemory";
 
 // The suite runs many files in parallel workers; under that load the app's async settles
 // (health checks, fetches, stream connects) can outlast the 1s default. A wider window
@@ -25,6 +26,7 @@ Object.defineProperty(window, "localStorage", { value: memoryStorage, configurab
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  resetChatMemoryForTests();
 });
 
 // jsdom has no matchMedia; tests choose the system theme through `setSystemDark`.
