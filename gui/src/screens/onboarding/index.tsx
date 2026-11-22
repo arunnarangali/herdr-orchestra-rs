@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useConnection } from "../../app/connection";
+import { HerdrSetup, useHerdr } from "../../app/HerdrSetup";
 import { useProjects } from "../../app/projects";
 import type { AgentsResponse } from "../../api/types";
 import { CopyCommand } from "./CopyCommand";
@@ -116,7 +117,7 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
   const rerun = (id: keyof typeof nonce) => setNonce((n) => ({ ...n, [id]: n[id] + 1 }));
 
   const [orch, setOrch] = useState<{ path: string | null; error: string | null } | null>(null);
-  const [herdr, setHerdr] = useState<{ path: string | null; error: string | null } | null>(null);
+  const herdr = useHerdr(shell, nonce.herdr);
   const [agents, setAgents] = useState<{ data: AgentsResponse | null; error: string | null } | null>(null);
   const [issue, setIssue] = useState<string | null>(null);
   const [unverified, setUnverified] = useState(false);
@@ -134,19 +135,6 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
       live = false;
     };
   }, [shell, nonce.orch]);
-
-  useEffect(() => {
-    setHerdr(null);
-    if (!shell) return;
-    let live = true;
-    shell.findHerdr().then(
-      (path) => live && setHerdr({ path, error: null }),
-      (e: unknown) => live && setHerdr({ path: null, error: messageOf(e) }),
-    );
-    return () => {
-      live = false;
-    };
-  }, [shell, nonce.herdr]);
 
   // The frame leaves the connect step for the first screen as soon as a project is chosen.
   // The guide is not finished then, so come straight back to it at the project step.
@@ -176,7 +164,7 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
 
   const results: Record<StepId, StepResult> = {
     orch: shell && !orch ? checking("Looking for orch…") : orchResult(orch?.path ?? null, orch?.error ?? null, health, shell !== null),
-    herdr: shell && !herdr ? checking("Looking for Herdr…") : herdrResult(herdr?.path ?? null, herdr?.error ?? null, shell !== null),
+    herdr: shell && !herdr.info ? checking("Looking for Herdr…") : herdrResult(herdr.info, shell !== null),
     agents: agentsResult(agents?.data ?? null, connected, agents?.error ?? null),
     skills: skillsResult(agents?.data ?? null, connected, agents?.error ?? null),
     project: projectResult(),
@@ -248,6 +236,9 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
   const firstAgent = agents?.data?.agents.find((a) => a.installed)?.kind ?? null;
   const attention = STEPS.filter((s) => s.id !== "start" && results[s.id].state === "problem");
   const last = index === STEPS.length - 1;
+  const herdrSetup = herdr.info && (
+    <HerdrSetup shell={shell} info={herdr.info} onChange={herdr.setInfo} onRecheck={() => rerun("herdr")} />
+  );
 
   const checks = STEPS.filter((s) => s.id !== "start");
   const passed = checks.filter((s) => results[s.id].state === "ok").length;
@@ -346,6 +337,14 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
               ) : (
                 <p>Everything checked is in place.</p>
               )}
+              {results.herdr.state === "problem" && (
+                <div className="ob-herdr-alert" role="alert">
+                  <p>
+                    <strong>Herdr needs attention.</strong> Orchestra needs Herdr to start the Lead and its agents.
+                  </p>
+                  {herdrSetup}
+                </div>
+              )}
               <ol className="ob-list">
                 <li>
                   Prepare the team and open the panes in Herdr (the lead builds a team from what is installed):
@@ -359,7 +358,7 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
                   Say <strong>go</strong>. The event manager runs the milestones and wakes the lead when you are needed.
                 </li>
               </ol>
-              <p className="muted">The app only shows these commands; it never runs them or installs anything. Finish setup, then chat with the lead from Chat / Home.</p>
+              <p className="muted">The app only shows these commands; it never runs them. It installs Herdr only when you choose Install Herdr and Run it. Finish setup, then chat with the lead from Chat / Home.</p>
             </>
           ) : (
             <>
@@ -367,6 +366,9 @@ function Flow({ onFinish, onSkip }: { onFinish: () => void; onSkip: () => void }
                 <Badge tone={STATE_TONE[r.state]}>{STATE_WORD[r.state]}</Badge> {r.found}
               </p>
               {r.next && <p>{r.next}</p>}
+              {step.id === "herdr" && r.state === "problem" && herdr.info && (
+                <HerdrSetup shell={shell} info={herdr.info} onChange={herdr.setInfo} onRecheck={() => rerun("herdr")} embedded />
+              )}
               {r.commands.map((c) => (
                 <CopyCommand key={c} command={c} />
               ))}

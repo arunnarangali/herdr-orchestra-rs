@@ -1169,3 +1169,48 @@ textarea:hover {
     transition: transform 0.18s ease, visibility 0.18s;
   }
 }
+
+/* The Herdr setup panel (app/HerdrSetup.tsx): Onboarding, the Lead start and Settings share it. */
+.herdr-setup {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-amber);
+  border-radius: var(--radius-sm);
+}
+.herdr-setup p {
+  margin: 0;
+}
+.herdr-setup__plan {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.herdr-setup code {
+  font: 12.5px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.herdr-setup__script {
+  max-height: 260px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font: 12px/1.4 var(--font-mono);
+  white-space: pre;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.herdr-setup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.herdr-setup__note {
+  color: var(--text-muted);
+  white-space: pre-line;
+}
