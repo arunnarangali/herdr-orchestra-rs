@@ -1,6 +1,7 @@
-//! The Lead: `GET /api/v1/lead` (where it stands) and `POST /api/v1/lead/start` (start it).
+//! The Lead: `GET /api/v1/lead` (where it stands), `POST /api/v1/lead/start` (start it) and
+//! `POST /api/v1/lead/prompt` (answer the prompt it is blocked at, with an option it offers).
 //!
-//! Both answer for a project with no run too. Starting happens only here, on the developer's
+//! All answer for a project with no run too. Starting happens only here, on the developer's
 //! request, and only ever starts the Lead: no route starts or addresses any other agent. Every
 //! change of the Lead's state is also a `lead` event on the live stream (same shape as the
 //! answer), so the page does not poll. The launcher itself is [`crate::lead`].
@@ -9,7 +10,9 @@ use crate::api_router::ApiRouter;
 use crate::doc;
 use crate::error::ApiError;
 use crate::lead::{LeadStartBody, LeadState, LeadStatus, LeadView};
+use crate::models::PromptAnswerBody;
 use crate::routes::actions::{blocking, body};
+use crate::routes::prompt::answer_responses;
 use crate::routes::stream::StreamHub;
 use crate::state::AppState;
 use axum::Json;
@@ -23,6 +26,7 @@ use utoipa::openapi::{ContentBuilder, HttpMethod, Ref, RefOr, ResponseBuilder};
 /// Make the launcher send its changes to this project's stream (and watch the pane).
 fn attach_stream(state: &AppState) {
     let hub = StreamHub::get_or_create(state.project_root(), state.shutdown_signal());
+    hub.set_runtime(state.herdr().clone());
     state.lead().watch(hub, state.shutdown_signal());
 }
 
@@ -44,6 +48,15 @@ async fn start(
         Ok((StatusCode::ACCEPTED, Json(view)))
     })
     .await
+}
+
+async fn answer_prompt(
+    State(state): State<AppState>,
+    bytes: Bytes,
+) -> Result<Json<LeadView>, ApiError> {
+    let b: PromptAnswerBody = body(&bytes)?;
+    attach_stream(&state);
+    blocking(move || state.lead().answer_prompt(&b.option).map(Json)).await
 }
 
 // ------------------------------------------------------------------------ documentation
@@ -100,6 +113,18 @@ fn start_item() -> PathItem {
     doc::item(HttpMethod::Post, op)
 }
 
+fn prompt_item() -> PathItem {
+    let mut op = doc::operation(
+        "answerLeadPrompt",
+        "Answer the prompt the Lead is blocked at (`prompt` in the Lead's state) with one of the options it offers; the option's keys are typed into the Lead's pane only. Answers with the Lead's state; also without a run",
+        "LeadView",
+        Some("PromptAnswerBody"),
+    );
+    op.responses.responses.remove("404");
+    answer_responses(&mut op, "the Lead");
+    doc::item(HttpMethod::Post, op)
+}
+
 /// Add the Lead routes (and their OpenAPI entries) to `api`.
 pub fn register(api: ApiRouter) -> ApiRouter {
     api.schema::<LeadState>()
@@ -108,4 +133,5 @@ pub fn register(api: ApiRouter) -> ApiRouter {
         .schema::<LeadStartBody>()
         .route("/lead", get(show), lead_item())
         .route("/lead/start", post(start), start_item())
+        .route("/lead/prompt", post(answer_prompt), prompt_item())
 }

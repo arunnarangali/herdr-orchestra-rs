@@ -45,7 +45,7 @@ describe("Attention popup for each item kind", () => {
         agent: "coder-alpha",
         task: "M2",
         title: "Agent blocked on M2",
-        prompt: "Permission prompt: Allow cargo build?",
+        prompt: { text: "Permission prompt: Allow cargo build?", options: [] },
         actions: [],
       }),
     });
@@ -404,7 +404,7 @@ describe("Desktop notifications", () => {
 
     server.emit(13, "attention", {
       op: "add",
-      item: makeItem({ id: "notif-on", title: "Important Question", prompt: "Pick one" }),
+      item: makeItem({ id: "notif-on", title: "Important Question", prompt: { text: "Pick one", options: [] } }),
     });
 
     await screen.findByRole("alertdialog");

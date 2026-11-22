@@ -288,7 +288,7 @@ function AttentionRow({ item, handlers }: { item: TaggedItem; handlers: Attentio
         </Badge>
         <span className="attn__body">
           — {item.agent && item.kind === "question" ? `${item.agent} asks: ` : ""}
-          {item.detail ?? item.prompt ?? item.title}
+          {item.detail ?? item.prompt?.text ?? item.title}
         </span>
         {error && (
           <span className="error-text" role="alert">

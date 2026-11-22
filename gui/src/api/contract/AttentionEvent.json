@@ -7,7 +7,19 @@
     "detail": "needs bash permission",
     "id": "blocked:1",
     "kind": "blocked",
-    "prompt": "May I run `cargo test`?",
+    "prompt": {
+      "options": [
+        {
+          "id": "1-5d1f7c2a",
+          "label": "Yes, proceed"
+        },
+        {
+          "id": "2-5d1f7c2a",
+          "label": "No, exit"
+        }
+      ],
+      "text": "Do you trust the files in this folder?\n\n/home/dev/project"
+    },
     "since": "2023-11-14T22:13:20Z",
     "task": "M1",
     "title": "rs-claude-1 is blocked on permission"
