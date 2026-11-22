@@ -401,6 +401,7 @@ describe("the Projects screen", () => {
       },
     }));
     await user.click(await screen.findByRole("button", { name: /Create New Project/ }));
+    await user.click(await screen.findByRole("button", { name: "Create Project" }));
     expect(await screen.findByText(/Created new-one: created the folder, set up a git repository, prepared it for a run, and opened it/)).toBeInTheDocument();
     expect(made).toEqual(["/work/new-one"]);
     expect(tab("new-one")).toHaveAttribute("aria-current", "true");
@@ -417,6 +418,7 @@ describe("the Projects screen", () => {
       },
     }));
     await user.click(await screen.findByRole("button", { name: /Create New Project/ }));
+    await user.click(await screen.findByRole("button", { name: "Create Project" }));
     const alert = await screen.findByText(/already holds a run/);
     expect(alert).toHaveTextContent("open it from the project list");
     // nothing changed: still the two projects

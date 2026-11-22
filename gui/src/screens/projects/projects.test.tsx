@@ -5,6 +5,7 @@ import { samples } from "../../api/contract";
 import { deadAddress, errorBody, startFakeServer, type FakeServer } from "../../test/fakeServer";
 import { renderApp } from "../../test/render";
 import { setBackendForTests, type AppBackend, type ProjectInfo, type ProjectList } from "./backend";
+import type { AgentCli } from "../../api/types";
 
 const project = (o: Partial<ProjectInfo> = {}): ProjectInfo => ({
   path: "/home/me/project",
@@ -89,7 +90,7 @@ describe("Projects", () => {
     expect(within(card).getByText("Active")).toBeInTheDocument();
     await waitFor(() => expect(card).toHaveTextContent("orch/desktop from main"));
     expect(card).toHaveTextContent("Running");
-    expect(card).toHaveTextContent("1 of 2 merged");
+    await waitFor(() => expect(card).toHaveTextContent("1 of 2 merged"));
     expect(within(card).getByRole("progressbar", { name: "project run progress" })).toHaveAttribute("aria-valuenow", "50");
     expect(card).toHaveTextContent("Token Active");
     expect(within(card).getByRole("link", { name: /Open Run/ })).toHaveAttribute("href", "/execution");
@@ -144,11 +145,76 @@ describe("Projects", () => {
     setBackendForTests(backend({ addProject, chooseFolder }));
     show();
     await user.click(await screen.findByRole("button", { name: /Add Existing Folder/ }));
+    await user.click(screen.getByRole("button", { name: "Add Project" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("is not a git repository");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("No projects yet")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Add Existing Folder/ }));
+    await user.click(screen.getByRole("button", { name: "Add Project" }));
     expect(await screen.findByRole("article", { name: "repo" })).toBeInTheDocument();
     expect(screen.getByText("Added /work/repo.")).toBeInTheDocument();
+  });
+
+  it("AC1: where a project is added, the dropdown lists every agent CLI with Installed/Not installed mark and missing agent cannot be chosen", async () => {
+    const user = userEvent.setup();
+    const clis: AgentCli[] = [
+      { kind: "claude", displayName: "Claude Code", installed: true, canLead: true },
+      { kind: "codex", displayName: "Codex CLI", installed: false, canLead: true },
+    ];
+    const addProject = vi.fn<AppBackend["addProject"]>().mockResolvedValue(listOf([project({ path: "/work/repo", name: "repo" })]));
+    const saveProjectSettings = vi.fn<NonNullable<AppBackend["saveProjectSettings"]>>().mockResolvedValue({
+      leadAgent: "claude",
+      folder: "/work/repo",
+      warning: null,
+    });
+    const chooseFolder = vi.fn<AppBackend["chooseFolder"]>().mockResolvedValue("/work/repo");
+    setBackendForTests(backend({ detectAgentClis: async () => clis, addProject, chooseFolder, saveProjectSettings }));
+    show();
+
+    await user.click(await screen.findByRole("button", { name: /Add Existing Folder/ }));
+    const modal = await screen.findByRole("dialog", { name: /Add Project: repo/ });
+    const select = within(modal).getByRole("combobox", { name: "Default Lead Agent" });
+
+    // Options list installed and not installed marks
+    const options = within(select).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "None (no default lead agent)",
+      "Claude Code (Installed)",
+      "Codex CLI (Not installed)",
+    ]);
+
+    // Missing agent is disabled and cannot be chosen
+    const missingOption = within(select).getByRole("option", { name: "Codex CLI (Not installed)" });
+    expect(missingOption).toBeDisabled();
+
+    // Selecting installed agent works and saves
+    await user.selectOptions(select, "claude");
+    expect(select).toHaveValue("claude");
+
+    await user.click(within(modal).getByRole("button", { name: "Add Project" }));
+    expect(addProject).toHaveBeenCalledWith("/work/repo");
+    expect(saveProjectSettings).toHaveBeenCalledWith("/work/repo", {
+      leadAgent: "claude",
+      folder: "/work/repo",
+    });
+    expect(await screen.findByRole("article", { name: "repo" })).toBeInTheDocument();
+  });
+
+  it("AC4: when the Lead cannot be saved after adding, the project stays added, the dialog closes and the message says where to fix it", async () => {
+    const user = userEvent.setup();
+    const clis: AgentCli[] = [{ kind: "claude", displayName: "Claude Code", installed: true, canLead: true }];
+    const addProject = vi.fn<AppBackend["addProject"]>().mockResolvedValue(listOf([project({ path: "/work/repo", name: "repo" })]));
+    const saveProjectSettings = vi.fn<NonNullable<AppBackend["saveProjectSettings"]>>().mockRejectedValue(new Error("claude is not installed"));
+    setBackendForTests(backend({ detectAgentClis: async () => clis, addProject, chooseFolder: async () => "/work/repo", saveProjectSettings }));
+    show();
+    await user.click(await screen.findByRole("button", { name: /Add Existing Folder/ }));
+    const modal = await screen.findByRole("dialog", { name: /Add Project: repo/ });
+    await user.selectOptions(within(modal).getByRole("combobox", { name: "Default Lead Agent" }), "claude");
+    await user.click(within(modal).getByRole("button", { name: "Add Project" }));
+    expect(await screen.findByText(/Added \/work\/repo, but its default Lead agent was not saved: claude is not installed.*Settings/)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("article", { name: "repo" })).toBeInTheDocument();
+    expect(addProject).toHaveBeenCalledTimes(1);
   });
 
   it("cancelling the folder dialog changes nothing", async () => {

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Credentials } from "../api/client";
+import type { AgentCli, ProjectSettings, SaveProjectSettingsInput } from "../api/types";
 
 /**
  * The desktop shell's commands (`gui/src-tauri`). The shell starts `orch serve`, finds its
@@ -19,6 +20,12 @@ export interface Shell {
   findOrch(): Promise<string>;
   /** Path of the Herdr executable; rejects with a clear message. */
   findHerdr(): Promise<string>;
+  /** Detect installed agent CLIs on this machine from orch's registry. */
+  detectAgentClis(): Promise<AgentCli[]>;
+  /** Read a project's saved settings (lead agent and folder) from the shell's config folder. */
+  getProjectSettings(path: string): Promise<ProjectSettings>;
+  /** Save a project's settings through the shell. */
+  saveProjectSettings(path: string, settings: SaveProjectSettingsInput): Promise<ProjectSettings>;
 }
 
 /** Tauri rejects with the Rust `Err(String)`; make it an Error. */
@@ -38,6 +45,9 @@ export function createTauriShell(): Shell {
     getConnection: (project) => call<Credentials | null>("get_connection", { project: project ?? null }),
     findOrch: () => call<string>("find_orch"),
     findHerdr: () => call<string>("find_herdr"),
+    detectAgentClis: () => call<AgentCli[]>("detect_agent_clis"),
+    getProjectSettings: (path) => call<ProjectSettings>("get_project_settings", { path }),
+    saveProjectSettings: (path, settings) => call<ProjectSettings>("save_project_settings", { path, settings }),
   };
 }
 
