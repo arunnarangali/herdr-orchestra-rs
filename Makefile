@@ -71,7 +71,11 @@ dev-gui: ## Start Vite GUI development server
 dev-tauri: ## Start Tauri desktop GUI app in dev mode
 	export ORCH_BIN="$${ORCH_BIN:-$(PWD)/target/release/orch}" && cd gui && $(NPM) run tauri dev
 
-run-desktop: ## Launch the standalone desktop GUI app window directly
+run-desktop: ## Build the latest orch + desktop app, then open the desktop app window
+	@echo "Building orch (release)..."
+	$(CARGO) build --release -p orch
+	@echo "Building the desktop app (frontend + shell)..."
+	cd gui && $(NPM) run tauri -- build --no-bundle
 	@echo "Launching Herdr Orchestra Desktop GUI..."
 	@export ORCH_BIN="$${ORCH_BIN:-$(PWD)/target/release/orch}" && ./gui/src-tauri/target/release/herdr-orchestra-gui
 
