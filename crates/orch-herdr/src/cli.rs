@@ -442,6 +442,42 @@ impl RuntimeAdapter for CliHerdr {
         args.extend_from_slice(keys);
         self.call(&args, pane).map(|_| ())
     }
+
+    fn create_workspace(&self, cwd: &std::path::Path, label: Option<&str>) -> Result<PaneInfo> {
+        let cwd = cwd.to_string_lossy();
+        let mut args = vec!["workspace", "create", "--cwd", &cwd];
+        if let Some(l) = label {
+            args.push("--label");
+            args.push(l);
+        }
+        args.push("--no-focus");
+        self.field(&args, "", "root_pane")
+    }
+
+    fn start_server(&self) -> Result<()> {
+        use std::os::unix::process::CommandExt;
+        let mut cmd = Command::new(&self.bin);
+        cmd.arg("server")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            // its own process group: a Ctrl-C meant for us does not take the server down
+            .process_group(0);
+        for (k, v) in &self.env {
+            match v {
+                Some(v) => cmd.env(k, v),
+                None => cmd.env_remove(k),
+            };
+        }
+        let mut child = cmd.spawn().map_err(|e| HerdrError::Unavailable {
+            message: format!("cannot run {:?}: {e}", self.bin),
+        })?;
+        // The server outlives this call; reap it whenever it ends so it never stays a zombie.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    }
 }
 
 /// A failed text/Enter delivery to an `@pane:<id>` agent is a stale pane, with

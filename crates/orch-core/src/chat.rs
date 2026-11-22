@@ -201,7 +201,7 @@ impl LeadProblem {
         match self {
             LeadProblem::NoLead => "no lead pane exists: this run has no lead. Open an agent in Herdr, run `orch lead plan` in it and name its pane `lead`. Your message is kept and reaches the lead once there is one.".into(),
             LeadProblem::Gone(name) => format!(
-                "no lead pane exists: Herdr has no pane named `{name}`. Start the lead agent in Herdr, name its pane `{name}` and run `orch lead run` in it. Your message is kept and is typed into the lead as soon as it is there."
+                "no lead pane exists: Herdr has no pane named `{name}`. Start the Lead from the app (it opens that pane for you), or start the lead agent in Herdr yourself, name its pane `{name}` and run `orch lead run` in it. Your message is kept and is typed into the lead as soon as it is there."
             ),
         }
     }
@@ -1102,6 +1102,7 @@ mod tests {
         let (_d, s) = store_with_run(false);
         assert_eq!(s.lead_problem(true).unwrap(), Some(LeadProblem::NoLead));
         assert!(LeadProblem::NoLead.how_to_fix().contains("orch lead plan"));
+        assert!(LeadProblem::Gone("lead".into()).how_to_fix().contains("Start the Lead from the app"));
         let (_d, mut s) = store_with_run(true);
         assert_eq!(s.lead_problem(true).unwrap(), None, "nobody looked yet");
         tick(&mut s, &Lead::new(LeadPane::Gone));

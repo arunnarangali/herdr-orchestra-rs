@@ -1,6 +1,7 @@
 //! The application state every route module receives.
 
 use crate::error::ApiError;
+use crate::lead::{LeadLauncher, LeadOptions};
 use crate::token::Token;
 use orch_config::tunables::Tunables;
 use orch_core::paths::ORCH_DIR;
@@ -18,6 +19,7 @@ pub struct AppState {
     token: Token,
     shutdown: Arc<watch::Sender<bool>>,
     herdr: Arc<dyn RuntimeAdapter + Send + Sync>,
+    lead: Arc<LeadLauncher>,
 }
 
 impl AppState {
@@ -27,6 +29,7 @@ impl AppState {
             .unwrap_or_else(|_| Tunables::from_lookup(|_| None).expect("defaults always parse"));
         let herdr = Arc::new(CliHerdr::from_tunables(&tunables));
         Self::with_herdr(project_root, token, herdr)
+            .with_lead_options(LeadOptions::from_tunables(&tunables))
     }
 
     /// State with an explicit Herdr runtime adapter (e.g. `FakeHerdr` in tests).
@@ -35,12 +38,34 @@ impl AppState {
         token: Token,
         herdr: Arc<dyn RuntimeAdapter + Send + Sync>,
     ) -> AppState {
+        let lead = Arc::new(LeadLauncher::new(
+            project_root.clone(),
+            herdr.clone(),
+            LeadOptions::default(),
+        ));
         AppState {
             project_root: Arc::new(project_root),
             token,
             shutdown: Arc::new(watch::channel(false).0),
             herdr,
+            lead,
         }
+    }
+
+    /// The same state with the Lead launcher using `opts` (its registry, catalog and waits).
+    /// Call it before the state is shared: the launcher it replaces is dropped.
+    pub fn with_lead_options(mut self, opts: LeadOptions) -> AppState {
+        self.lead = Arc::new(LeadLauncher::new(
+            self.project_root.to_path_buf(),
+            self.herdr.clone(),
+            opts,
+        ));
+        self
+    }
+
+    /// The project's Lead launcher.
+    pub fn lead(&self) -> &Arc<LeadLauncher> {
+        &self.lead
     }
 
     /// The Herdr runtime adapter.
