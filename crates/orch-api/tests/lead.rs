@@ -310,6 +310,12 @@ async fn a_second_start_is_refused_and_opens_no_pane() {
     rig.fake.set_detect_on_run(false);
     assert_eq!(start(&rig, json!({ "agent": "claude" })).await.0, 202);
     assert_eq!(get_lead(&rig).await["state"], "starting");
+    // the start opens its pane on its own thread: wait (bounded) until it has one
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while rig.fake.panes(None).unwrap().is_empty() {
+        assert!(Instant::now() < deadline, "the first start never opened its pane");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let m = refused(
         &start(&rig, json!({ "agent": "claude" })).await,
         409,
@@ -325,6 +331,11 @@ async fn a_second_start_is_refused_and_opens_no_pane() {
     // the agent never showed up: gone, with what to do
     let v = settled(&rig).await;
     assert_eq!(v["state"], "gone", "{v}");
+    assert_eq!(
+        rig.fake.panes(None).unwrap().len(),
+        1,
+        "the refused start never opened a pane"
+    );
     assert!(
         v["note"].as_str().unwrap().contains("first-run question"),
         "{v}"
