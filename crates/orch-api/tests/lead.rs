@@ -12,7 +12,7 @@ use orch_core::chat::{ChatTick, chat_tick};
 use orch_core::run_store::{AgentRole, PlanTask, RunAgent, RunSettings, SyncInput};
 use orch_core::store::Store;
 use orch_core::wake::{LeadPane, LeadRuntime, Notifier, SystemClock, WakeEnv, WakeTunables};
-use orch_herdr::{AgentStatus, CallKind, FakeHerdr, HerdrError, RuntimeAdapter, Sent};
+use orch_herdr::{AgentInfo, AgentStatus, CallKind, FakeHerdr, HerdrError, PaneInfo, RuntimeAdapter, Sent};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -933,4 +933,236 @@ async fn failed_skill_installation_refuses_start_before_any_pane_opens() {
         "nothing was typed into any pane"
     );
     assert_eq!(get_lead(&rig).await["state"], "none");
+}
+
+// ---------------------------------------------------------------- the Lead's open prompt
+
+const TRUST: &str = "\
+╭──────────────────────────────────────────╮
+│ Do you trust the files in this folder?   │
+│                                          │
+│ ❯ 1. Yes, proceed                        │
+│   2. No, exit                            │
+╰──────────────────────────────────────────╯
+   Enter to confirm · Esc to exit
+";
+
+/// Keys typed into any pane, and text or prompts sent to any agent, after `from` sends.
+fn typed_since(fake: &FakeHerdr, from: usize) -> Vec<Sent> {
+    fake.sent()
+        .into_iter()
+        .skip(from)
+        .filter(|s| matches!(s, Sent::Keys { .. } | Sent::Text { .. } | Sent::Prompt { .. }))
+        .collect()
+}
+
+async fn answer_lead(rig: &Rig, body: Value) -> (u16, Value) {
+    req(rig, "POST", "/api/v1/lead/prompt", Some(&body.to_string())).await
+}
+
+/// A started Lead, settled and running.
+async fn running_lead() -> (Rig, String) {
+    let rig = new_rig().await;
+    assert_eq!(start(&rig, json!({ "agent": "claude" })).await.0, 202);
+    let v = settled(&rig).await;
+    assert_eq!(v["state"], "running", "{v}");
+    let pane = v["pane"].as_str().unwrap().to_string();
+    (rig, pane)
+}
+
+// AC1: while the Lead is blocked, `GET /lead` carries the question and its choices; otherwise
+// `prompt` is null.
+#[tokio::test]
+async fn a_blocked_lead_shows_its_prompt_and_none_otherwise() {
+    let rig = new_rig().await;
+    assert!(get_lead(&rig).await["prompt"].is_null(), "no Lead, no prompt");
+    assert_eq!(start(&rig, json!({ "agent": "claude" })).await.0, 202);
+    let v = settled(&rig).await;
+    assert!(v["prompt"].is_null(), "{v}");
+
+    rig.fake.set_output("lead", TRUST);
+    rig.fake.set_status("lead", AgentStatus::Blocked);
+    let v = get_lead(&rig).await;
+    assert_eq!(v["status"], "blocked");
+    let p = &v["prompt"];
+    assert_eq!(p["text"], "Do you trust the files in this folder?", "{p}");
+    let labels: Vec<&str> = p["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["Yes, proceed", "No, exit"]);
+
+    rig.fake.set_status("lead", AgentStatus::Working);
+    assert!(get_lead(&rig).await["prompt"].is_null());
+}
+
+// AC1: the stream's `lead` events carry the prompt while the Lead is blocked, and drop it
+// when it is not.
+#[tokio::test]
+async fn the_lead_event_carries_the_prompt_while_blocked() {
+    let (rig, _) = running_lead().await;
+    let mut s = TcpStream::connect(rig.addr).await.unwrap();
+    s.write_all(
+        format!(
+            "GET /api/v1/stream?token={SECRET} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            rig.addr
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    let mut buf = vec![0u8; 512];
+    let n = s.read(&mut buf).await.unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
+    get_lead(&rig).await; // the page asks about the Lead: the watch runs
+
+    let mut seen = String::new();
+    let mut next = async |want: &dyn Fn(&Value) -> bool| -> Value {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let mut tmp = [0u8; 4096];
+            if let Ok(Ok(n)) =
+                tokio::time::timeout(Duration::from_millis(200), s.read(&mut tmp)).await
+            {
+                seen.push_str(&String::from_utf8_lossy(&tmp[..n]));
+            }
+            let found = seen
+                .split("\n\n")
+                .filter(|e| e.contains("event: lead\n"))
+                .filter_map(|e| e.lines().find_map(|l| l.strip_prefix("data: ")))
+                .map(|d| serde_json::from_str::<Value>(d).unwrap())
+                .find(|e| want(e));
+            if let Some(e) = found {
+                seen.clear();
+                return e;
+            }
+            assert!(Instant::now() < deadline, "no such lead event: {seen}");
+        }
+    };
+    rig.fake.set_output("lead", TRUST);
+    rig.fake.set_status("lead", AgentStatus::Blocked);
+    let e = next(&|e| e["prompt"].is_object()).await;
+    assert_eq!(e["status"], "blocked");
+    assert_eq!(e["prompt"]["options"][0]["label"], "Yes, proceed");
+    rig.fake.set_status("lead", AgentStatus::Idle);
+    let e = next(&|e| e["status"] == "idle").await;
+    assert!(e["prompt"].is_null(), "{e}");
+}
+
+// AC3: an offered option is typed into the Lead's pane, and into no other pane, even when
+// another agent waits at the same question.
+#[tokio::test]
+async fn answering_the_lead_types_the_choice_into_its_pane_only() {
+    let (rig, pane) = running_lead().await;
+    rig.fake.add_pane(PaneInfo::new("w7:p1", "w7", "w7:t1"));
+    rig.fake
+        .add_agent(AgentInfo::new("other", "claude", "w7:p1", AgentStatus::Blocked));
+    rig.fake.set_output("other", TRUST);
+    rig.fake.set_output("lead", TRUST);
+    rig.fake.set_status("lead", AgentStatus::Blocked);
+    let before = rig.fake.sent().len();
+    let no = get_lead(&rig).await["prompt"]["options"][1]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, v) = answer_lead(&rig, json!({ "option": no })).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["state"], "running", "the same shape as GET /lead: {v}");
+    assert_eq!(
+        typed_since(&rig.fake, before),
+        vec![Sent::Keys {
+            pane,
+            keys: vec!["down".into(), "enter".into()]
+        }]
+    );
+}
+
+// AC3: refused with a plain message, and nothing typed, when nothing is blocked, for an
+// option the prompt does not offer, and for anything but an option.
+#[tokio::test]
+async fn lead_answers_are_refused_with_nothing_typed() {
+    // no Lead at all: a normal state, but nothing to answer
+    let rig = new_rig().await;
+    let m = refused(&answer_lead(&rig, json!({ "option": "1" })).await, 409, "no_prompt");
+    assert!(m.contains("not waiting for an answer"), "{m}");
+
+    let (rig, _) = running_lead().await;
+    rig.fake.set_output("lead", TRUST);
+    let before = rig.fake.sent().len();
+    // running but not blocked
+    refused(&answer_lead(&rig, json!({ "option": "1" })).await, 409, "no_prompt");
+
+    rig.fake.set_status("lead", AgentStatus::Blocked);
+    let yes = get_lead(&rig).await["prompt"]["options"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for bad in ["1", "y", "enter", "answered_in_pane", ""] {
+        let m = refused(&answer_lead(&rig, json!({ "option": bad })).await, 400, "bad_option");
+        assert!(m.contains("nothing was typed") && m.contains("Yes, proceed"), "{m}");
+    }
+    refused(
+        &answer_lead(&rig, json!({ "option": yes, "text": "yes" })).await,
+        400,
+        "bad_request",
+    );
+    assert!(typed_since(&rig.fake, before).is_empty());
+
+    // the Lead of another project, blocked at the same question, is not this project's
+    let fake = Arc::new(FakeHerdr::new());
+    let other = rig_on(fake.clone(), "other", |_| {}).await;
+    let mut pane = PaneInfo::new("w8:p1", "w8", "w8:t1");
+    pane.cwd = Some(other.root.display().to_string());
+    fake.add_pane(pane);
+    fake.add_agent(AgentInfo::new("lead", "claude", "w8:p1", AgentStatus::Blocked));
+    fake.set_output("lead", TRUST);
+    let mine = rig_on(fake.clone(), "mine", |_| {}).await;
+    assert!(get_lead(&mine).await["prompt"].is_null());
+    refused(&answer_lead(&mine, json!({ "option": yes })).await, 409, "no_prompt");
+    assert!(typed_since(&fake, 0).is_empty());
+}
+
+// AC4: a question the app cannot read into choices is shown as text with the single
+// "I answered it in the pane" action, which types nothing.
+#[tokio::test]
+async fn an_unreadable_lead_prompt_offers_only_i_answered_it_in_the_pane() {
+    let (rig, _) = running_lead().await;
+    rig.fake.set_output("lead", "Sign in to continue? (y/n)");
+    rig.fake.set_status("lead", AgentStatus::Blocked);
+    let before = rig.fake.sent().len();
+    assert_eq!(
+        get_lead(&rig).await["prompt"],
+        json!({
+            "text": "Sign in to continue? (y/n)",
+            "options": [{ "id": "answered_in_pane", "label": "I answered it in the pane" }]
+        })
+    );
+    let (status, v) = answer_lead(&rig, json!({ "option": "answered_in_pane" })).await;
+    assert_eq!(status, 200, "{v}");
+    assert!(typed_since(&rig.fake, before).is_empty());
+}
+
+// AC5: the answer route is in the OpenAPI document, with its body, answer and refusals.
+#[tokio::test]
+async fn the_lead_prompt_route_is_documented() {
+    let rig = new_rig().await;
+    let (status, doc) = req(&rig, "GET", "/api/v1/openapi.json", None).await;
+    assert_eq!(status, 200);
+    let post = &doc["paths"]["/api/v1/lead/prompt"]["post"];
+    assert_eq!(
+        post["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PromptAnswerBody"
+    );
+    assert_eq!(
+        post["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/LeadView"
+    );
+    for code in ["400", "409", "503"] {
+        assert!(post["responses"][code].is_object(), "{code}: {post}");
+    }
+    let view = &doc["components"]["schemas"]["LeadView"]["properties"]["prompt"];
+    assert!(view.to_string().contains("PromptView"), "{view}");
 }

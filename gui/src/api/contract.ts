@@ -26,6 +26,7 @@ import logEvent from "./contract/LogEvent.json";
 import logs from "./contract/LogsResponse.json";
 import models from "./contract/ModelsResponse.json";
 import plan from "./contract/PlanResponse.json";
+import promptAnswerBody from "./contract/PromptAnswerBody.json";
 import report from "./contract/ReportResponse.json";
 import runControl from "./contract/RunControlResponse.json";
 import runStateEvent from "./contract/RunStateEvent.json";
@@ -80,6 +81,7 @@ export const samples = {
   attentionEvent: fits<T.AttentionEvent>()(attentionEvent),
   leadView: fits<T.LeadView>()(leadView),
   leadStartBody: fits<T.LeadStartBody>()(leadStartBody),
+  promptAnswerBody: fits<T.PromptAnswerBody>()(promptAnswerBody),
   answerBody: fits<T.AnswerBody>()(answerBody),
   chatBody: fits<T.ChatBody>()(chatBody),
   dispatchBody: fits<T.DispatchBody>()(dispatchBody),

@@ -475,8 +475,36 @@ fn lead_view() -> LeadView {
         state: LeadState::Running,
         agent: some("claude"),
         pane: some("w2:p1"),
-        status: Some(LeadStatus::Working),
+        status: Some(LeadStatus::Blocked),
         note: None,
+        prompt: Some(trust_prompt()),
+    }
+}
+
+fn trust_prompt() -> PromptView {
+    PromptView {
+        text: s("Do you trust the files in this folder?\n\n/home/dev/project"),
+        options: vec![
+            PromptOption {
+                id: s("1-5d1f7c2a"),
+                label: s("Yes, proceed"),
+            },
+            PromptOption {
+                id: s("2-5d1f7c2a"),
+                label: s("No, exit"),
+            },
+        ],
+    }
+}
+
+/// A prompt the app could not read into choices.
+fn unreadable_prompt() -> PromptView {
+    PromptView {
+        text: s("Allow this command? (y/n)"),
+        options: vec![PromptOption {
+            id: s("answered_in_pane"),
+            label: s("I answered it in the pane"),
+        }],
     }
 }
 
@@ -563,7 +591,7 @@ fn attention() -> AttentionResponse {
             agent: some("rs-claude-1"),
             title: s("rs-claude-1 is blocked on permission"),
             detail: some("needs bash permission"),
-            prompt: some("May I run `cargo test`?"),
+            prompt: Some(unreadable_prompt()),
             since: s("2023-11-14T22:13:20Z"),
             actions: vec![AttentionAction::OpenChat],
         }],
@@ -589,7 +617,7 @@ fn attention_event() -> AttentionEvent {
             agent: some("rs-claude-1"),
             title: s("rs-claude-1 is blocked on permission"),
             detail: some("needs bash permission"),
-            prompt: some("May I run `cargo test`?"),
+            prompt: Some(trust_prompt()),
             since: s("2023-11-14T22:13:20Z"),
             actions: vec![AttentionAction::OpenChat],
         },
@@ -656,12 +684,17 @@ fn check_requests() -> Vec<&'static str> {
     assert_eq!(c.kind, "feature_request");
     assert_eq!(c.text, "");
     assert_eq!(c.request.unwrap().must_not, "change the API");
+    let p: PromptAnswerBody = serde_json::from_str(&read("PromptAnswerBody")).unwrap();
+    assert_eq!(p.option, "2-5d1f7c2a");
+    // only a choice: no text, no keys
+    assert!(serde_json::from_str::<PromptAnswerBody>(r#"{"option":"1","keys":["enter"]}"#).is_err());
     let l: LeadStartBody = serde_json::from_str(&read("LeadStartBody")).unwrap();
     assert_eq!(
         (l.agent.as_str(), l.message.as_deref()),
         ("claude", Some("what does this repo do?"))
     );
     vec![
+        "PromptAnswerBody",
         "LeadStartBody",
         "ChatBody",
         "AnswerBody",

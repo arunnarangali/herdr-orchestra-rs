@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 const agent: AgentKindInfo = { ...samples.agents.agents[0]!, kind: "claude", display_name: "Claude Code", installed: true, roles: ["lead", "coder"] };
-const view = (over: Partial<LeadView> = {}): LeadView => ({ state: "none", agent: null, pane: null, status: null, note: null, ...over });
+const view = (over: Partial<LeadView> = {}): LeadView => ({ state: "none", agent: null, pane: null, status: null, note: null, prompt: null, ...over });
 const msg = (id: number, over: Partial<ChatMessage> = {}): ChatMessage => ({
   id,
   ts: "2026-11-15T09:30:00Z",

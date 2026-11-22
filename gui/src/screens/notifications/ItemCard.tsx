@@ -199,7 +199,7 @@ export function OpenItemCard({
   onResolved,
 }: ActionProps) {
   const look = kindLook(item.kind);
-  const body = item.detail ?? item.prompt;
+  const body = item.detail ?? item.prompt?.text;
   return (
     <Card as="li" tone={look.tone} className="nc-card" data-attention={item.id}>
       <div className="nc-card__head">

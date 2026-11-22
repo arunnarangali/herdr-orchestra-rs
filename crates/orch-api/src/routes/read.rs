@@ -165,15 +165,8 @@ async fn agents(State(state): State<AppState>) -> Result<Json<AgentsResponse>, A
 }
 
 async fn attention(State(state): State<AppState>) -> Result<Json<AttentionResponse>, ApiError> {
-    blocking(move || {
-        let (store, run) = load(&state)?;
-        let items = orch_core::attention::attention_items(&store, Some(&run))
-            .map_err(ApiError::internal)?;
-        Ok(Json(AttentionResponse {
-            items: items.into_iter().map(Into::into).collect(),
-        }))
-    })
-    .await
+    // a blocked worker's item carries the prompt read from its pane now
+    blocking(move || crate::routes::prompt::attention_response(&state).map(Json)).await
 }
 
 /// Default and largest `lines` of `GET /agents/{name}/output`.
@@ -376,7 +369,7 @@ pub fn register(api: ApiRouter) -> ApiRouter {
             get(attention),
             doc::get(
                 "attention",
-                "Open items that need the developer: blocked agents, questions, held/failed milestones, wake-ups, plan approval",
+                "Open items that need the developer: blocked agents (with the prompt in a blocked worker's pane), questions, held/failed milestones, wake-ups, plan approval",
                 "AttentionResponse",
             ),
         )
