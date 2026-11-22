@@ -1,7 +1,9 @@
 import { useId, useState } from "react";
 import type { ApiClient } from "../../api/client";
 import type { AttentionAction } from "../../api/types";
+import { useAnswerItemPrompt, useRecheckItemPrompt } from "../../components/Attention";
 import type { ResolvedItem, TaggedItem } from "../../components/attentionStore";
+import { PromptAnswer } from "../../components/PromptAnswer";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
@@ -164,7 +166,7 @@ function Actions({ item, client, onReview, onResolved }: ActionProps) {
           </Button>
         </>
       )}
-      {item.kind === "blocked" && (
+      {item.kind === "blocked" && !item.prompt && (
         <Button unavailable="Not available from the app yet: answer in the agent's Herdr pane.">
           <Icon name="external" />
           Open Pane in Herdr
@@ -199,7 +201,10 @@ export function OpenItemCard({
   onResolved,
 }: ActionProps) {
   const look = kindLook(item.kind);
-  const body = item.detail ?? item.prompt?.text;
+  const answerPrompt = useAnswerItemPrompt();
+  const recheckPrompt = useRecheckItemPrompt();
+  const answerable = Boolean(item.prompt && item.prompt.options.length > 0);
+  const body = answerable ? item.detail : (item.detail ?? item.prompt?.text);
   return (
     <Card as="li" tone={look.tone} className="nc-card" data-attention={item.id}>
       <div className="nc-card__head">
@@ -218,6 +223,15 @@ export function OpenItemCard({
       </div>
       <p className="nc-card__body">{item.title}</p>
       {body && <p className="nc-card__body nc-card__detail">{body}</p>}
+      {answerable && item.prompt && (
+        <PromptAnswer
+          prompt={item.prompt}
+          who={item.agent ?? "the agent"}
+          tone={look.tone}
+          onAnswer={(o) => answerPrompt(item, o)}
+          onRecheck={() => recheckPrompt(item)}
+        />
+      )}
       <div className="nc-card__meta">
         <span>{when(item.since)}</span>
         <span className="mono">api/v1/attention</span>

@@ -3,6 +3,7 @@ import { Badge } from "../ui/Badge";
 import { Button, type Tone } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Icon, type IconName } from "../ui/Icon";
+import { PromptAnswer } from "./PromptAnswer";
 import "./components.css";
 
 const KINDS: Record<string, { tone: Tone; icon: IconName }> = {
@@ -23,15 +24,20 @@ export interface AttentionCardProps {
   item: TaggedItem;
   /** Open the item (the popup where it is answered). */
   onReview: (item: TaggedItem) => void;
+  /** Answer the item's open prompt with one of its options; without it the prompt is only shown. */
+  onAnswerPrompt?: (item: TaggedItem, option: string) => Promise<unknown>;
+  /** Read the item's project again, to see whether its prompt went (needed with `onAnswerPrompt`). */
+  onRecheckPrompt?: (item: TaggedItem) => Promise<unknown>;
 }
 
 /**
  * One item that needs the developer, as the notification drawer and the Attention Center show
  * it: what it is, where it comes from, and a way to act on it.
  */
-export function AttentionCard({ item, onReview }: AttentionCardProps) {
+export function AttentionCard({ item, onReview, onAnswerPrompt, onRecheckPrompt }: AttentionCardProps) {
   const { tone, icon } = attentionLook(item.kind);
-  const body = item.detail ?? item.prompt?.text;
+  const answerable = Boolean(item.prompt && onAnswerPrompt && onRecheckPrompt && item.prompt.options.length > 0);
+  const body = answerable ? item.detail : (item.detail ?? item.prompt?.text);
   return (
     <Card as="li" tone={tone} className="att" data-attention={item.id}>
       <div className="att__head">
@@ -51,6 +57,15 @@ export function AttentionCard({ item, onReview }: AttentionCardProps) {
         <Badge tone={tone}>{item.kind}</Badge>
       </div>
       {body && <p className="att__body">{body}</p>}
+      {answerable && item.prompt && onAnswerPrompt && onRecheckPrompt && (
+        <PromptAnswer
+          prompt={item.prompt}
+          who={item.agent ?? "the agent"}
+          tone={tone}
+          onAnswer={(o) => onAnswerPrompt(item, o)}
+          onRecheck={() => onRecheckPrompt(item)}
+        />
+      )}
       <div className="att__actions">
         <Button tone={tone} aria-label={`Review ${item.title}`} onClick={() => onReview(item)}>
           Review

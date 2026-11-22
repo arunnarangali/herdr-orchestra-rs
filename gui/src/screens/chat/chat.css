@@ -737,3 +737,25 @@
   border-left: 3px solid var(--accent-coral);
   padding-left: 10px;
 }
+
+/* The Lead's open prompt, answered from Chat */
+.lead-prompt {
+  display: grid;
+  gap: 8px;
+  margin: 0 16px 12px;
+  padding: 12px 14px;
+}
+/* The shared `.card--tone` resets `--c` after the tone helpers; restate the tone here. */
+.lead-prompt.card--tone.tone-amber {
+  --c: var(--accent-amber);
+}
+.lead-prompt .card__head {
+  margin: 0;
+  padding: 0 0 8px;
+}
+.lead-prompt .card__title {
+  font-size: 14px;
+}
+.lead-prompt .card__title .icon {
+  color: var(--c);
+}
