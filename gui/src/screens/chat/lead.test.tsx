@@ -200,6 +200,7 @@ describe("Chat with no Lead", () => {
     const user = userEvent.setup();
     open();
     server.respond("POST", "/lead/start", 400, errorBody("agent_not_installed", "claude is not installed."));
+    await startButton(); // the Lead's state is known, so the message has to start it
     await user.type(await screen.findByLabelText("Message to the lead"), "hello{Enter}");
     expect(await screen.findByText("claude is not installed.", { selector: ".chat-note" })).toBeInTheDocument();
     expect(screen.getByLabelText("Message to the lead")).toHaveValue("hello");
