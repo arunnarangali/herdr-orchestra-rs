@@ -486,6 +486,34 @@ export interface ChatListResponse {
   messages: ChatMessage[];
 }
 
+// --------------------------------------------------------------------------------- lead
+
+/* The wire carries these as plain strings (like every state in this file); narrow with these. */
+export type LeadState = "none" | "starting" | "running" | "gone";
+export type LeadStatus = "idle" | "working" | "blocked";
+/** Where the project's Lead stands (`GET /lead`; also the payload of a `lead` stream event). */
+export interface LeadView {
+  /** `none`, `starting`, `running` or `gone` (see `LeadState`). */
+  state: string;
+  /** The Lead's agent kind (`claude`, `codex`, ...), when there is or was one. */
+  agent: string | null;
+  /** Its Herdr pane id, once it has one. */
+  pane: string | null;
+  /** For a running Lead: `idle`, `working` or `blocked` (see `LeadStatus`); `null` when Herdr cannot tell. */
+  status: string | null;
+  /** What is happening, or what went wrong and what to do about it. */
+  note: string | null;
+}
+/**
+ * Body of `POST /lead/start` (answer: `LeadView`, status 202). Errors: 400
+ * `agent_not_installed` / `bad_request`, 409 `lead_running`, 503 `herdr_unavailable`.
+ */
+export interface LeadStartBody {
+  agent: string;
+  /** The developer's first message, passed to the Lead as written. */
+  message?: string | null;
+}
+
 // ------------------------------------------------------------------------------- stream
 
 /** Payload of a `task-state` message. */

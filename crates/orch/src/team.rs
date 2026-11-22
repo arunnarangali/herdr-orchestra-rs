@@ -10,6 +10,7 @@ use orch_config::launch::{launch_command, repr, shell_quote};
 use orch_config::models::Catalog;
 use orch_config::team::render_team;
 use orch_herdr::RuntimeAdapter;
+use orch_herdr::launch::{AgentStart, Started, start_agent_in_pane};
 use orch_herdr::adapter::{SplitDirection, SplitPane};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -288,7 +289,18 @@ pub fn run_team_up(
         };
         let pid = pane.pane_id.clone();
         last = Some(pid.clone());
-        if let Err(e) = runtime.run_command(&pid, &cmd) {
+        let started = start_agent_in_pane(
+            runtime,
+            &AgentStart {
+                pane: &pid,
+                command: &cmd,
+                name: &a.name,
+                detect: v.herdr_detect,
+                wait_s: plan.wait_s,
+            },
+            sleep,
+        );
+        if let Started::RunFailed(e) = &started {
             let msg = e.to_string();
             let tail: String = msg
                 .chars()
@@ -313,9 +325,8 @@ pub fn run_team_up(
                 a.model.as_deref().unwrap_or_default()
             )));
         }
-        if !v.herdr_detect {
-            let _ = runtime.rename_agent(&pid, &a.name);
-            lines.push(Line::Out(format!(
+        match started {
+            Started::Unwatched => lines.push(Line::Out(format!(
                 "OPENED  {}: pane {pid} in {} — herdr can't watch {}: write it as \
 `{} ({} @pane:{pid})` in plan.md, then `orch sync`",
                 a.name,
@@ -323,39 +334,21 @@ pub fn run_team_up(
                 a.kind,
                 a.name,
                 a.kind
-            )));
-            continue;
-        }
-        let step = (plan.wait_s / 30.0).clamp(0.2, 2.0);
-        let tries = if plan.wait_s > 0.0 {
-            (plan.wait_s / step).ceil() as u32 + 1
-        } else {
-            1
-        };
-        let mut named = false;
-        for attempt in 0..tries {
-            if attempt > 0 {
-                sleep(Duration::from_secs_f64(step));
-            }
-            if runtime.rename_agent(&pid, &a.name).is_ok() {
-                named = true;
-                break;
-            }
-        }
-        if named {
-            lines.push(Line::Out(format!(
+            ))),
+            Started::Named => lines.push(Line::Out(format!(
                 "OPENED  {}: pane {pid} in {} running `{cmd}`",
                 a.name,
                 short(&a.folder)
-            )));
-        } else {
-            lines.push(Line::Out(format!(
-                "WAITING {}: pane {pid} runs `{cmd}`, but herdr has not seen the agent start yet — if it \
+            ))),
+            _ => {
+                lines.push(Line::Out(format!(
+                    "WAITING {}: pane {pid} runs `{cmd}`, but herdr has not seen the agent start yet — if it \
 shows a first-run question (trust this folder, sign in), answer it, then: herdr agent rename \
 {pid} {}",
-                a.name, a.name
-            )));
-            failed += 1;
+                    a.name, a.name
+                )));
+                failed += 1;
+            }
         }
     }
     lines.push(Line::Out(if failed == 0 {

@@ -5,5 +5,6 @@ pub mod agents;
 pub mod discovery;
 pub mod launch;
 pub mod models;
+pub mod playbooks;
 pub mod team;
 pub mod tunables;

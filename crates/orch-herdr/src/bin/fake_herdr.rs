@@ -14,6 +14,12 @@
 //!   `fail_exit` (exit non-zero with `fail_message` on stderr, no JSON),
 //!   `fail_cmd` (limit both to commands starting with this text, e.g. `"agent prompt"`);
 //! - `kinds.txt`: the `kinds:` line of plain `herdr agent` (default `pi|claude|codex|gemini|agy|opencode|amp|hermes`);
+//! - `down`: while present the server is not running: every command but
+//!   `server` fails as an unreachable herdr does; `server` removes it (unless
+//!   `server_fails` is present too) and exits at once;
+//! - `detect_on_run`: while present, `pane run` in a pane without an agent makes
+//!   an agent appear there (named after the pane id, kind = the command's first
+//!   word, `idle`), as herdr detects an agent once its interface is up;
 //! - written by the fake: `calls.jsonl` (every invocation's arguments),
 //!   `sent.jsonl` (every prompt, text, key press and command received),
 //!   `pids.log` (its process id on every start).
@@ -62,6 +68,17 @@ fn main() {
             eprintln!("{msg}");
             std::process::exit(code as i32);
         }
+    }
+
+    if args == ["server"] {
+        if !dir.join("server_fails").exists() {
+            let _ = fs::remove_file(dir.join("down"));
+        }
+        return;
+    }
+    if dir.join("down").exists() {
+        eprintln!("error: herdr server is not running (socket connection refused)");
+        std::process::exit(1);
     }
 
     if args == ["agent"] {
@@ -161,13 +178,31 @@ fn dispatch(dir: &Path, args: &[String]) -> Reply {
         }
         ["pane", "split", rest @ ..] => split(dir, rest),
         ["pane", "run", id, command @ ..] => {
-            find_pane(dir, id)?;
+            let (path, mut pane) = find_pane(dir, id)?;
             record(
                 dir,
                 json!({ "kind": "run", "target": id, "text": command.join(" ") }),
             );
+            let empty = pane.get("agent").is_none_or(Value::is_null);
+            if dir.join("detect_on_run").exists() && empty {
+                let kind = command
+                    .first()
+                    .and_then(|c| c.split_whitespace().next())
+                    .and_then(|w| w.rsplit('/').next())
+                    .unwrap_or("unknown");
+                let agent = json!({
+                    "name": id, "agent": kind, "agent_status": "idle", "pane_id": id,
+                    "tab_id": pane["tab_id"], "workspace_id": pane["workspace_id"],
+                    "cwd": pane["cwd"], "focused": false
+                });
+                write_json(&dir.join("agents").join(format!("{id}.json")), &agent);
+                pane["agent"] = json!(kind);
+                pane["agent_status"] = json!("idle");
+                write_json(&path, &pane);
+            }
             Ok(json!({ "type": "ok" }))
         }
+        ["workspace", "create", rest @ ..] => create_workspace(dir, rest),
         ["pane", "send-text", id, text] => {
             find_pane(dir, id)?;
             record(dir, json!({ "kind": "text", "target": id, "text": text }));
@@ -187,6 +222,43 @@ fn dispatch(dir: &Path, args: &[String]) -> Reply {
             format!("fake-herdr: unsupported command: {}", args.join(" ")),
         )),
     }
+}
+
+fn create_workspace(dir: &Path, rest: &[&str]) -> Reply {
+    let path = dir.join("workspaces.json");
+    let mut list = read_json(&path)
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let mut n = list.len() as u64 + 1;
+    while list
+        .iter()
+        .any(|w| str_of(w, "workspace_id") == format!("w{n}"))
+    {
+        n += 1;
+    }
+    let ws = format!("w{n}");
+    let tab = format!("{ws}:t1");
+    let workspace = json!({
+        "workspace_id": ws, "number": n, "label": flag(rest, "--label").unwrap_or(""),
+        "focused": rest.contains(&"--focus"), "pane_count": 1, "tab_count": 1,
+        "active_tab_id": tab
+    });
+    list.push(workspace.clone());
+    write_json(&path, &Value::Array(list));
+    let id = format!("{ws}:p1");
+    let pane = json!({
+        "pane_id": id, "workspace_id": ws, "tab_id": tab, "agent_status": "unknown",
+        "focused": false, "cwd": flag(rest, "--cwd")
+    });
+    write_json(&dir.join("panes").join(format!("{id}.json")), &pane);
+    record(
+        dir,
+        json!({ "kind": "workspace", "target": ws, "cwd": flag(rest, "--cwd"), "label": flag(rest, "--label") }),
+    );
+    Ok(json!({
+        "type": "workspace_created", "workspace": workspace,
+        "tab": { "tab_id": tab, "workspace_id": ws }, "root_pane": pane
+    }))
 }
 
 fn split(dir: &Path, rest: &[&str]) -> Reply {

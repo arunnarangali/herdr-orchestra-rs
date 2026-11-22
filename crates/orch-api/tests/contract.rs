@@ -8,6 +8,7 @@
 //! to a shape, regenerate with `ORCH_UPDATE_CONTRACT=1 cargo test -p orch-api --test contract`
 //! and then fix the TypeScript types the typecheck points at.
 
+use orch_api::lead::{LeadStartBody, LeadState, LeadStatus, LeadView};
 use orch_api::models::*;
 use orch_api::routes::actions::{
     ActionResponse, AnswerBody, DispatchBody, EscalateBody, FixBody, RunControlResponse,
@@ -469,6 +470,16 @@ fn chat_reply() -> ChatMessageView {
     }
 }
 
+fn lead_view() -> LeadView {
+    LeadView {
+        state: LeadState::Running,
+        agent: some("claude"),
+        pane: some("w2:p1"),
+        status: Some(LeadStatus::Working),
+        note: None,
+    }
+}
+
 fn error_body() -> ErrorBody {
     ErrorBody {
         error: orch_api::error::ErrorDetail {
@@ -611,6 +622,7 @@ fn responses() -> Vec<(&'static str, Value)> {
         ("AttentionResponse", to_value(&attention())),
         ("AgentOutputResponse", to_value(&agent_output())),
         ("AttentionEvent", to_value(&attention_event())),
+        ("LeadView", to_value(&lead_view())),
     ]
 }
 
@@ -644,7 +656,13 @@ fn check_requests() -> Vec<&'static str> {
     assert_eq!(c.kind, "feature_request");
     assert_eq!(c.text, "");
     assert_eq!(c.request.unwrap().must_not, "change the API");
+    let l: LeadStartBody = serde_json::from_str(&read("LeadStartBody")).unwrap();
+    assert_eq!(
+        (l.agent.as_str(), l.message.as_deref()),
+        ("claude", Some("what does this repo do?"))
+    );
     vec![
+        "LeadStartBody",
         "ChatBody",
         "AnswerBody",
         "DispatchBody",

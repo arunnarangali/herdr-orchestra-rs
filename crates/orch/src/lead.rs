@@ -11,25 +11,19 @@ use orch_herdr::cli::CliHerdr;
 use orch_herdr::error::HerdrError;
 use orch_herdr::RuntimeAdapter;
 
-/// The lead planning playbook (Python v4.10.1's `playbooks/plan.md`).
-const PLAYBOOK_PLAN: &str = include_str!("../assets/playbooks/plan.md");
-/// The lead run playbook (Python v4.10.1's `playbooks/run.md`).
-const PLAYBOOK_RUN: &str = include_str!("../assets/playbooks/run.md");
+#[cfg(test)]
+use orch_config::playbooks::{PLAN as PLAYBOOK_PLAN, RUN as PLAYBOOK_RUN};
 
 /// `orch lead plan` / `orch lead run`: the header line with this build's version, then the
 /// playbook text. Extra arguments are ignored, as in Python.
 pub fn playbook(which: &str) -> i32 {
-    let pb = match which {
-        "plan" => PLAYBOOK_PLAN,
-        "run" => PLAYBOOK_RUN,
-        _ => return die("usage: orch lead plan | run | check | whoami"),
-    };
-    println!(
-        "herdr-orchestra {} — lead playbook: {which}\n",
-        env!("CARGO_PKG_VERSION")
-    );
-    print!("{pb}");
-    0
+    match orch_config::playbooks::render(which) {
+        Some(text) => {
+            print!("{text}");
+            0
+        }
+        None => die("usage: orch lead plan | run | check | whoami"),
+    }
 }
 
 /// `orch lead whoami`: the pane this agent runs in, and the command that names it `lead`.

@@ -20,6 +20,8 @@ import events from "./contract/EventsResponse.json";
 import fixBody from "./contract/FixBody.json";
 import health from "./contract/Health.json";
 import leadEvent from "./contract/LeadQueueEvent.json";
+import leadStartBody from "./contract/LeadStartBody.json";
+import leadView from "./contract/LeadView.json";
 import logEvent from "./contract/LogEvent.json";
 import logs from "./contract/LogsResponse.json";
 import models from "./contract/ModelsResponse.json";
@@ -76,6 +78,8 @@ export const samples = {
   runStateEvent: fits<T.RunStateEvent>()(runStateEvent),
   logEvent: fits<T.LogEvent>()(logEvent),
   attentionEvent: fits<T.AttentionEvent>()(attentionEvent),
+  leadView: fits<T.LeadView>()(leadView),
+  leadStartBody: fits<T.LeadStartBody>()(leadStartBody),
   answerBody: fits<T.AnswerBody>()(answerBody),
   chatBody: fits<T.ChatBody>()(chatBody),
   dispatchBody: fits<T.DispatchBody>()(dispatchBody),

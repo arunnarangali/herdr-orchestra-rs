@@ -497,3 +497,94 @@ fn agent_kinds_fails_when_herdr_is_missing() {
     let h = CliHerdr::new("/nonexistent/herdr", 5);
     assert!(h.agent_kinds().is_err());
 }
+
+// The Lead launcher opens its pane as a new workspace in the project folder: the GUI runs
+// outside herdr, so there is no pane of its own to split.
+#[test]
+fn create_workspace_opens_a_root_pane_in_the_folder() {
+    let st = State::new();
+    st.put("workspaces.json", "[]");
+    let p = st
+        .herdr()
+        .create_workspace(Path::new("/work/my project"), Some("my project"))
+        .unwrap();
+    assert_eq!(p.pane_id, "w1:p1");
+    assert_eq!(p.workspace_id, "w1");
+    assert_eq!(p.cwd.as_deref(), Some("/work/my project"));
+    let call = &st.lines("calls.jsonl")[0]["args"];
+    assert_eq!(
+        call,
+        &json!(["workspace", "create", "--cwd", "/work/my project", "--label", "my project", "--no-focus"])
+    );
+    // the pane is real: herdr answers about it
+    assert_eq!(st.herdr().pane("w1:p1").unwrap().cwd.as_deref(), Some("/work/my project"));
+}
+
+#[test]
+fn create_workspace_reports_herdrs_failure() {
+    let st = State::new();
+    st.sim(json!({ "fail_exit": 1, "fail_message": "no session", "fail_cmd": "workspace create" }));
+    let e = st.herdr().create_workspace(Path::new("/r"), None).unwrap_err();
+    assert!(e.to_string().contains("no session"), "{e}");
+}
+
+// AC6 (M1): a herdr whose server is down is reported unreachable; `herdr server` started in
+// the background brings it up, and the call itself never waits for the server.
+#[test]
+fn start_server_brings_a_stopped_herdr_up_without_waiting_for_it() {
+    let st = State::new();
+    st.put("down", "");
+    let h = st.herdr();
+    assert!(!h.availability().unwrap().reachable);
+    h.start_server().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.availability().unwrap().reachable {
+        assert!(std::time::Instant::now() < deadline, "herdr never came up");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(st.lines("calls.jsonl").iter().any(|c| c["args"] == json!(["server"])));
+}
+
+#[test]
+fn a_server_that_fails_to_start_leaves_herdr_unreachable() {
+    let st = State::new();
+    st.put("down", "");
+    st.put("server_fails", "");
+    let h = st.herdr();
+    h.start_server().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!h.availability().unwrap().reachable);
+}
+
+#[test]
+fn start_server_without_herdr_installed_is_unavailable() {
+    let e = CliHerdr::new("/nonexistent/herdr", 5).start_server().unwrap_err();
+    assert!(matches!(e, HerdrError::Unavailable { .. }), "{e:?}");
+}
+
+// herdr sees an agent start once its command runs (with `detect_on_run`), so the shared
+// start engine names it over the real CLI too.
+#[test]
+fn an_agent_started_in_a_pane_is_named_over_the_cli() {
+    use orch_herdr::launch::{AgentStart, Started, start_agent_in_pane};
+    let st = State::new();
+    st.put("workspaces.json", "[]");
+    st.put("detect_on_run", "");
+    let h = st.herdr();
+    let pane = h.create_workspace(Path::new("/proj"), None).unwrap().pane_id;
+    let r = start_agent_in_pane(
+        &h,
+        &AgentStart {
+            pane: &pane,
+            command: "claude --permission-mode acceptEdits",
+            name: "lead",
+            detect: true,
+            wait_s: 2.0,
+        },
+        &mut std::thread::sleep,
+    );
+    assert_eq!(r, Started::Named);
+    let a = h.agent("lead").unwrap();
+    assert_eq!((a.kind.as_str(), a.pane_id.as_str(), a.cwd.as_deref()), ("claude", "w1:p1", Some("/proj")));
+    assert_eq!(h.agent_status("lead").unwrap(), AgentStatus::Idle);
+}
