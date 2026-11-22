@@ -58,7 +58,7 @@ herdr_detect = true
 roles = ["lead", "coder", "reviewer"]
 skills_dirs = ["~/.codex/skills"]
 auth_cmd = "codex login status"
-invoke = "$orch-plan <feature>   (or: use the orch-plan skill: <feature>)"
+invoke = "$orch-plan <feature>"
 verified = true
 notes = "codex-cli 0.167: --full-auto is gone; --approve-for-me routes approvals to automatic review in the workspace-write sandbox. Reads ~/.codex/skills and ~/.agents/skills."
 
