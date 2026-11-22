@@ -190,3 +190,45 @@
 .att__actions .btn {
   flex: 1;
 }
+
+/* An agent's open prompt: its text and one button per choice (Chat, Attention Inbox, Attention Center) */
+.prompt-answer {
+  display: grid;
+  gap: 8px;
+}
+.prompt-answer__text {
+  margin: 0;
+  background: var(--surface-2);
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font: 400 12px/1.5 var(--font-mono);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12rem;
+  overflow: auto;
+}
+.prompt-answer__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.prompt-answer__status:empty {
+  display: none;
+}
+.prompt-answer__note {
+  margin: 0;
+}
+.prompt-answer__status {
+  margin: 0;
+  font-size: 12px;
+}
+.prompt-answer__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+}
