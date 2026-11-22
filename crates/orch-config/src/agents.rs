@@ -476,6 +476,7 @@ mod tests {
         assert_eq!(claude.commands_dirs, ["~/.claude/commands"]);
         assert_eq!(claude.commands_from.as_deref(), Some("claude-commands"));
         assert_eq!(claude.invoke.as_deref(), Some("/orch-plan <feature>"));
+        assert_eq!(reg.get("codex").unwrap().invoke.as_deref(), Some("$orch-plan <feature>"));
         assert!(claude.verified);
         assert!(claude.notes.as_deref().unwrap().contains("2.1"));
         assert!(!reg.get("hermes").unwrap().verified);
