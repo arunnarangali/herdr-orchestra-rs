@@ -78,7 +78,7 @@ describe("plan approval on the Workflows screen", () => {
     server.respond("POST", "/chat", 409, errorBody("lead_unavailable", "no lead pane exists: this run has no lead."));
     await user.click(await screen.findByRole("button", { name: "Approve and start" }));
     const alert = (await screen.findByText("The lead is not running")).closest("[role=alert]")!;
-    expect(alert).toHaveTextContent("orch lead run");
+    expect(alert).toHaveTextContent("Start Lead");
     expect(screen.getByRole("button", { name: "Approve and start" })).toBeEnabled();
   });
 

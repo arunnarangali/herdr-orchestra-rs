@@ -1,22 +1,46 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatBody, ChatMessage } from "../../api/types";
 import { useConnection } from "../../app/connection";
+import { useProjects } from "../../app/projects";
 import { useSendChat, type SendResult } from "../../components/useSendChat";
+import { startMessageFor, type LeadControl } from "./useLead";
 
 /** The server's wording for a project without a run. */
 const NO_RUN_TEXT = /\bno run\b/i;
-/** What a send says when the project has no run yet. */
-export const NO_RUN_SEND =
-  "Not sent: this project has no run yet, so there is no lead to take messages here. Once the lead is running for this project, send it again.";
 import type { ApiError } from "../../api/errors";
 import { isApiError } from "../../api/errors";
+
+type Inner = SendResult | { ok: false; kind: "no_run"; text: string };
 
 /** A message of the developer's that has not been stored yet, or could not be sent. */
 export interface OutboxEntry {
   key: number;
   body: ChatBody;
-  state: "sending" | "failed";
+  /** `waiting`: no run exists yet, so it is held and sent by itself once the run is there. */
+  state: "sending" | "failed" | "waiting";
   error: string | null;
+}
+
+/**
+ * First messages that started the Lead are kept on this machine: with no run the server has no
+ * conversation to put them in. They come back after a reload, ahead of the stored messages.
+ */
+const KEPT_MAX = 50;
+function readStarted(key: string): ChatMessage[] {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const list = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(list) ? (list as ChatMessage[]).filter((m) => typeof m?.id === "number" && m.id < 0) : [];
+  } catch {
+    return [];
+  }
+}
+function rememberStarted(key: string, m: ChatMessage): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify([...readStarted(key), m].slice(-KEPT_MAX)));
+  } catch {
+    // storage full or off: the message still shows for this visit
+  }
 }
 
 export interface Chat {
@@ -35,7 +59,7 @@ export interface Chat {
   /** Send a stored message's content again (a `failed` one). */
   resend: (m: ChatMessage) => void;
   /** Send without the outbox (the form, the approval): the caller shows the result. */
-  sendNow: ReturnType<typeof useSendChat>["send"];
+  sendNow: (body: ChatBody) => Promise<SendResult>;
   sending: boolean;
   reload: () => void;
   /** Called when a stored message came back from a send. */
@@ -49,7 +73,7 @@ export interface Chat {
  * reconnects the whole conversation is read again, so nothing missed while it was down stays
  * missing. A message the stream delivered while a read was in flight wins over that read.
  */
-export function useChat(): Chat {
+export function useChat(lead?: LeadControl): Chat {
   const { client, stream } = useConnection();
   const { send: rawSend, pending } = useSendChat();
   const [byId, setById] = useState<Map<number, ChatMessage>>(new Map());
@@ -60,19 +84,75 @@ export function useChat(): Chat {
   const [noRun, setNoRun] = useState(false);
   const noRunRef = useRef(false);
   noRunRef.current = noRun;
+  // the stored conversation was read and a run exists (so the chat routes take messages)
+  const runExistsRef = useRef(false);
+  runExistsRef.current = state === "ready" && !noRun;
 
   // Without a run the server takes no chat messages (404 no_run) and its answer names a
   // terminal command. Say it in plain words instead; the message was not stored.
+  const { selected } = useProjects();
+  const { health } = useConnection();
+  const storeKey = `orch.chat.started:${(selected ?? health?.project ?? "") || "project"}`;
+  const storeKeyRef = useRef(storeKey);
+  storeKeyRef.current = storeKey;
+  const leadRef = useRef(lead);
+  leadRef.current = lead;
   const send = useCallback(
-    async (body: ChatBody): Promise<SendResult> => {
+    async (body: ChatBody): Promise<Inner> => {
+      const l = leadRef.current;
+      if (l?.mustStart) {
+        // No Lead: the message goes in the start request (the chat routes need a run) and is
+        // kept on this machine, shown as sent to the Lead it started.
+        if (body.kind === "plan_approval") {
+          return { ok: false, kind: "lead_unavailable", text: "The Lead is not running, so there is nobody to approve the plan for." };
+        }
+        if (runExistsRef.current) {
+          // A run exists, so the server has a conversation: start the Lead on its own, and post
+          // the message to the chat route so it is stored there (what the Lead reads with
+          // `orch chat`, shared with every screen) and delivered once the Lead is up.
+          const started = await l.start(null);
+          if (!started.ok) return { ok: false, kind: "error", text: started.text };
+          return rawSend(body);
+        }
+        const r = await l.start(startMessageFor(body));
+        if (!r.ok) return { ok: false, kind: "error", text: r.text };
+        const message: ChatMessage = {
+          // negative and rising with time: ahead of every stored message, in the order they were sent
+          id: Date.now() - 2e13,
+          ts: new Date().toISOString(),
+          sender: "developer",
+          kind: body.kind,
+          text: body.text,
+          request: body.request ?? null,
+          about: null,
+          delivery: "sent",
+          delivery_note: "Passed to the Lead as it started.",
+        };
+        rememberStarted(storeKeyRef.current, message);
+        return { ok: true, message };
+      }
+      if (l?.starting && !runExistsRef.current) {
+        return { ok: false, kind: "error", text: "The Lead is starting. Send it again once it is running." };
+      }
       const r = await rawSend(body);
       if (!r.ok && r.kind === "error" && (noRunRef.current || NO_RUN_TEXT.test(r.text))) {
         setNoRun(true);
-        return { ok: false, kind: "error", text: NO_RUN_SEND };
+        return { ok: false, kind: "no_run", text: r.text };
       }
       return r;
     },
     [rawSend],
+  );
+  // for the form and the approval, which show the result themselves
+  const sendNow = useCallback(
+    async (body: ChatBody): Promise<SendResult> => {
+      const r = await send(body);
+      if (!r.ok && r.kind === "no_run") {
+        return { ok: false, kind: "error", text: "The Lead is still setting up this project's run. Send this again in a moment." };
+      }
+      return r;
+    },
+    [send],
   );
   const [nonce, setNonce] = useState(0);
   const { kind } = useConnection();
@@ -91,6 +171,11 @@ export function useChat(): Chat {
       setNonce((n) => n + 1);
     }
   }, [kind]);
+
+  useEffect(() => {
+    const kept = readStarted(storeKey);
+    if (kept.length > 0) setById((prev) => new Map([...prev, ...kept.map((m) => [m.id, m] as const)]));
+  }, [storeKey]);
 
   const merge = useCallback((list: ChatMessage[], skipStreamedAfter?: number) => {
     setById((prev) => {
@@ -159,6 +244,11 @@ export function useChat(): Chat {
         setLeadProblem(null);
         return true;
       }
+      if (r.kind === "no_run") {
+        // No run yet, so no chat route: hold it and send it by itself once the run exists.
+        setOutbox((o) => o.map((e) => (e.key === key ? { ...e, state: "waiting", error: null } : e)));
+        return true;
+      }
       if (r.kind === "lead_unavailable") {
         // stored all the same: it shows up (queued) through the stream or the next read
         setOutbox((o) => o.filter((e) => e.key !== key));
@@ -171,6 +261,15 @@ export function useChat(): Chat {
     },
     [send, merge],
   );
+
+  // a held message goes out as soon as the run exists
+  useEffect(() => {
+    if (noRun) return;
+    const held = outbox.filter((e) => e.state === "waiting");
+    if (held.length === 0) return;
+    setOutbox((o) => o.map((e) => (e.state === "waiting" ? { ...e, state: "sending" } : e)));
+    for (const e of held) void attempt(e.key, e.body);
+  }, [noRun, outbox, attempt]);
 
   const sendQueued = useCallback(
     (body: ChatBody) => {
@@ -209,7 +308,7 @@ export function useChat(): Chat {
     sendQueued,
     retryOutbox,
     resend,
-    sendNow: send,
+    sendNow,
     sending: pending,
     reload: () => setNonce((n) => n + 1),
     adopt: (m) => merge([m]),

@@ -6,6 +6,8 @@ import type {
   AnswerBody,
   AttentionResponse,
   ChatBody,
+  LeadStartBody,
+  LeadView,
   ChatListResponse,
   ChatMessage,
   DispatchBody,
@@ -126,6 +128,10 @@ export function createApiClient(options: ClientOptions) {
     // -- chat with the lead (stored by the server; the event manager delivers it)
     chat: (q: { after?: number } = {}, o?: RequestOptions) => get<ChatListResponse>("/chat", o, q),
     sendChat: (body: ChatBody, o?: RequestOptions) => post<ChatMessage>("/chat", body, o),
+
+    // -- the Lead itself: where it stands, and starting it (answers for a project with no run too)
+    lead: (o?: RequestOptions) => get<LeadView>("/lead", o),
+    startLead: (body: LeadStartBody, o?: RequestOptions) => post<LeadView>("/lead/start", body, o),
 
     // -- actions (the event manager carries them out; the answer says whether it is running)
     dispatch: (body: DispatchBody, o?: RequestOptions) =>
