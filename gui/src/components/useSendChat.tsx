@@ -43,10 +43,7 @@ export function LeadUnavailable({ text }: { text: string }) {
       <div>
         <p className="panel-title">The lead is not running</p>
         <p>{text}</p>
-        <p className="muted">
-          Your message is saved. To start the lead, open your agent in Herdr, run <code>orch lead plan</code> (or{" "}
-          <code>orch lead run</code> for a plan that is ready) in it and name its pane <code>lead</code>.
-        </p>
+        <p className="muted">Press <strong>Start Lead</strong> in Chat to start it.</p>
       </div>
     </div>
   );

@@ -92,7 +92,11 @@ export function OutboxBubble({ entry, onRetry }: { entry: OutboxEntry; onRetry: 
           <span className="chat-who">You</span>
         </p>
         <p className="chat-text">{entry.body.text}</p>
-        {entry.state === "sending" ? (
+        {entry.state === "waiting" ? (
+          <span className="chat-delivery" role="status">
+            Waiting: it is sent as soon as the Lead has set up this project's run.
+          </span>
+        ) : entry.state === "sending" ? (
           <span className="chat-delivery" role="status">
             Sending…
           </span>

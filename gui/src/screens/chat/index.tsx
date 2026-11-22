@@ -11,7 +11,9 @@ import { Bubble, OutboxBubble } from "./Bubble";
 import { Composer } from "./Composer";
 import { EMPTY_REQUEST, FeatureForm } from "./FeatureForm";
 import { PlanCard } from "./PlanCard";
+import { LeadPanel } from "./LeadPanel";
 import { useChat } from "./useChat";
+import { useLead } from "./useLead";
 import "./chat.css";
 
 const LEAD_STATE: Record<string, { label: string; tone: string }> = {
@@ -24,7 +26,8 @@ const LEAD_STATE: Record<string, { label: string; tone: string }> = {
 
 /** The developer's conversation with the lead, its plan, what needs attention and who is working. */
 export function ChatScreen() {
-  const chat = useChat();
+  const lead = useLead();
+  const chat = useChat(lead);
   const ready = chat.state === "ready";
   const status = useResource(
     (api, signal) => (ready ? api.status({ signal }) : Promise.resolve(null)),
@@ -76,6 +79,8 @@ export function ChatScreen() {
             </button>
           </header>
 
+          <LeadPanel lead={lead} />
+
           {chat.leadProblem && <LeadUnavailable text={chat.leadProblem} />}
 
           <div className="chat__thread-wrap">
@@ -96,8 +101,8 @@ export function ChatScreen() {
                   <li className="chat-empty chat-empty--calm">
                     <strong>No run in this project yet.</strong>
                     <span>
-                      That is normal for a new project. Once the lead is running here it can plan one: send it a{" "}
-                      <strong>New feature request</strong>.
+                      That is normal for a new project. Start the Lead above, or send your first message below: that
+                      starts it and hands it your message.
                     </span>
                   </li>
                 )}
@@ -125,6 +130,7 @@ export function ChatScreen() {
           <Composer
             onSend={(text) => chat.sendQueued({ kind: "message", text, request: null })}
             onNewRequest={() => setFormOpen(true)}
+            disabled={lead.starting}
           />
         </section>
 

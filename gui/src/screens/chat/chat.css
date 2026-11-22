@@ -660,3 +660,40 @@
   border-radius: var(--radius);
   overflow-wrap: anywhere;
 }
+
+/* the Lead's state: running, starting, or what is needed to start one */
+.lead-panel {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  margin: 0 16px 12px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+.lead-panel p {
+  margin: 0;
+}
+.lead-panel--running {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.lead-panel__line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lead-panel__choose {
+  display: grid;
+  gap: 4px;
+  max-width: 100%;
+}
+.lead-panel__error {
+  color: var(--text-primary);
+  border-left: 3px solid var(--accent-coral);
+  padding-left: 10px;
+}
