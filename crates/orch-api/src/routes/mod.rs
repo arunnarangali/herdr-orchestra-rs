@@ -7,6 +7,7 @@ use crate::api_router::ApiRouter;
 pub mod actions;
 pub mod chat;
 pub mod lead;
+pub mod prompt;
 pub mod read;
 pub mod stream;
 pub mod system;
@@ -18,5 +19,6 @@ pub(crate) fn register_all(api: ApiRouter) -> ApiRouter {
     let api = actions::register(api);
     let api = chat::register(api);
     let api = lead::register(api);
+    let api = prompt::register(api);
     stream::register(api)
 }

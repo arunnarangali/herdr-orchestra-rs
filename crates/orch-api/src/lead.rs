@@ -12,8 +12,14 @@
 //! At most one Lead: a start while one is starting or herdr already has the lead is refused
 //! (`lead_running`), and the check-and-claim is one step under a lock. Nothing here can start
 //! or address any agent but the Lead.
+//!
+//! A Lead blocked at a prompt (a permission, or "trust this folder?" while it starts) shows the
+//! prompt read from its pane on its view, and [`LeadLauncher::answer_prompt`] types one of the
+//! prompt's own choices into the Lead's pane ([`orch_herdr::prompt`]).
 
 use crate::error::ApiError;
+use crate::models::PromptView;
+use crate::routes::prompt::{bad_option, no_prompt};
 use crate::routes::stream::StreamHub;
 use axum::http::StatusCode;
 use orch_config::agents::{self, AgentKind, Registry, Role};
@@ -24,6 +30,7 @@ use orch_config::tunables::Tunables;
 use orch_core::paths::ORCH_DIR;
 use orch_core::store::{DB_FILE, Store};
 use orch_herdr::launch::{AgentStart, Started, name_when_seen, start_agent_in_pane};
+use orch_herdr::prompt::{self, AnswerError};
 use orch_herdr::{AgentInfo, AgentStatus, HerdrError, RuntimeAdapter};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -66,8 +73,8 @@ pub enum LeadStatus {
     Blocked,
 }
 
-/// The Lead's state: the answer of `GET /lead` and `POST /lead/start`, and the payload of
-/// the stream's `lead` event.
+/// The Lead's state: the answer of `GET /lead`, `POST /lead/start` and `POST /lead/prompt`,
+/// and the payload of the stream's `lead` event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct LeadView {
     pub state: LeadState,
@@ -79,6 +86,9 @@ pub struct LeadView {
     pub status: Option<LeadStatus>,
     /// What is happening, or what went wrong and what to do about it.
     pub note: Option<String>,
+    /// While the Lead is blocked: the question in its pane and the answers it offers
+    /// (`POST /lead/prompt` chooses one). `null` otherwise.
+    pub prompt: Option<PromptView>,
 }
 
 /// Body of `POST /lead/start`.
@@ -360,12 +370,20 @@ impl LeadLauncher {
         let (started, last_pane, last_note) = {
             let slot = self.slot.lock().unwrap();
             if let Some(s) = &slot.starting {
+                let s = s.clone();
+                drop(slot);
+                // a first-run question (trust this folder) can stop the start: it is answered
+                // from the app like any other prompt
+                let prompt = self
+                    .blocked_lead()
+                    .map(|(n, _)| prompt::read(self.herdr.as_ref(), &n));
                 return LeadView {
                     state: LeadState::Starting,
-                    agent: Some(s.kind.clone()),
-                    pane: s.pane.clone(),
-                    status: None,
-                    note: Some(s.note.clone()),
+                    agent: Some(s.kind),
+                    pane: s.pane,
+                    status: prompt.as_ref().map(|_| LeadStatus::Blocked),
+                    note: Some(s.note),
+                    prompt: prompt.as_ref().map(PromptView::from),
                 };
             }
             (slot.started.clone(), slot.pane.clone(), slot.note.clone())
@@ -383,6 +401,7 @@ impl LeadLauncher {
                 pane: if had_one { last_pane.clone() } else { None },
                 status: None,
                 note: Some(note),
+                prompt: None,
             }
         };
         match self.project_agent(&name) {
@@ -393,6 +412,8 @@ impl LeadLauncher {
                 status: pane_status(a.status),
                 // what the start left to say belongs to the pane it started
                 note: last_note.filter(|_| last_pane.as_deref() == Some(a.pane_id.as_str())),
+                prompt: (a.status == AgentStatus::Blocked)
+                    .then(|| PromptView::from(&prompt::read(self.herdr.as_ref(), &name))),
             },
             Ok(_) | Err(HerdrError::AgentNotFound { .. }) => {
                 missing(last_note.unwrap_or_else(|| {
@@ -416,6 +437,51 @@ impl LeadLauncher {
                 })
             }
         }
+    }
+
+    /// The Lead's agent name and pane while it is blocked at a prompt: during a start, the
+    /// agent the start named, in the pane it started (once herdr sees it); otherwise this
+    /// project's Lead. `None` when no Lead of this project is blocked. Blocking: it asks herdr.
+    fn blocked_lead(&self) -> Option<(String, String)> {
+        let (name, pane) = {
+            let slot = self.slot.lock().unwrap();
+            match &slot.starting {
+                Some(s) => (Some(slot.name.clone()?), s.pane.clone()),
+                None => (None, None),
+            }
+        };
+        let name = name.unwrap_or_else(|| self.lead_name());
+        let a = self.project_agent(&name).ok()?;
+        let ours = pane.as_deref().is_none_or(|p| p == a.pane_id);
+        (ours && a.status == AgentStatus::Blocked).then_some((name, a.pane_id))
+    }
+
+    /// Answer the Lead's open prompt with the option `option` (an id the prompt offers now):
+    /// its keys are typed into the Lead's pane, and nowhere else. Refused with `no_prompt`
+    /// when the Lead is not blocked, `bad_option` when the prompt does not offer `option`.
+    /// Blocking: it asks herdr.
+    pub fn answer_prompt(&self, option: &str) -> Result<LeadView, ApiError> {
+        let Some((name, pane)) = self.blocked_lead() else {
+            return Err(no_prompt(
+                "the Lead is not waiting for an answer, so nothing was typed",
+            ));
+        };
+        match prompt::answer(self.herdr.as_ref(), &name, &pane, option) {
+            Ok(_) => {}
+            Err(AnswerError::NotOffered(p)) => return Err(bad_option(option, "the Lead", &p)),
+            Err(AnswerError::JustAnswered) => {
+                return Err(no_prompt(
+                    "that answer was just typed into the Lead's pane: wait for the Lead to move on",
+                ));
+            }
+            Err(AnswerError::Herdr(e)) => {
+                return Err(herdr_unavailable(format!(
+                    "Herdr could not type the answer into the Lead's pane ({e}): try again"
+                )));
+            }
+        }
+        self.publish();
+        Ok(self.view())
     }
 
     /// Start the Lead. Blocking: checks the kind and Herdr (starting Herdr when it is not
@@ -922,6 +988,58 @@ mod tests {
             !l.watching.load(Ordering::SeqCst),
             "the watch task kept running"
         );
+    }
+
+    // A first-run question (trust this folder) that stops a start is shown on the `starting`
+    // view and answered into the pane the start opened; an agent of that name in another pane
+    // is not the starting Lead.
+    #[test]
+    fn a_question_during_a_start_is_shown_and_answered_in_the_starting_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeHerdr::new());
+        fake.add_pane(PaneInfo::new("w1:p1", "w1", "w1:t1"));
+        fake.add_agent(AgentInfo::new(
+            "lead",
+            "claude",
+            "w1:p1",
+            AgentStatus::Blocked,
+        ));
+        fake.set_output(
+            "lead",
+            "Do you trust the files in this folder?\n❯ 1. Yes, proceed\n  2. No, exit\n",
+        );
+        let l = launcher(dir.path(), fake.clone());
+        {
+            let mut slot = l.slot.lock().unwrap();
+            slot.name = Some("lead".into());
+            slot.starting = Some(Starting {
+                kind: "claude".into(),
+                pane: Some("w1:p1".into()),
+                note: "waiting for claude to be ready".into(),
+            });
+        }
+        let v = l.view();
+        assert_eq!(
+            (v.state, v.status),
+            (LeadState::Starting, Some(LeadStatus::Blocked))
+        );
+        let p = v.prompt.expect("the question is shown while starting");
+        assert_eq!(p.text, "Do you trust the files in this folder?");
+        let yes = p.options[0].id.clone();
+        l.answer_prompt(&yes).unwrap();
+        assert_eq!(
+            fake.sent(),
+            vec![orch_herdr::Sent::Keys {
+                pane: "w1:p1".into(),
+                keys: vec!["enter".into()]
+            }]
+        );
+
+        // the start opened another pane: the blocked `lead` in w1:p1 is not it
+        l.slot.lock().unwrap().starting.as_mut().unwrap().pane = Some("w1:p2".into());
+        assert!(l.view().prompt.is_none());
+        assert_eq!(l.answer_prompt(&yes).unwrap_err().code(), "no_prompt");
+        assert_eq!(fake.sent().len(), 1);
     }
 
     // Herdr agent names are global: a Lead running in another project's folder is not this

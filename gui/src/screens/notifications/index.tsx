@@ -66,7 +66,7 @@ export function NotificationsScreen() {
     if (query.trim() === "") return true;
     const look = kindLook(item.kind);
     return matches(
-      [item.title, item.detail, item.prompt, item.task, item.agent, item.projectName, look.label, item.kind]
+      [item.title, item.detail, item.prompt?.text, item.task, item.agent, item.projectName, look.label, item.kind]
         .filter(Boolean)
         .join(" "),
       query,

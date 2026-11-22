@@ -162,6 +162,9 @@ pub struct StreamHub {
     has_dropped: AtomicBool,
     subscribers: Mutex<HashMap<u64, mpsc::Sender<StreamMessage>>>,
     next_sub_id: AtomicU64,
+    /// The project's Herdr, once a request handed it over: a new `blocked` attention item
+    /// carries the prompt read from its agent's pane.
+    runtime: Mutex<Option<Arc<dyn orch_herdr::RuntimeAdapter + Send + Sync>>>,
 }
 
 static HUBS: Mutex<Option<HashMap<PathBuf, Arc<StreamHub>>>> = Mutex::new(None);
@@ -179,7 +182,17 @@ impl StreamHub {
             has_dropped: AtomicBool::new(false),
             subscribers: Mutex::new(HashMap::new()),
             next_sub_id: AtomicU64::new(1),
+            runtime: Mutex::new(None),
         }
+    }
+
+    /// Read blocked agents' prompts through `runtime` from now on.
+    pub fn set_runtime(&self, runtime: Arc<dyn orch_herdr::RuntimeAdapter + Send + Sync>) {
+        *self.runtime.lock().unwrap() = Some(runtime);
+    }
+
+    fn runtime(&self) -> Option<Arc<dyn orch_herdr::RuntimeAdapter + Send + Sync>> {
+        self.runtime.lock().unwrap().clone()
     }
 
     pub fn get_or_create(project_root: &Path, shutdown: watch::Receiver<bool>) -> Arc<StreamHub> {
@@ -718,11 +731,18 @@ fn poll_once(
                     hub.publish("attention", serde_json::to_value(ev).unwrap_or_default());
                 }
             }
+            let runtime = hub.runtime();
             for cur in &current_items {
                 if !prev_items.iter().any(|old| old.id == cur.id) {
+                    let item = match &runtime {
+                        Some(rt) => {
+                            crate::routes::prompt::attention_item(cur.clone(), &run, rt.as_ref())
+                        }
+                        None => cur.clone().into(),
+                    };
                     let ev = AttentionEvent {
                         op: AttentionOp::Add,
-                        item: cur.clone().into(),
+                        item,
                     };
                     hub.publish("attention", serde_json::to_value(ev).unwrap_or_default());
                 }

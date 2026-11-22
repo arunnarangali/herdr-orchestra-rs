@@ -31,7 +31,7 @@ export interface AttentionCardProps {
  */
 export function AttentionCard({ item, onReview }: AttentionCardProps) {
   const { tone, icon } = attentionLook(item.kind);
-  const body = item.detail ?? item.prompt;
+  const body = item.detail ?? item.prompt?.text;
   return (
     <Card as="li" tone={tone} className="att" data-attention={item.id}>
       <div className="att__head">

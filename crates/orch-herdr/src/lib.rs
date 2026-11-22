@@ -13,6 +13,7 @@ pub mod error;
 pub mod fake;
 pub mod launch;
 pub mod model;
+pub mod prompt;
 pub mod status;
 
 pub use adapter::{Availability, RuntimeAdapter, SplitDirection, SplitPane};
@@ -20,4 +21,5 @@ pub use error::HerdrError;
 pub use fake::{CallKind, FakeHerdr, Sent};
 pub use launch::{AgentStart, Started, name_when_seen, start_agent_in_pane};
 pub use model::{AgentInfo, PaneInfo, WorkspaceInfo};
+pub use prompt::{AgentPrompt, PromptChoice};
 pub use status::AgentStatus;
