@@ -641,6 +641,7 @@ export interface StreamMessageEnvelope {
 export interface StreamPayloads {
   "task-state": TaskStateEvent;
   "lead-event": LeadQueueEvent;
+  lead: LeadView;
   "run-state": RunStateEvent;
   chat: ChatMessage;
   log: LogEvent;
@@ -650,6 +651,7 @@ export type StreamEventName = keyof StreamPayloads;
 export const STREAM_EVENT_NAMES: readonly StreamEventName[] = [
   "task-state",
   "lead-event",
+  "lead",
   "run-state",
   "chat",
   "log",

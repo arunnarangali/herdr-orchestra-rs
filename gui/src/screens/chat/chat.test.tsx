@@ -69,7 +69,7 @@ describe("the conversation", () => {
     expect(screen.getByRole("textbox", { name: /message/i })).toBeInTheDocument();
   });
 
-  it("with no run, a send says so in plain words and never shows the server's terminal advice", async () => {
+  it("with no run and no Lead state known, a send is held, not refused, and never shows terminal advice", async () => {
     server.respond("GET", "/chat", 404, errorBody("no_run", "no run"));
     server.respond("POST", "/chat", 404, errorBody("no_run", "no run exists in this project: write .orchestrate/plan.md and run `orch sync`"));
     const user = userEvent.setup();
@@ -77,7 +77,9 @@ describe("the conversation", () => {
     await screen.findByText("No run in this project yet.");
     await user.type(screen.getByRole("textbox", { name: /message/i }), "build a login page");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    expect(await screen.findByText(/Not sent: this project has no run yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/Waiting: it is sent as soon as the Lead has set up/)).toBeInTheDocument();
+    expect(screen.getByText("build a login page")).toBeInTheDocument();
+    expect(screen.queryByText(/Not sent/)).toBeNull();
     expect(document.body).not.toHaveTextContent("orch sync");
     expect(document.body).not.toHaveTextContent("plan.md");
   });
@@ -209,7 +211,7 @@ describe("sending", () => {
     server.respond("GET", "/chat", 200, { messages: [msg(1, { text: "anyone there?" })] });
     await user.type(screen.getByLabelText("Message to the lead"), "anyone there?{Enter}");
     const alert = await screen.findByText("The lead is not running");
-    expect(alert.closest("[role=alert]")).toHaveTextContent("orch lead plan");
+    expect(alert.closest("[role=alert]")).toHaveTextContent("Start Lead");
     expect(alert.closest("[role=alert]")).toHaveTextContent("no pane named `lead`");
     expect(screen.getByLabelText("Message to the lead")).toHaveValue("anyone there?");
     expect(await screen.findByText("Queued")).toBeInTheDocument();
@@ -279,7 +281,7 @@ describe("the feature request form", () => {
     await user.type(screen.getByLabelText("Must"), "keep it small");
     await user.click(screen.getByRole("button", { name: "Send feature request" }));
     const alert = (await screen.findByText("The lead is not running")).closest("[role=alert]")!;
-    expect(alert).toHaveTextContent("orch lead plan");
+    expect(alert).toHaveTextContent("Start Lead");
     expect(screen.getByLabelText(/^Feature/)).toHaveValue(FULL.feature);
     expect(screen.getByLabelText(/^Why/)).toHaveValue(FULL.why);
     expect(screen.getByLabelText("Must")).toHaveValue("keep it small");

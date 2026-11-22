@@ -35,7 +35,7 @@ export function advice(kind: ConnectionKind, url: string | null): { title: strin
     case "no-run":
       return {
         title: "This project has no run yet.",
-        hint: "Start one with a new feature request in Chat. This page keeps checking.",
+        hint: "Press Start Lead in Chat, or send it your first message there. This page keeps checking.",
       };
     default:
       return null;
