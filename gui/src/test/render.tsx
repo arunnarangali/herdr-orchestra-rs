@@ -44,6 +44,9 @@ export function fakeShell(overrides: Partial<Shell> = {}): Shell {
     getConnection: async () => null,
     findOrch: async () => "/usr/bin/orch",
     findHerdr: async () => "/usr/bin/herdr",
+    detectAgentClis: async () => [],
+    getProjectSettings: async (path) => ({ leadAgent: null, folder: path, warning: null }),
+    saveProjectSettings: async (_path, settings) => ({ leadAgent: settings.leadAgent, folder: settings.folder, warning: null }),
     ...overrides,
   };
 }
