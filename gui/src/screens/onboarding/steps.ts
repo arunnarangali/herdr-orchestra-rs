@@ -1,4 +1,6 @@
 import type { AgentsResponse, Health } from "../../api/types";
+import { herdrRunningText } from "../../app/HerdrSetup";
+import type { HerdrInfo } from "../../app/shell";
 
 export type StepState = "checking" | "ok" | "problem" | "unknown";
 
@@ -35,22 +37,17 @@ export function orchResult(path: string | null, error: string | null, health: He
   };
 }
 
-export function herdrResult(path: string | null, error: string | null, hasShell: boolean): StepResult {
-  if (path) {
-    return {
-      state: "ok",
-      found: `Herdr found at ${path}.`,
-      next: "Make sure Herdr is running when you open a lead pane.",
-      commands: ["herdr --version"],
-    };
+/**
+ * The Herdr step from the shell's view of Herdr (`null`: no shell). A running Herdr is done,
+ * with no install asked for; anything else is a problem whose way out is the Herdr setup panel
+ * (install, update, the official site), never a terminal command.
+ */
+export function herdrResult(info: HerdrInfo | null, hasShell: boolean): StepResult {
+  if (info?.state === "running") {
+    return { state: "ok", found: herdrRunningText(info), next: "Nothing to do: the app takes care of Herdr.", commands: [] };
   }
-  if (hasShell && error) {
-    return {
-      state: "problem",
-      found: error,
-      next: "Orchestra uses your existing Herdr to open the lead and coder panes. Install Herdr following its own documentation, or set HERDR_BIN to its full path, then check again. This app never installs it.",
-      commands: ["herdr --version", "export HERDR_BIN=/full/path/to/herdr"],
-    };
+  if (hasShell && info) {
+    return { state: "problem", found: info.error ?? "Herdr is not running.", next: "", commands: [] };
   }
   return {
     state: "unknown",

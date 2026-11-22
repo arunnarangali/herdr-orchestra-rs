@@ -3,10 +3,12 @@ import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { resetChatMemoryForTests } from "../screens/chat/chatMemory";
 
-// The suite runs many files in parallel workers; under that load the app's async settles
-// (health checks, fetches, stream connects) can outlast the 1s default. A wider window
-// keeps the same assertions honest on a busy machine.
-configure({ asyncUtilTimeout: 5000 });
+// The suite runs many files in parallel workers, often next to other agents' builds; under
+// that load the app's async settles (health checks, fetches, stream connects) can take
+// several seconds (a check run measured 3-25x the usual times). Each wait gets most of the
+// test's own 20s budget (vite.config.ts) instead of giving up at 5s: the assertions are the
+// same, a passing wait returns as soon as it holds, and only a slow machine waits longer.
+configure({ asyncUtilTimeout: 15_000 });
 
 // Node 25 ships its own `localStorage` global that is unusable without a file; use a plain
 // in-memory one so tests behave the same on every Node version.

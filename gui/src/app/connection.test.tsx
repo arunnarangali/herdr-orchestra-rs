@@ -18,8 +18,9 @@ afterEach(async () => {
 const pill = () => screen.getByRole("status", { name: /^Connection:/ });
 
 // The suite runs many files in parallel workers; under load the connection settles slower
-// than waitFor's 1s default. Same assertions, a wider window (the app polls every 50ms).
-const PATIENT = { timeout: 5000 } as const;
+// than waitFor's 1s default. Same assertions, a wider window (the app polls every 50ms),
+// the same as every other wait (src/test/setup.ts).
+const PATIENT = { timeout: 15_000 } as const;
 const waitPill = (state: string) =>
   waitFor(() => expect(pill()).toHaveAccessibleName(`Connection: ${state}`), PATIENT);
 const waitStreams = (srv: FakeServer, count: number) =>

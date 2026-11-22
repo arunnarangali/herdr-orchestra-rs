@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { samples } from "../../api/contract";
 import type { AgentKindInfo, ChatMessage, LeadView } from "../../api/types";
 import { errorBody, startFakeServer, type FakeServer } from "../../test/fakeServer";
-import { renderApp } from "../../test/render";
+import { fakeShell, renderApp } from "../../test/render";
 import { setDefaultLeadLookupForTests } from "./defaultAgent";
+import type { HerdrInfo } from "../../app/shell";
 
 let server: FakeServer;
 beforeEach(async () => {
@@ -40,11 +41,11 @@ const msg = (id: number, over: Partial<ChatMessage> = {}): ChatMessage => ({
   ...over,
 });
 
-function open(opts: { lead?: LeadView; agents?: AgentKindInfo[]; saved?: string | null } = {}) {
+function open(opts: { lead?: LeadView; agents?: AgentKindInfo[]; saved?: string | null; shell?: import("../../app/shell").Shell | null } = {}) {
   server.respond("GET", "/lead", 200, opts.lead ?? view());
   server.respond("GET", "/agents", 200, { agents: opts.agents ?? AGENTS, team: [] });
   setDefaultLeadLookupForTests(async () => (opts.saved === undefined ? "claude" : opts.saved));
-  return renderApp({ route: "/chat", initial: server });
+  return renderApp({ route: "/chat", initial: server, shell: opts.shell });
 }
 const starts = () => server.requests.filter((r) => r.method === "POST" && r.path === "/lead/start");
 const chats = () => server.requests.filter((r) => r.method === "POST" && r.path === "/chat");
@@ -52,6 +53,28 @@ const startButton = async () => {
   const b = await screen.findByRole("button", { name: "Start Lead" });
   await waitFor(() => expect(b).toBeEnabled()); // enabled once the installed agents are known
   return b;
+};
+const herdr = (o: Partial<HerdrInfo> = {}): HerdrInfo => ({
+  state: "running",
+  installed: true,
+  path: "/usr/bin/herdr",
+  version: "0.9.5",
+  running: true,
+  managed: true,
+  too_old: false,
+  error: null,
+  fix: null,
+  ...o,
+});
+const MISSING: Partial<HerdrInfo> = {
+  state: "missing",
+  installed: false,
+  path: null,
+  version: null,
+  running: false,
+  managed: false,
+  error: "Herdr is not installed on this computer. Orchestra needs it to run the Lead and its agents: choose Install Herdr to install it from Herdr's official site (herdr.dev).",
+  fix: "install",
 };
 const live = async (event: string, data: unknown, id = 1) => {
   await waitFor(() => expect(server.streamRequests().length).toBeGreaterThan(0));
@@ -218,6 +241,60 @@ describe("Chat with no Lead", () => {
     expect(screen.getByRole("button", { name: "Start Lead" })).toBeEnabled();
     expect(screen.getByText("message 1")).toBeInTheDocument();
     expect(screen.getByText("done")).toBeInTheDocument();
+  });
+
+  it("AC2 + AC4: with no Herdr the Lead start says so, offers Install Herdr with the official script shown first, and starts once Herdr runs", async () => {
+    const user = userEvent.setup();
+    const prepareHerdrFix = vi.fn(async () => ({ action: "install" as const, command: "curl -fsSL https://herdr.dev/install.sh | sh", script: "#!/bin/sh\necho official\n", token: "t9" }));
+    const runHerdrFix = vi.fn(async () => herdr());
+    open({ shell: fakeShell({ getHerdrInfo: async () => herdr(MISSING), prepareHerdrFix, runHerdrFix }) });
+
+    expect(await screen.findByText(/Herdr is not installed on this computer/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Lead" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Install Herdr" }));
+    const plan = await screen.findByRole("region", { name: "Install Herdr: what will run" });
+    expect(within(plan).getByLabelText("Installer script")).toHaveTextContent("echo official");
+    expect(runHerdrFix).not.toHaveBeenCalled();
+    await user.click(within(plan).getByRole("button", { name: "Run it" }));
+    expect(runHerdrFix).toHaveBeenCalledWith("t9");
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Herdr setup" })).toBeNull());
+    expect(await startButton()).toBeEnabled();
+  });
+
+  it("AC1 + AC2: a too-old Herdr offers Herdr's own update, showing the exact command that runs", async () => {
+    const user = userEvent.setup();
+    const prepareHerdrFix = vi.fn(async () => ({ action: "update" as const, command: "/usr/bin/herdr update", script: null, token: "u" }));
+    const runHerdrFix = vi.fn(async () => herdr());
+    open({
+      shell: fakeShell({
+        getHerdrInfo: async () => herdr({ state: "too_old", too_old: true, running: false, managed: false, version: "0.8.2", error: "Herdr 0.8.2 is too old: Orchestra needs Herdr 0.9.0 or newer. Choose Update Herdr to update it with Herdr's own updater.", fix: "update" }),
+        prepareHerdrFix,
+        runHerdrFix,
+      }),
+    });
+    expect(await screen.findByText(/0\.8\.2 is too old/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Update Herdr" }));
+    const plan = await screen.findByRole("region", { name: "Update Herdr: what will run" });
+    expect(plan).toHaveTextContent("/usr/bin/herdr update");
+    await user.click(within(plan).getByRole("button", { name: "Run it" }));
+    expect(runHerdrFix).toHaveBeenCalledWith("u");
+  });
+
+  it("AC4: a Herdr that did not start is said plainly, with Check again and no reinstall", async () => {
+    open({
+      shell: fakeShell({
+        getHerdrInfo: async () => herdr({ state: "failed", running: false, managed: false, error: "Herdr is installed, but its background server did not start (it did not answer within 15s). Check again; if it keeps failing, open herdr.dev for help." }),
+      }),
+    });
+    expect(await screen.findByText(/background server did not start/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Install Herdr" })).toBeNull();
+  });
+
+  it("a running Herdr adds nothing to the Lead start", async () => {
+    open({ shell: fakeShell({ getHerdrInfo: async () => herdr() }) });
+    expect(await startButton()).toBeEnabled();
+    expect(screen.queryByRole("group", { name: "Herdr setup" })).toBeNull();
   });
 });
 
