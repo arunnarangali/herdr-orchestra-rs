@@ -1,3 +1,4 @@
+import { shownText } from "./featureCommand";
 import type { ChatMessage } from "../../api/types";
 import type { OutboxEntry } from "./useChat";
 
@@ -76,7 +77,7 @@ export function Bubble({ message, onRetry }: { message: ChatMessage; onRetry: ()
           {message.about && <span className="badge badge--neutral">about {message.about}</span>}
           <Time ts={message.ts} />
         </p>
-        {message.request ? <Request request={message.request} /> : <p className="chat-text">{message.text}</p>}
+        {message.request ? <Request request={message.request} /> : <p className="chat-text">{shownText(message.text)}</p>}
         {mine && message.delivery && <Delivery state={message.delivery} note={message.delivery_note} onRetry={onRetry} />}
       </div>
     </li>
@@ -91,7 +92,7 @@ export function OutboxBubble({ entry, onRetry }: { entry: OutboxEntry; onRetry: 
         <p className="chat-meta">
           <span className="chat-who">You</span>
         </p>
-        <p className="chat-text">{entry.body.text}</p>
+        <p className="chat-text">{shownText(entry.body.text)}</p>
         {entry.state === "waiting" ? (
           <span className="chat-delivery" role="status">
             Waiting: it is sent as soon as the Lead has set up this project's run.
