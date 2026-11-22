@@ -28,6 +28,7 @@ use orch_config::launch::launch_command;
 use orch_config::models::Catalog;
 use orch_config::tunables::Tunables;
 use orch_core::paths::ORCH_DIR;
+use orch_core::run_store::{AgentRole, RunAgent, RunSettings, SyncInput};
 use orch_core::store::{DB_FILE, Store};
 use orch_herdr::launch::{AgentStart, Started, name_when_seen, start_agent_in_pane};
 use orch_herdr::prompt::{self, AnswerError};
@@ -847,9 +848,58 @@ then start the Lead again: it picks that pane up",
         let _ = self.herdr.rename_pane(&pane, name);
         self.set_starting(None, &format!("waiting for {kind} to be ready"));
         self.publish();
+        self.setup_chat_run(kind, name, &pane);
         let prompt = first_prompt(kind, name, &pane, message, Some(invoke));
         let note = self.hand_over(name, &prompt);
         self.finish(Some((kind, &pane)), note, false);
+    }
+
+    /// Ensure a run exists in `.orchestrate/state.db` naming this Lead, so the developer's
+    /// conversation is ready and replies appear in Chat without needing a separate plan sync first.
+    fn setup_chat_run(&self, kind: &str, name: &str, pane: &str) {
+        let orch_dir = self.root.join(ORCH_DIR);
+        if std::fs::create_dir_all(&orch_dir).is_err() {
+            return;
+        }
+        let db = orch_dir.join(DB_FILE);
+        let Ok(mut store) = Store::open(&db) else {
+            return;
+        };
+        if store.load_run().ok().flatten().is_none() {
+            let input = SyncInput {
+                settings: RunSettings {
+                    branch: String::new(),
+                    base: None,
+                    title: self
+                        .root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    commits: "squash".into(),
+                    isolation: "worktree".into(),
+                    max_parallel: 1,
+                    setup_inputs: vec![],
+                    scope: "warn".into(),
+                    risk_hold: true,
+                    budget_s: None,
+                    check_command: "true".into(),
+                    setup_command: String::new(),
+                    lead_mode: "events".into(),
+                    reviewer: None,
+                },
+                agents: vec![RunAgent {
+                    role: AgentRole::Lead,
+                    name: name.to_string(),
+                    kind: kind.to_string(),
+                    model: None,
+                    tier: None,
+                    detect: true,
+                    pane: Some(pane.to_string()),
+                }],
+                tasks: vec![],
+            };
+            let _ = store.apply_sync(&input);
+        }
     }
 
     /// Type the first prompt once the Lead is ready (idle), within the bound. `None` when it
