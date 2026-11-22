@@ -521,6 +521,34 @@ export interface LeadView {
   status: string | null;
   /** What is happening, or what went wrong and what to do about it. */
   note: string | null;
+  /** While the Lead is blocked: the question in its pane and its answers (`POST /lead/prompt`). */
+  prompt: AgentPrompt | null;
+}
+/** One answer an agent's open prompt offers. */
+export interface PromptOption {
+  /** Opaque, and tied to this one question: send it back as `option` to choose it. */
+  id: string;
+  /** The answer as the agent's pane shows it. */
+  label: string;
+}
+/** The id of the one option of a prompt the app could not read into choices; it types nothing. */
+export const ANSWERED_IN_PANE = "answered_in_pane";
+/**
+ * A blocked agent's open prompt, read from its pane. When the pane could not be read into
+ * choices, `text` is the bottom of its screen and the only option is `ANSWERED_IN_PANE`
+ * ("I answered it in the pane").
+ */
+export interface AgentPrompt {
+  text: string;
+  options: PromptOption[];
+}
+/**
+ * Body of `POST /lead/prompt` (answer: `LeadView`) and `POST /attention/{id}/prompt` (answer:
+ * `AttentionResponse`): one option id the open prompt offers; nothing else is accepted.
+ * Errors: 400 `bad_option`, 409 `no_prompt` (nothing is blocked), 503 `herdr_unavailable`.
+ */
+export interface PromptAnswerBody {
+  option: string;
 }
 /**
  * Body of `POST /lead/start` (answer: `LeadView`, status 202). Errors: 400
@@ -605,7 +633,8 @@ export interface AttentionItem {
   agent: string | null;
   title: string;
   detail: string | null;
-  prompt: string | null;
+  /** For a `blocked` item whose agent is blocked now: its open prompt; `null` otherwise. */
+  prompt: AgentPrompt | null;
   since: string;
   actions: (AttentionAction | (string & {}))[];
 }

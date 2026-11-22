@@ -1085,7 +1085,8 @@ async fn agents_endpoint_reports_working_on_per_team_member() {
 async fn attention_lists_all_open_kinds_and_they_disappear_when_resolved() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = fresh_run(dir.path());
-    let srv = start(dir.path()).await;
+    // herdr has no such agent: a blocked item carries no live prompt (see tests/prompt.rs)
+    let srv = start_with_herdr(dir.path(), Arc::new(FakeHerdr::new())).await;
 
     // 1. Plan approval: fresh run has plan_approval item
     let body = ok(&srv, "/api/v1/attention").await;
@@ -1109,7 +1110,8 @@ async fn attention_lists_all_open_kinds_and_they_disappear_when_resolved() {
     let items = body["items"].as_array().unwrap();
     let blocked = items.iter().find(|i| i["kind"] == "blocked").unwrap();
     assert_eq!(blocked["agent"], "claude-1");
-    assert_eq!(blocked["prompt"], "May I run `cargo test`?");
+    assert!(blocked["prompt"].is_null(), "{blocked}");
+    assert!(blocked["detail"].as_str().unwrap().contains("May I run `cargo test`?"), "{blocked}");
     assert_eq!(blocked["actions"], serde_json::json!(["open_chat"]));
 
     // Resolve blocked agent: milestone moves on (e.g. finishes coding into verifying)

@@ -8,7 +8,15 @@
       "detail": "needs bash permission",
       "id": "blocked:1",
       "kind": "blocked",
-      "prompt": "May I run `cargo test`?",
+      "prompt": {
+        "options": [
+          {
+            "id": "answered_in_pane",
+            "label": "I answered it in the pane"
+          }
+        ],
+        "text": "Allow this command? (y/n)"
+      },
       "since": "2023-11-14T22:13:20Z",
       "task": "M1",
       "title": "rs-claude-1 is blocked on permission"

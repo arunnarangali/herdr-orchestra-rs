@@ -157,7 +157,7 @@ export function AttentionPopup() {
         {item.prompt && (
           <div className="attention-prompt">
             <strong>Prompt:</strong>
-            <pre className="attention-text">{item.prompt}</pre>
+            <pre className="attention-text">{item.prompt.text}</pre>
           </div>
         )}
 

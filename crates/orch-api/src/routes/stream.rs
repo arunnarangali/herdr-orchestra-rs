@@ -43,6 +43,7 @@ pub async fn stream_handler(
     });
 
     let hub = StreamHub::get_or_create(state.project_root(), state.shutdown_signal());
+    hub.set_runtime(state.herdr().clone());
     match hub.subscribe(since) {
         Ok((rx, guard)) => {
             let keepalive_dur = feed::keepalive_interval();

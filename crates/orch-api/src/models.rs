@@ -1085,6 +1085,53 @@ impl From<orch_core::attention::AttentionAction> for AttentionAction {
     }
 }
 
+/// One choice of an agent's open prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PromptOption {
+    /// Opaque: send it back as `option` to choose it. It belongs to this one question, so an
+    /// id kept from an earlier question is refused (`bad_option`).
+    pub id: String,
+    /// The choice as the agent's pane shows it.
+    pub label: String,
+}
+
+/// A blocked agent's open prompt, read from its pane. When the pane cannot be read into
+/// choices, `text` is the bottom of its screen and the one option is `answered_in_pane`
+/// ("I answered it in the pane"), which types nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PromptView {
+    /// The question the agent asks.
+    pub text: String,
+    /// The answers it offers, in the pane's order.
+    pub options: Vec<PromptOption>,
+}
+
+impl From<&orch_herdr::AgentPrompt> for PromptView {
+    fn from(p: &orch_herdr::AgentPrompt) -> Self {
+        PromptView {
+            text: p.text.clone(),
+            options: p
+                .choices
+                .iter()
+                .map(|c| PromptOption {
+                    id: c.id.clone(),
+                    label: c.label.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Body of `POST /lead/prompt` and `POST /attention/{id}/prompt`: one of the open prompt's
+/// option ids. Nothing else is accepted: no text, no keys.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PromptAnswerBody {
+    /// The chosen option's `id`, as the prompt offers it.
+    #[serde(default)]
+    pub option: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct AttentionItem {
     pub id: String,
@@ -1093,7 +1140,9 @@ pub struct AttentionItem {
     pub agent: Option<String>,
     pub title: String,
     pub detail: Option<String>,
-    pub prompt: Option<String>,
+    /// For a `blocked` item whose agent is blocked now: its open prompt, read from its pane
+    /// (the text the event manager saw first stays in `detail`). `null` otherwise.
+    pub prompt: Option<PromptView>,
     pub since: String,
     pub actions: Vec<AttentionAction>,
 }
@@ -1107,7 +1156,8 @@ impl From<orch_core::attention::AttentionItem> for AttentionItem {
             agent: item.agent,
             title: item.title,
             detail: item.detail,
-            prompt: item.prompt,
+            // the live prompt is read from the pane: see `routes::prompt::attention_item`
+            prompt: None,
             since: item.since,
             actions: item.actions.into_iter().map(Into::into).collect(),
         }

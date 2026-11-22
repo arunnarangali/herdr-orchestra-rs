@@ -2,6 +2,19 @@
   "agent": "claude",
   "note": null,
   "pane": "w2:p1",
+  "prompt": {
+    "options": [
+      {
+        "id": "1-5d1f7c2a",
+        "label": "Yes, proceed"
+      },
+      {
+        "id": "2-5d1f7c2a",
+        "label": "No, exit"
+      }
+    ],
+    "text": "Do you trust the files in this folder?\n\n/home/dev/project"
+  },
   "state": "running",
-  "status": "working"
+  "status": "blocked"
 }

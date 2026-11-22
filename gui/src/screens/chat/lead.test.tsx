@@ -26,7 +26,7 @@ const kindInfo = (kind: string, installed: boolean, display: string): AgentKindI
   roles: ["lead", "coder"],
 });
 const AGENTS = [kindInfo("claude", true, "Claude Code"), kindInfo("codex", true, "Codex CLI"), kindInfo("amp", false, "Amp")];
-const view = (over: Partial<LeadView> = {}): LeadView => ({ state: "none", agent: null, pane: null, status: null, note: null, ...over });
+const view = (over: Partial<LeadView> = {}): LeadView => ({ state: "none", agent: null, pane: null, status: null, note: null, prompt: null, ...over });
 const msg = (id: number, over: Partial<ChatMessage> = {}): ChatMessage => ({
   id,
   ts: "2026-11-15T09:30:00Z",

@@ -50,7 +50,7 @@ async function notifyDesktop(item: TaggedItem) {
   }
   if (!enabled) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  const body = item.prompt || item.detail || item.title;
+  const body = item.prompt?.text || item.detail || item.title;
   new Notification(item.projectName ? `${item.projectName}: ${item.title}` : item.title, { body });
 }
 
