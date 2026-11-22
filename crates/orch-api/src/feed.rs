@@ -17,7 +17,8 @@ use utoipa::ToSchema;
 pub struct StreamMessage {
     /// Monotonically increasing event ID.
     pub id: u64,
-    /// Event name: `task-state`, `lead-event`, `run-state`, `chat`, or `log`.
+    /// Event name: `task-state`, `lead-event`, `run-state`, `chat`, `attention`, `lead` (the
+    /// Lead's state, a `LeadView`) or `log`.
     pub event: String,
     /// Event data payload (JSON object).
     pub data: serde_json::Value,

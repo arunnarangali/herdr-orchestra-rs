@@ -171,6 +171,21 @@ pub trait RuntimeAdapter {
     /// `herdr pane send-text <pane_id> <text>`.
     fn send_text(&self, pane: &str, text: &str) -> Result<()>;
 
+    /// Open a new workspace whose first pane starts in `cwd`, without taking
+    /// focus. Corresponds to `herdr workspace create --cwd PATH [--label TEXT]
+    /// --no-focus`. Returns the new workspace's first pane (herdr's
+    /// `.result.root_pane`). Needs no pane of the caller, so it works from a
+    /// process that runs outside herdr (the desktop app).
+    fn create_workspace(&self, cwd: &std::path::Path, label: Option<&str>) -> Result<PaneInfo>;
+
+    /// Start herdr's headless server in the background and return without
+    /// waiting for it. Corresponds to `herdr server`. The caller checks
+    /// [`availability`](RuntimeAdapter::availability) afterwards to see whether
+    /// it came up.
+    ///
+    /// Fails with [`HerdrError::Unavailable`] when herdr is not installed.
+    fn start_server(&self) -> Result<()>;
+
     /// Press keys in a pane (e.g. `enter` after
     /// [`send_text`](RuntimeAdapter::send_text) for `@pane:<id>` agents, §4).
     /// Corresponds to `herdr pane send-keys <pane_id> <key> [key ...]`.

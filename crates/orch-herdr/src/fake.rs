@@ -48,6 +48,10 @@ pub enum CallKind {
     PaneSendText,
     /// [`RuntimeAdapter::send_keys`].
     PaneSendKeys,
+    /// [`RuntimeAdapter::create_workspace`].
+    WorkspaceCreate,
+    /// [`RuntimeAdapter::start_server`].
+    ServerStart,
 }
 
 /// One thing the fake was asked to send, in the order it was sent (§4: read
@@ -81,6 +85,9 @@ struct State {
     sent: Vec<Sent>,
     failures: BTreeMap<CallKind, Failure>,
     next_pane: u32,
+    detect_on_run: bool,
+    server_comes_up: bool,
+    server_starts: u32,
 }
 
 /// A scriptable in-memory herdr. All methods take `&self` so the fake can be
@@ -112,6 +119,9 @@ impl FakeHerdr {
                 sent: Vec::new(),
                 failures: BTreeMap::new(),
                 next_pane: 1,
+                detect_on_run: false,
+                server_comes_up: true,
+                server_starts: 0,
             }),
         }
     }
@@ -238,6 +248,25 @@ impl FakeHerdr {
                 error,
             },
         );
+    }
+
+    /// When on, a command run in a pane without an agent makes herdr "see" an
+    /// agent start there, as the real herdr does a moment after the agent's
+    /// interface comes up: named after the pane id, of the kind the command's
+    /// first word names, idle.
+    pub fn set_detect_on_run(&self, on: bool) {
+        self.state.lock().unwrap().detect_on_run = on;
+    }
+
+    /// Whether [`RuntimeAdapter::start_server`] makes herdr reachable (default
+    /// true). Off simulates a server that starts and dies at once.
+    pub fn set_server_comes_up(&self, up: bool) {
+        self.state.lock().unwrap().server_comes_up = up;
+    }
+
+    /// How many times [`RuntimeAdapter::start_server`] was called.
+    pub fn server_starts(&self) -> u32 {
+        self.state.lock().unwrap().server_starts
     }
 
     /// Everything the fake was asked to send, oldest first.
@@ -490,6 +519,53 @@ impl RuntimeAdapter for FakeHerdr {
             pane: pane.to_string(),
             command: command.to_string(),
         });
+        let empty = st.panes.get(pane).is_some_and(|p| p.agent.is_none());
+        if st.detect_on_run && empty {
+            let kind = command
+                .split_whitespace()
+                .next()
+                .and_then(|w| w.rsplit('/').next())
+                .unwrap_or("unknown")
+                .to_string();
+            let p = st.panes.get_mut(pane).expect("checked above");
+            p.agent = Some(pane.to_string());
+            p.status = AgentStatus::Idle;
+            let mut a = AgentInfo::new(pane, &kind, pane, AgentStatus::Idle);
+            a.workspace_id = p.workspace_id.clone();
+            a.tab_id = p.tab_id.clone();
+            a.cwd = p.cwd.clone();
+            st.agents.insert(pane.to_string(), a);
+        }
+        Ok(())
+    }
+
+    fn create_workspace(&self, cwd: &std::path::Path, label: Option<&str>) -> Result<PaneInfo> {
+        let mut st = self.state.lock().unwrap();
+        self.failing(&mut st, CallKind::WorkspaceCreate)?;
+        let mut n = st.workspaces.len() as u32 + 1;
+        while st.workspaces.contains_key(&format!("w{n}")) {
+            n += 1;
+        }
+        let ws = format!("w{n}");
+        let tab = format!("{ws}:t1");
+        let mut w = WorkspaceInfo::new(&ws, n, label.unwrap_or(""));
+        w.pane_count = 1;
+        w.tab_count = 1;
+        w.active_tab_id = tab.clone();
+        st.workspaces.insert(ws.clone(), w);
+        let mut pane = PaneInfo::new(&format!("{ws}:p1"), &ws, &tab);
+        pane.cwd = Some(cwd.display().to_string());
+        st.panes.insert(pane.pane_id.clone(), pane.clone());
+        Ok(pane)
+    }
+
+    fn start_server(&self) -> Result<()> {
+        let mut st = self.state.lock().unwrap();
+        self.failing(&mut st, CallKind::ServerStart)?;
+        st.server_starts += 1;
+        if st.server_comes_up {
+            st.reachable = true;
+        }
         Ok(())
     }
 
