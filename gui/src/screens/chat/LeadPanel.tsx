@@ -1,5 +1,7 @@
 import { useId } from "react";
 import { Link } from "react-router-dom";
+import { useConnection } from "../../app/connection";
+import { HerdrSetup, useHerdr } from "../../app/HerdrSetup";
 import { Button } from "../../ui/Button";
 import { Icon } from "../../ui/Icon";
 import { CHOOSE_AGENT_TEXT, NO_AGENT_TEXT, type LeadControl } from "./useLead";
@@ -10,11 +12,16 @@ const STATUS_TONE: Record<string, string> = { idle: "neutral", working: "info", 
 /**
  * Where the Lead stands, in words: running (its agent and status, kept live by the stream),
  * starting, or not there with what is needed to start one. Nothing here is an error unless a
- * start failed; a project with no Lead is a normal state.
+ * start failed; a project with no Lead is a normal state. When the app's Herdr is missing, too
+ * old or not running, it says so and offers the way out (install, update, Herdr's site).
  */
 export function LeadPanel({ lead }: { lead: LeadControl }) {
   const id = useId();
   const { phase, view } = lead;
+  const { shell } = useConnection();
+  // asked again after a failed start: Herdr may be what failed
+  const herdr = useHerdr(shell, lead.startError);
+  const herdrBlocks = herdr.info !== null && (herdr.info.state === "missing" || herdr.info.state === "too_old");
 
   if (phase === "loading" || phase === "unknown") {
     if (!lead.readError) return null;
@@ -107,6 +114,18 @@ export function LeadPanel({ lead }: { lead: LeadControl }) {
         </p>
       )}
 
+      {herdr.info && (
+        <HerdrSetup
+          shell={shell}
+          info={herdr.info}
+          onChange={(info) => {
+            herdr.setInfo(info);
+            if (info.state === "running") lead.reload();
+          }}
+          onRecheck={herdr.refresh}
+        />
+      )}
+
       {lead.startError && (
         <p className="lead-panel__error" role="alert">
           <strong>The Lead did not start.</strong> {lead.startError}
@@ -114,7 +133,7 @@ export function LeadPanel({ lead }: { lead: LeadControl }) {
       )}
 
       {!none && (
-        <Button solid tone="emerald" disabled={!lead.agentToUse || lead.agents === null} onClick={() => void lead.start()}>
+        <Button solid tone="emerald" disabled={!lead.agentToUse || lead.agents === null || herdrBlocks} onClick={() => void lead.start()}>
           {lead.startError ? "Try again" : "Start Lead"}
         </Button>
       )}

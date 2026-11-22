@@ -5,6 +5,8 @@ import type { IconName } from "../../ui/Icon";
 export type Field =
   /** The app's own settings, saved by the desktop shell. */
   | { kind: "app"; id: "theme" | "notifications" | "orch" }
+  /** Managed Herdr runtime status and installation. */
+  | { kind: "herdr" }
   /** A line of the plan header: read-only here, changed in plan.md. */
   | { kind: "plan"; key: Exclude<keyof PlanHeader, "extra">; label: string; desc: string; icon: IconName; code?: boolean }
   /** An `ORCH_*` tunable: read from orch's environment, shown with its default. */
@@ -67,6 +69,7 @@ export const SECTIONS: Section[] = [
     desc: "The programs the app starts and how orch talks to Herdr.",
     fields: [
       { kind: "app", id: "orch" },
+      { kind: "herdr" },
       { kind: "env", name: "ORCH_HERDR_TIMEOUT_S", def: "30", unit: "seconds", label: "Herdr Timeout", desc: "How long orch waits for an answer from Herdr.", icon: "activity" },
       off("Herdr Socket", "Unix socket the orchestrator uses to control panes.", "keyboard", "text"),
       off("Pane Layout", "How new agent panes are arranged in a workspace.", "grid", "select"),

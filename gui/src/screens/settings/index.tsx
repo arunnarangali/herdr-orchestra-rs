@@ -1,6 +1,7 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { PlanResponse } from "../../api/types";
 import { useConnection } from "../../app/connection";
+import { HerdrSetup, herdrRunningText, useHerdr } from "../../app/HerdrSetup";
 import { useProjects } from "../../app/projects";
 import type { ThemePreference } from "../../app/theme";
 import { Badge } from "../../ui/Badge";
@@ -151,6 +152,8 @@ function FieldRow({
           )}
         </Row>
       );
+    case "herdr":
+      return <HerdrRow />;
     case "plan":
       return (
         <Row icon={field.icon} label={field.label} desc={field.desc} source="plan.md">
@@ -365,6 +368,42 @@ function FieldRow({
         </Row>
       );
   }
+}
+
+/** The app's Herdr: running (started by the app, or found running), or what to do about it. */
+function HerdrRow() {
+  const { shell } = useConnection();
+  const herdr = useHerdr(shell);
+  const label = "Herdr";
+  if (!shell) {
+    return (
+      <Row icon="keyboard" label={label} desc="The desktop app runs Herdr in the background." source="runtime">
+        <span className="muted">{DESKTOP_ONLY}</span>
+      </Row>
+    );
+  }
+  const info = herdr.info;
+  if (!info) {
+    return (
+      <Row icon="keyboard" label={label} desc="Checking Herdr…" source="runtime">
+        <Badge tone="cyan">Checking</Badge>
+      </Row>
+    );
+  }
+  if (info.state === "running") {
+    return (
+      <Row icon="keyboard" label={label} desc={herdrRunningText(info)} source="runtime">
+        <Badge tone="emerald">{info.managed ? "Running (started by the app)" : "Running"}</Badge>
+      </Row>
+    );
+  }
+  const word = { missing: "Not installed", too_old: "Update needed", failed: "Not running" } as const;
+  return (
+    <Row icon="keyboard" label={label} desc="Orchestra needs Herdr to run the Lead and its agents." source="runtime">
+      <Badge tone="amber">{word[info.state]}</Badge>
+      <HerdrSetup shell={shell} info={info} onChange={herdr.setInfo} onRecheck={herdr.refresh} />
+    </Row>
+  );
 }
 
 const useAgents = () => useResource((api, signal) => api.agents({ signal }), []);

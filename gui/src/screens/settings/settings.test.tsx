@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { samples } from "../../api/contract";
 import { deadAddress, errorBody, startFakeServer, type FakeServer } from "../../test/fakeServer";
-import { renderApp } from "../../test/render";
+import { fakeShell, renderApp } from "../../test/render";
+import type { HerdrInfo } from "../../app/shell";
 import { setBackendForTests, type AppBackend, type AppSettings } from "../projects/backend";
 import type { AgentCli } from "../../api/types";
 
@@ -84,6 +85,34 @@ describe("sections", () => {
     expect(density).toBeDisabled();
     expect(density).toHaveAccessibleName(/Not available yet/);
     expect(within(panel()).getByRole("button", { name: /Save to config\.toml/ })).toBeDisabled();
+  });
+});
+
+describe("the app's Herdr", () => {
+  const herdr = (o: Partial<HerdrInfo>): HerdrInfo => ({
+    state: "running", installed: true, path: "/usr/bin/herdr", version: "0.9.5", running: true, managed: true, too_old: false, error: null, fix: null, ...o,
+  });
+  const open = async (info: HerdrInfo) => {
+    setBackendForTests(null);
+    const user = userEvent.setup();
+    renderApp({ route: "/settings", initial: server, shell: fakeShell({ getHerdrInfo: async () => info }) });
+    await user.click(await screen.findByRole("tab", { name: "Herdr Runtime" }));
+  };
+
+  it("AC5: says whether the app started Herdr (and stops it) or found it running (and leaves it)", async () => {
+    await open(herdr({ managed: true }));
+    expect(await within(panel()).findByText(/the app started it and stops it when you close the app/)).toBeInTheDocument();
+  });
+
+  it("AC5: a Herdr the app found running is left running", async () => {
+    await open(herdr({ managed: false }));
+    expect(await within(panel()).findByText(/was already running: the app uses it and leaves it running/)).toBeInTheDocument();
+  });
+
+  it("AC2: a missing Herdr offers Install Herdr", async () => {
+    await open(herdr({ state: "missing", installed: false, running: false, managed: false, path: null, error: "Herdr is not installed on this computer.", fix: "install" }));
+    expect(await within(panel()).findByRole("button", { name: "Install Herdr" })).toBeInTheDocument();
+    expect(within(panel()).getByText("Not installed")).toBeInTheDocument();
   });
 });
 

@@ -5,7 +5,7 @@ import { samples } from "../../api/contract";
 import type { AgentKindInfo } from "../../api/types";
 import { startFakeServer, type FakeServer } from "../../test/fakeServer";
 import { fakeShell, renderApp } from "../../test/render";
-import type { Shell } from "../../app/shell";
+import type { HerdrInfo, Shell } from "../../app/shell";
 import { setGitCheckForTests } from "./git";
 
 const kind = (o: Partial<AgentKindInfo>): AgentKindInfo =>
@@ -30,7 +30,7 @@ afterEach(async () => {
 const missingShell = () =>
   fakeShell({
     findOrch: async () => Promise.reject(new Error("orch was not found: set ORCH_BIN to its full path or put it on your PATH")),
-    findHerdr: async () => Promise.reject(new Error("herdr was not found: set HERDR_BIN or put it on your PATH")),
+    findHerdr: async () => Promise.reject(new Error("Herdr was not found on this computer. Install Herdr from https://herdr.dev to continue.")),
   });
 const show = (o: Parameters<typeof renderApp>[0] = {}) => renderApp({ route: "/onboarding", ...o });
 const step = () => screen.getByRole("article");
@@ -71,9 +71,9 @@ describe("everything missing", () => {
     expect(await screen.findByText("Copied")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText(/herdr was not found/)).toBeInTheDocument();
-    expect(step()).toHaveTextContent("never installs it");
-    expect(screen.getByRole("button", { name: "Copy herdr --version" })).toBeInTheDocument();
+    expect(await screen.findByText(/Herdr was not found/i)).toBeInTheDocument();
+    expect(step()).toHaveTextContent("herdr.dev");
+    expect(screen.getByRole("button", { name: "Install Herdr" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(step()).toHaveTextContent("Choose a project folder");
@@ -88,6 +88,8 @@ describe("everything missing", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     // the last step can be read although every step before it failed
     expect(step()).toHaveTextContent("Still open: orch, Herdr, Project");
+    expect(step()).toHaveTextContent("Herdr needs attention");
+    expect(within(step()).getByRole("button", { name: "Install Herdr" })).toBeInTheDocument();
     expect(step()).toHaveTextContent("describe the feature to the lead");
     expect(step()).toHaveTextContent("go");
     expect(screen.getByRole("button", { name: "Copy orch team up" })).toBeInTheDocument();
@@ -139,7 +141,7 @@ describe("everything present", () => {
     show({ shell: fakeShell({ findOrch: async () => "/usr/bin/orch", findHerdr: async () => "/usr/bin/herdr" }), initial: server });
     expect(await screen.findByText("orch found at /usr/bin/orch.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText("Herdr found at /usr/bin/herdr.")).toBeInTheDocument();
+    expect(await screen.findByText(/Herdr \(\/usr\/bin\/herdr\) was already running/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText(/1 of 2 agents found: Claude Code\. Missing: Codex \(optional\)/)).toBeInTheDocument();
     const missing = screen.getByRole("list", { name: "Missing agents" });
@@ -303,3 +305,129 @@ describe("layout and step cards", () => {
   });
 });
 
+const herdrInfo = (o: Partial<HerdrInfo> = {}): HerdrInfo => ({
+  state: "running",
+  installed: true,
+  path: "/home/dev/.local/bin/herdr",
+  version: "0.9.5",
+  running: true,
+  managed: true,
+  too_old: false,
+  error: null,
+  fix: null,
+  ...o,
+});
+const MISSING = herdrInfo({
+  state: "missing",
+  installed: false,
+  path: null,
+  version: null,
+  running: false,
+  managed: false,
+  error: "Herdr is not installed on this computer. Orchestra needs it to run the Lead and its agents: choose Install Herdr to install it from Herdr's official site (herdr.dev).",
+  fix: "install",
+});
+const SCRIPT = "#!/bin/sh\nset -eu\necho 'herdr installer'\n";
+
+describe("the app's Herdr (AC1, AC2, AC4, AC6)", () => {
+  it("AC2: missing Herdr offers Install Herdr, shows the official script before anything runs, and runs that plan on Run it", async () => {
+    const user = userEvent.setup();
+    const prepareHerdrFix = vi.fn(async () => ({ action: "install" as const, command: "curl -fsSL https://herdr.dev/install.sh | sh", script: SCRIPT, token: "t1" }));
+    const runHerdrFix = vi.fn(async () => herdrInfo());
+    show({ shell: fakeShell({ getHerdrInfo: async () => MISSING, prepareHerdrFix, runHerdrFix }) });
+
+    await user.click(screen.getByRole("button", { name: /2\. Herdr/ }));
+    expect(await within(step()).findByText(/Herdr is not installed on this computer/)).toBeInTheDocument();
+    expect(step()).not.toHaveTextContent("HERDR_BIN");
+    await user.click(within(step()).getByRole("button", { name: "Install Herdr" }));
+    expect(prepareHerdrFix).toHaveBeenCalledWith("install");
+    expect(runHerdrFix).not.toHaveBeenCalled();
+    const plan = await screen.findByRole("region", { name: "Install Herdr: what will run" });
+    expect(within(plan).getByLabelText("Installer script")).toHaveTextContent("echo 'herdr installer'");
+
+    await user.click(within(plan).getByRole("button", { name: "Run it" }));
+    expect(runHerdrFix).toHaveBeenCalledWith("t1");
+    // Herdr now runs: the step is done and asks for nothing
+    expect(await within(step()).findByText(/the app started it and stops it when you close the app/)).toBeInTheDocument();
+    expect(within(step()).queryByRole("button", { name: "Install Herdr" })).toBeNull();
+  });
+
+  it("AC2 + AC4: when the install cannot be done from the app, it opens herdr.dev and says what to do next", async () => {
+    const user = userEvent.setup();
+    const openHerdrUrl = vi.fn(async () => {});
+    const runHerdrFix = vi.fn(async () => {
+      throw new Error("The Herdr installer stopped with an error:\nerror: unsupported architecture: sparc");
+    });
+    show({
+      shell: fakeShell({
+        getHerdrInfo: async () => MISSING,
+        prepareHerdrFix: async () => ({ action: "install", command: "curl -fsSL https://herdr.dev/install.sh | sh", script: SCRIPT, token: "t" }),
+        runHerdrFix,
+        openHerdrUrl,
+      }),
+    });
+    await user.click(screen.getByRole("button", { name: /2\. Herdr/ }));
+    await user.click(await within(step()).findByRole("button", { name: "Install Herdr" }));
+    await user.click(await screen.findByRole("button", { name: "Run it" }));
+    const note = await within(step()).findByText(/unsupported architecture: sparc/);
+    expect(note).toHaveTextContent("https://herdr.dev is open in your browser");
+    expect(note).toHaveTextContent("then choose Check again");
+    expect(openHerdrUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC2 + AC4: on the Start step the same panel is offered, with the same plan shown and run", async () => {
+    const user = userEvent.setup();
+    const prepareHerdrFix = vi.fn(async () => ({ action: "update" as const, command: "/usr/bin/herdr update", script: null, token: "u1" }));
+    const runHerdrFix = vi.fn(async () => herdrInfo());
+    const old = herdrInfo({ state: "too_old", running: false, managed: false, too_old: true, version: "0.8.2", path: "/usr/bin/herdr", error: "Herdr 0.8.2 is too old: Orchestra needs Herdr 0.9.0 or newer. Choose Update Herdr to update it with Herdr's own updater.", fix: "update" });
+    show({ shell: fakeShell({ getHerdrInfo: async () => old, prepareHerdrFix, runHerdrFix }) });
+
+    await user.click(screen.getByRole("button", { name: /6\. Start/ }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Herdr needs attention");
+    expect(alert).toHaveTextContent("0.8.2 is too old");
+    expect(alert).not.toHaveTextContent("not installed");
+    await user.click(within(alert).getByRole("button", { name: "Update Herdr" }));
+    const plan = await within(alert).findByRole("region", { name: "Update Herdr: what will run" });
+    // what is shown is the plan's own command, and that plan is what runs
+    expect(plan).toHaveTextContent("/usr/bin/herdr update");
+    expect(plan).not.toHaveTextContent("curl");
+    await user.click(within(plan).getByRole("button", { name: "Run it" }));
+    expect(runHerdrFix).toHaveBeenCalledWith("u1");
+  });
+
+  it("AC4: a Herdr that is installed but did not start says so, offers Check again, and no install", async () => {
+    const user = userEvent.setup();
+    let n = 0;
+    const getHerdrInfo = vi.fn(async () =>
+      n++ === 0
+        ? herdrInfo({ state: "failed", running: false, managed: false, error: "Herdr is installed, but its background server did not start (it did not answer within 15s). Check again; if it keeps failing, open herdr.dev for help." })
+        : herdrInfo(),
+    );
+    show({ shell: fakeShell({ getHerdrInfo }) });
+    await user.click(screen.getByRole("button", { name: /2\. Herdr/ }));
+    expect(await within(step()).findByText(/background server did not start/)).toBeInTheDocument();
+    expect(within(step()).queryByRole("button", { name: "Install Herdr" })).toBeNull();
+    await user.click(within(step()).getByRole("button", { name: "Check again" }));
+    expect(await within(step()).findByText(/runs in the background/)).toBeInTheDocument();
+  });
+
+  it("AC6: a running Herdr is shown as present, managed by the app, with nothing to install", async () => {
+    const user = userEvent.setup();
+    show({ shell: fakeShell({ getHerdrInfo: async () => herdrInfo() }) });
+    await user.click(screen.getByRole("button", { name: /2\. Herdr/ }));
+    expect(await within(step()).findByText(/Herdr 0\.9\.5 \(\/home\/dev\/\.local\/bin\/herdr\) runs in the background/)).toBeInTheDocument();
+    expect(step()).toHaveTextContent("Nothing to do");
+    expect(within(step()).queryByRole("button", { name: "Install Herdr" })).toBeNull();
+    expect(within(step()).queryByRole("button", { name: /Copy/ })).toBeNull();
+    // a Herdr the app found running is said to be left alone
+    await user.click(screen.getByRole("button", { name: /1\. orch/ }));
+  });
+
+  it("AC6: a Herdr found already running is used and left running", async () => {
+    const user = userEvent.setup();
+    show({ shell: fakeShell({ getHerdrInfo: async () => herdrInfo({ managed: false }) }) });
+    await user.click(screen.getByRole("button", { name: /2\. Herdr/ }));
+    expect(await within(step()).findByText(/was already running: the app uses it and leaves it running/)).toBeInTheDocument();
+  });
+});

@@ -1,6 +1,7 @@
 //! The `orch serve` child processes: one per open project. Start one for a project folder, learn
 //! its address and token, stop it (or all of them when the app quits). It has no knowledge of runs, milestones or agents.
 
+use crate::herdr::HerdrManager;
 use crate::serve::{
     allowed_origins, find_in_environment, parse_listening, parse_token_path, read_token,
 };
@@ -9,7 +10,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -40,8 +41,11 @@ pub struct Servers {
     starting: Mutex<HashSet<String>>,
     /// How long `orch serve` gets to print its address and token file.
     start_timeout: Duration,
+    /// The Herdr every `orch serve` is handed.
+    herdr: Arc<HerdrManager>,
 }
 
+#[cfg(test)]
 impl Default for Servers {
     fn default() -> Self {
         Servers::with_timeout(Duration::from_secs(10))
@@ -65,11 +69,24 @@ impl Drop for StartingGuard<'_> {
 }
 
 impl Servers {
+    /// Servers on a machine without Herdr (tests never touch the real one).
+    #[cfg(test)]
     pub fn with_timeout(start_timeout: Duration) -> Servers {
+        let none = HerdrManager::new(
+            Box::new(|| Err(crate::herdr::NotLocated::Missing)),
+            Box::new(|| Err("no installer in tests".into())),
+            Duration::from_secs(1),
+        );
+        Servers::with_herdr(start_timeout, Arc::new(none))
+    }
+
+    /// Servers whose `orch serve` children run on `herdr`.
+    pub fn with_herdr(start_timeout: Duration, herdr: Arc<HerdrManager>) -> Servers {
         Servers {
             running: Mutex::new(HashMap::new()),
             starting: Mutex::new(HashSet::new()),
             start_timeout,
+            herdr,
         }
     }
 
@@ -172,6 +189,23 @@ impl Servers {
         command.arg("serve").args(["--port", "0"]);
         for origin in allowed_origins() {
             command.args(["--allow-origin", origin]);
+        }
+        // orch reaches the app's Herdr, with its server up (the app's own when it started it),
+        // even when Herdr's folder is not on the app's PATH (`~/.local/bin` after an install).
+        // Without a Herdr the project still opens; the Lead start says what to do.
+        if let Some(herdr_path) = self.herdr.ensure_running().path.map(std::path::PathBuf::from) {
+            command.env("HERDR", &herdr_path);
+            command.env("HERDR_BIN", &herdr_path);
+            if let Some(parent) = herdr_path.parent() {
+                let current = std::env::var_os("PATH").unwrap_or_default();
+                let mut paths: Vec<_> = std::env::split_paths(&current).collect();
+                if !paths.iter().any(|p| p == parent) {
+                    paths.insert(0, parent.to_path_buf());
+                    if let Ok(joined) = std::env::join_paths(paths) {
+                        command.env("PATH", joined);
+                    }
+                }
+            }
         }
         #[cfg(test)]
         let _spawning = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
@@ -518,5 +552,88 @@ mod tests {
         state.stop(&real);
         assert!(gone(&pid));
         assert!(state.current(&link).is_none());
+    }
+
+    // AC3: before `orch serve` starts, the app's Herdr runs (started here when it was not), and
+    // the child is handed that Herdr: `HERDR`, `HERDR_BIN`, and its folder first on the PATH
+    // (the official installer's `~/.local/bin` is often missing from a desktop app's PATH).
+    #[test]
+    fn orch_serve_is_handed_the_running_herdr_by_path_and_environment() {
+        let d = scratch("herdr_env");
+        std::fs::write(d.join("api-token"), "t3st\n").unwrap();
+        let hbin = d.join("hbin");
+        std::fs::create_dir_all(&hbin).unwrap();
+        let herdr = hbin.join("herdr");
+        {
+            let _w = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
+            std::fs::write(
+                &herdr,
+                format!(
+                    r#"#!/bin/sh
+D="{0}"
+case "$1" in
+  --version) echo "herdr 0.9.5" ;;
+  status) if [ -f "$D/up" ]; then printf 'server:\n  status: running\n'; else exit 1; fi ;;
+  server) [ "$2" = stop ] && {{ rm -f "$D/up"; exit 0; }}; echo x >> "$D/starts"; touch "$D/up"; while [ -f "$D/up" ]; do sleep 0.05; done ;;
+esac"#,
+                    d.display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&herdr, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let orch = fake_orch(
+            &d,
+            &format!(
+                "{{ echo \"HERDR=$HERDR\"; echo \"HERDR_BIN=$HERDR_BIN\"; echo \"PATH=$PATH\"; herdr status; }} > {0}/env.txt\n\
+                 echo 'orch serve: listening on http://127.0.0.1:4243'\n\
+                 echo 'token: read it from {0}/api-token and send x'\nexec sleep 30",
+                d.display()
+            ),
+        );
+        let project = scratch("herdr_env_project");
+        let h = herdr.clone();
+        let manager = Arc::new(HerdrManager::new(
+            Box::new(move || Ok(h.clone())),
+            Box::new(|| Err("no installer in tests".into())),
+            Duration::from_secs(5),
+        ));
+        let state = Servers::with_herdr(Duration::from_secs(5), manager.clone());
+        let c = state.start_with(&orch, &project).unwrap();
+        assert_eq!(c.url, "http://127.0.0.1:4243");
+
+        let env = std::fs::read_to_string(d.join("env.txt")).unwrap();
+        assert!(env.contains(&format!("HERDR={}\n", herdr.display())), "{env}");
+        assert!(env.contains(&format!("HERDR_BIN={}\n", herdr.display())), "{env}");
+        assert!(env.contains(&format!("PATH={}:", hbin.display())), "Herdr's folder first: {env}");
+        assert!(env.contains("status: running"), "the child finds a running Herdr by name: {env}");
+        // a second project reuses the same server
+        let project2 = scratch("herdr_env_project2");
+        state.start_with(&orch, &project2).unwrap();
+        let starts = std::fs::read_to_string(d.join("starts")).unwrap();
+        assert_eq!(starts.lines().count(), 1, "one Herdr server for every orch serve");
+
+        state.stop_all();
+        manager.stop_managed();
+        assert!(!d.join("up").exists(), "the app's Herdr stops with the app");
+    }
+
+    // Without Herdr the project still opens (the Lead start then says what to do).
+    #[test]
+    fn orch_serve_starts_without_herdr() {
+        let d = scratch("no_herdr");
+        std::fs::write(d.join("api-token"), "t3st\n").unwrap();
+        let orch = fake_orch(
+            &d,
+            &format!(
+                "echo 'orch serve: listening on http://127.0.0.1:4244'\n\
+                 echo 'token: read it from {0}/api-token and send x'\nexec sleep 30",
+                d.display()
+            ),
+        );
+        let project = scratch("no_herdr_project");
+        let state = Servers::with_timeout(Duration::from_secs(5));
+        assert_eq!(state.start_with(&orch, &project).unwrap().url, "http://127.0.0.1:4244");
+        state.stop(&project);
     }
 }
