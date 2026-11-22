@@ -798,6 +798,94 @@ async fn the_started_lead_takes_chat_messages_once_a_run_exists() {
     );
 }
 
+// AC1: starting the Lead from Chat with "hi" when the project has no run yet initializes
+// the run so the Lead's reply appears in Chat, and a following message is delivered and answered
+// too, with no run needed first.
+#[tokio::test]
+async fn starting_lead_with_hi_allows_lead_reply_and_following_message_with_no_run_needed_first() {
+    let rig = new_rig().await;
+    // Before starting, the project has no run: /chat returns 404 no_run.
+    let (status, err) = req(&rig, "GET", "/api/v1/chat", None).await;
+    assert_eq!(status, 404, "{err}");
+    assert_eq!(err["error"]["code"], "no_run");
+
+    // Start the Lead from Chat with "hi"
+    let r = start(&rig, json!({ "agent": "claude", "message": "hi" })).await;
+    assert_eq!(r.0, 202, "{}", r.1);
+    let v = settled(&rig).await;
+    assert_eq!(v["state"], "running");
+
+    // The Lead is invoked with /orch-plan hi in its pane
+    let ps = prompts(&rig.fake);
+    assert_eq!(ps.len(), 1);
+    assert!(ps[0].1.starts_with("/orch-plan hi"));
+
+    // Lead becomes idle and answers with orch say (via post_lead_reply)
+    rig.fake.set_status("lead", AgentStatus::Idle);
+    let mut store = Store::open_in(&rig.root.join(".orchestrate")).unwrap();
+    store
+        .post_lead_reply("Hello! How can I help you?", None)
+        .unwrap();
+
+    // The Lead's reply appears in Chat with no run needed first
+    let (status, chat) = req(&rig, "GET", "/api/v1/chat", None).await;
+    assert_eq!(status, 200, "{chat}");
+    let msgs = chat["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0]["sender"], "lead");
+    assert_eq!(msgs[0]["text"], "Hello! How can I help you?");
+
+    // A following message sent in Chat is accepted (201 Created), not held at no_run
+    let (status, m) = req(
+        &rig,
+        "POST",
+        "/api/v1/chat",
+        Some(&json!({ "kind": "message", "text": "can you plan a login page?" }).to_string()),
+    )
+    .await;
+    assert_eq!(status, 201, "following message accepted: {m}");
+    let id = m["id"].as_i64().unwrap();
+
+    // The following message is delivered to the Lead pane via chat_tick
+    let lead = HerdrLead(&rig.fake);
+    let env = WakeEnv {
+        runtime: &lead,
+        notifier: &Quiet,
+        clock: &SystemClock,
+        tun: WakeTunables::default(),
+    };
+    assert_eq!(
+        chat_tick(&mut store, &env, &mut |_| {}).unwrap(),
+        ChatTick::Sent(id)
+    );
+    let ps2 = prompts(&rig.fake);
+    assert_eq!(ps2.len(), 2, "{ps2:?}");
+    assert_eq!(ps2[1].0, "lead");
+    assert!(
+        ps2[1].1.contains(&format!("orch chat #{id}"))
+            && ps2[1].1.contains("can you plan a login page?"),
+        "{}",
+        ps2[1].1
+    );
+
+    // The Lead answers the following message too
+    store
+        .post_lead_reply("Sure, I am on it!", None)
+        .unwrap();
+
+    let (status, chat2) = req(&rig, "GET", "/api/v1/chat", None).await;
+    assert_eq!(status, 200, "{chat2}");
+    let msgs2 = chat2["messages"].as_array().unwrap();
+    assert_eq!(msgs2.len(), 3);
+    assert_eq!(msgs2[0]["sender"], "lead");
+    assert_eq!(msgs2[0]["text"], "Hello! How can I help you?");
+    assert_eq!(msgs2[1]["sender"], "developer");
+    assert_eq!(msgs2[1]["text"], "can you plan a login page?");
+    assert_eq!(msgs2[1]["delivery"], "acknowledged");
+    assert_eq!(msgs2[2]["sender"], "lead");
+    assert_eq!(msgs2[2]["text"], "Sure, I am on it!");
+}
+
 // AC8: both routes are in the OpenAPI document with their answers.
 #[tokio::test]
 async fn the_routes_are_documented() {
