@@ -19,6 +19,8 @@ export type Field =
   | { kind: "tiers" }
   /** Plan header lines without a field of their own. */
   | { kind: "extra" }
+  /** Per-project settings (Lead agent, folder) saved by the shell. */
+  | { kind: "project" }
   /** A setting the app cannot save yet: shown, disabled, with the reason. */
   | { kind: "none"; label: string; desc: string; icon: IconName; control: "switch" | "select" | "text" | "number" | "area" };
 
@@ -48,6 +50,14 @@ export const SECTIONS: Section[] = [
       off("Startup Page", "Screen opened when the app starts.", "grid", "select"),
       off("Reduce Motion", "Skip pulsing indicators and transitions in this app.", "pulse", "switch"),
     ],
+  },
+  {
+    id: "project",
+    label: "Project",
+    icon: "folder",
+    title: "Project Settings",
+    desc: "Per-project configuration: default Lead agent and project folder.",
+    fields: [{ kind: "project" }],
   },
   {
     id: "runtime",

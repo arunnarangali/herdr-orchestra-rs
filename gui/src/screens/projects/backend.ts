@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Credentials } from "../../api/client";
+import type { AgentCli, ProjectSettings, SaveProjectSettingsInput } from "../../api/types";
 import { detectShell } from "../../app/shell";
+
+export type { AgentCli, ProjectSettings, SaveProjectSettingsInput };
 
 export interface ArchiveEntry {
   name: string;
@@ -62,6 +65,9 @@ export interface AppBackend {
   getSettings(): Promise<{ value: AppSettings; warning: string | null }>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   findOrch(): Promise<string>;
+  detectAgentClis?(): Promise<AgentCli[]>;
+  getProjectSettings?(path: string): Promise<ProjectSettings>;
+  saveProjectSettings?(path: string, settings: SaveProjectSettingsInput): Promise<ProjectSettings>;
 }
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -88,18 +94,24 @@ function tauriBackend(): AppBackend {
     getSettings: () => call("get_app_settings"),
     saveSettings: (settingsIn) => call("save_app_settings", { settingsIn }),
     findOrch: () => (shell ? shell.findOrch() : Promise.reject(new Error("not in the desktop app"))),
+    detectAgentClis: () => call("detect_agent_clis"),
+    getProjectSettings: (path) => call("get_project_settings", { path }),
+    saveProjectSettings: (path, settings) => call("save_project_settings", { path, settings }),
   };
 }
 
-let override: AppBackend | null | undefined;
+let override: AppBackend | null | undefined | (() => AppBackend | null);
 
-/** For tests: replace what `getBackend` returns (null = a plain browser). */
-export function setBackendForTests(b: AppBackend | null | undefined): void {
+/**
+ * For tests: replace what `getBackend` returns (null = a plain browser). A function is called
+ * on every `getBackend()`, as the real shell's backend is a new object each time.
+ */
+export function setBackendForTests(b: AppBackend | null | undefined | (() => AppBackend | null)): void {
   override = b;
 }
 
 /** The shell's storage, or null when the page runs in a plain browser. */
 export function getBackend(): AppBackend | null {
-  if (override !== undefined) return override;
+  if (override !== undefined) return typeof override === "function" ? override() : override;
   return detectShell() ? tauriBackend() : null;
 }

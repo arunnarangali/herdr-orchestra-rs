@@ -47,6 +47,28 @@
 .spanel .set-msg {
   margin: 12px 16px 0;
 }
+.slead,
+.sfolder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.slead select,
+.sfolder input {
+  width: 100%;
+  max-width: 480px;
+}
+.field-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--accent-coral);
+}
+.field-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--accent-amber);
+}
 .set__body {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);

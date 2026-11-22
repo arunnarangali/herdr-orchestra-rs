@@ -332,6 +332,24 @@ export interface AgentKindInfo {
   skills: SkillsInfo;
   login: LoginInfo;
 }
+
+export interface AgentCli {
+  kind: string;
+  displayName: string;
+  installed: boolean;
+  canLead: boolean;
+}
+
+export interface ProjectSettings {
+  leadAgent: string | null;
+  folder: string;
+  warning: string | null;
+}
+
+export interface SaveProjectSettingsInput {
+  leadAgent: string | null;
+  folder: string;
+}
 export interface WorkingOn {
   task: string;
   state: string;

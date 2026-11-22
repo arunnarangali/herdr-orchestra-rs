@@ -1,5 +1,7 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { PlanResponse } from "../../api/types";
+import { useConnection } from "../../app/connection";
+import { useProjects } from "../../app/projects";
 import type { ThemePreference } from "../../app/theme";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
@@ -10,6 +12,7 @@ import { Segmented } from "../../ui/Segmented";
 import { useResource } from "../../ui/useResource";
 import { SECTIONS, type Field } from "./sections";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
+import { useProjectSettings, type ProjectSettingsState } from "./useProjectSettings";
 import "./settings.css";
 
 const NOT_AVAILABLE = "Not available yet";
@@ -67,7 +70,21 @@ function PlanValue({ plan, value, code }: { plan: PlanResponse | null; value: st
   return code ? <code className="sval">{value}</code> : <span className="sval mono">{value}</span>;
 }
 
-function FieldRow({ field, app, plan, agents, models }: { field: Field; app: AppSettingsState; plan: PlanResponse | null; agents: ReturnType<typeof useAgents>; models: ReturnType<typeof useModels> }) {
+function FieldRow({
+  field,
+  app,
+  plan,
+  agents,
+  models,
+  project,
+}: {
+  field: Field;
+  app: AppSettingsState;
+  plan: PlanResponse | null;
+  agents: ReturnType<typeof useAgents>;
+  models: ReturnType<typeof useModels>;
+  project: ProjectSettingsState;
+}) {
   const notifyId = useId();
   const orchId = useId();
   switch (field.kind) {
@@ -219,6 +236,128 @@ function FieldRow({ field, app, plan, agents, models }: { field: Field; app: App
           ))}
         </>
       );
+    case "project": {
+      if (!project.projectPath) {
+        return (
+          <Card className="set-note" role="status">
+            <p className="panel-title">No project is open</p>
+            <p className="muted">
+              Open a project to configure its settings.
+            </p>
+          </Card>
+        );
+      }
+      if (project.loading) {
+        return (
+          <p className="srow-note muted" role="status">
+            Loading project settings…
+          </p>
+        );
+      }
+      if (project.loadError) {
+        return (
+          <Card className="set-note tone-coral" role="alert">
+            <p className="panel-title">Cannot load project settings</p>
+            <p>{project.loadError}</p>
+            <div className="button-row" style={{ marginTop: 12 }}>
+              <Button onClick={() => void project.reload()}>Try again</Button>
+            </div>
+          </Card>
+        );
+      }
+
+      const isDesktop = Boolean(project.backend);
+      const leadId = "st-lead-agent";
+      const folderId = "st-project-folder";
+      const missingSavedAgent =
+        project.isSavedLeadMissing &&
+        !project.clis.some((c) => c.kind === project.savedLeadAgent)
+          ? project.savedLeadAgent
+          : null;
+
+      const leadDisplayName =
+        project.clis.find((c) => c.kind === project.savedLeadAgent)?.displayName ??
+        project.savedLeadAgent;
+
+      return (
+        <>
+          {project.loadWarning && (
+            <p className="set-msg tone-coral" role="alert">
+              {project.loadWarning}
+            </p>
+          )}
+          <Row
+            icon="robot"
+            label="Default Lead Agent"
+            desc="The agent CLI used to plan and run milestones in this project."
+            source={isDesktop ? "project settings" : NOT_AVAILABLE}
+          >
+            <div className="slead">
+              <label className="visually-hidden" htmlFor={leadId}>
+                Default Lead Agent
+              </label>
+              <select
+                id={leadId}
+                aria-label="Default Lead Agent"
+                value={project.leadAgent}
+                disabled={!isDesktop || project.busy}
+                title={isDesktop ? undefined : DESKTOP_ONLY}
+                onChange={(e) => project.setLeadAgent(e.target.value)}
+              >
+                <option value="">None (no default lead agent)</option>
+                {project.clis.map((c) => (
+                  <option
+                    key={c.kind}
+                    value={c.kind}
+                    disabled={!c.installed || !c.canLead}
+                  >
+                    {c.displayName} ({c.installed ? "Installed" : "Not installed"})
+                  </option>
+                ))}
+                {missingSavedAgent && (
+                  <option value={missingSavedAgent} disabled>
+                    {missingSavedAgent} (Not installed)
+                  </option>
+                )}
+              </select>
+              {project.isSavedLeadMissing && (
+                <p className="field-hint tone-amber" role="alert">
+                  The saved Lead agent “{leadDisplayName}” is not installed. Pick another Lead agent.
+                </p>
+              )}
+            </div>
+          </Row>
+
+          <Row
+            icon="folder"
+            label="Project Folder"
+            desc="Location of the git repository for this project."
+            source={isDesktop ? "project settings" : NOT_AVAILABLE}
+          >
+            <div className="sfolder">
+              <label className="visually-hidden" htmlFor={folderId}>
+                Project Folder
+              </label>
+              <input
+                id={folderId}
+                aria-label="Project Folder"
+                className="mono"
+                value={project.folder}
+                spellCheck={false}
+                disabled={!isDesktop || project.busy}
+                title={isDesktop ? undefined : DESKTOP_ONLY}
+                onChange={(e) => project.setFolder(e.target.value)}
+              />
+              {project.folderError && (
+                <p className="field-error tone-coral" role="alert">
+                  {project.folderError}
+                </p>
+              )}
+            </div>
+          </Row>
+        </>
+      );
+    }
     case "none":
       return (
         <Row icon={field.icon} label={field.label} desc={field.desc} source={NOT_AVAILABLE}>
@@ -237,6 +376,31 @@ export function SettingsScreen() {
   const agents = useAgents();
   const models = useModels();
   const app = useAppSettings();
+  const connection = useConnection();
+  const pj = useProjects();
+  const [stickyPath, setStickyPath] = useState<string | null>(null);
+  const rawPath = pj.multi
+    ? pj.selected
+    : (pj.selected ?? connection.health?.project ?? null);
+  const activePath = rawPath && rawPath.trim() ? rawPath.trim() : (connection.kind === "checking" ? stickyPath : null);
+  if (rawPath && rawPath.trim() && rawPath.trim() !== stickyPath) {
+    setStickyPath(rawPath.trim());
+  }
+  const project = useProjectSettings(activePath, {
+    onFolderChanged: (newFolder) => {
+      if (pj.multi) {
+        if (activePath) {
+          void pj.close(activePath).catch(() => {});
+        }
+        void pj.openListed(newFolder).catch(() => {});
+      } else if (app.backend) {
+        void app.backend
+          .switchProject(newFolder)
+          .then((conn) => connection.connect(conn))
+          .catch(() => {});
+      }
+    },
+  });
   const [current, setCurrent] = useState(SECTIONS[0]!.id);
   const noRun = plan.error?.isNoRun === true;
   const section = SECTIONS.find((s) => s.id === current) ?? SECTIONS[0]!;
@@ -315,7 +479,9 @@ export function SettingsScreen() {
               </h2>
               <p className="spanel__desc">{section.desc}</p>
             </div>
-            <span className="prec mono">Sources: app settings · plan.md · environment</span>
+            <span className="prec mono">
+              {section.id === "project" ? "Source: project settings" : "Sources: app settings · plan.md · environment"}
+            </span>
           </header>
           {plan.state === "loading" && (
             <p className="srow-note muted" role="status">
@@ -329,23 +495,56 @@ export function SettingsScreen() {
           )}
           <div className="spanel__rows">
             {section.fields.map((f, i) => (
-              <FieldRow key={i} field={f} app={app} plan={plan.data} agents={agents} models={models} />
+              <FieldRow key={i} field={f} app={app} plan={plan.data} agents={agents} models={models} project={project} />
             ))}
           </div>
-          {app.outcome && (
+          {app.outcome && section.id !== "project" && (
             <p className={app.outcome.kind === "ok" ? "set-msg tone-emerald" : "set-msg tone-coral"} role={app.outcome.kind === "ok" ? "status" : "alert"}>
               {app.outcome.text}
             </p>
           )}
+          {section.id === "project" && project.saveError && !project.folderError && !project.loadError && (
+            <p className="set-msg tone-coral" role="alert">
+              {project.saveError}
+            </p>
+          )}
+          {section.id === "project" && project.saveSuccess && (
+            <p className="set-msg tone-emerald" role="status">
+              {project.saveSuccess}
+            </p>
+          )}
           <footer className="spanel__foot">
-            <Button unavailable={`${NOT_AVAILABLE}: the run's settings come from plan.md`}>
-              <Icon name="sync" size={14} />
-              Reset to Defaults
-            </Button>
-            <span className="muted spanel__hint">App settings save as you change them. Run settings come from the plan and are read-only here.</span>
-            <Button tone="emerald" solid unavailable={`${NOT_AVAILABLE}: the app does not write config.toml`}>
-              Save to config.toml
-            </Button>
+            {section.id === "project" ? (
+              project.projectPath && !project.loading && !project.loadError ? (
+                <>
+                  <Button
+                    tone="emerald"
+                    solid
+                    disabled={!project.backend || project.busy || !project.isDirty}
+                    unavailable={project.backend ? undefined : DESKTOP_ONLY}
+                    onClick={() => void project.save()}
+                  >
+                    Save project settings
+                  </Button>
+                  <span className="muted spanel__hint">
+                    {project.backend
+                      ? "Saved per project in the shell's config folder. Never written into the project."
+                      : DESKTOP_ONLY}
+                  </span>
+                </>
+              ) : null
+            ) : (
+              <>
+                <Button unavailable={`${NOT_AVAILABLE}: the run's settings come from plan.md`}>
+                  <Icon name="sync" size={14} />
+                  Reset to Defaults
+                </Button>
+                <span className="muted spanel__hint">App settings save as you change them. Run settings come from the plan and are read-only here.</span>
+                <Button tone="emerald" solid unavailable={`${NOT_AVAILABLE}: the app does not write config.toml`}>
+                  Save to config.toml
+                </Button>
+              </>
+            )}
           </footer>
         </Card>
       </div>
