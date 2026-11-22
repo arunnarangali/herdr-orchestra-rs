@@ -11,6 +11,7 @@ import { Bubble, OutboxBubble } from "./Bubble";
 import { Composer } from "./Composer";
 import { EMPTY_REQUEST, FeatureForm } from "./FeatureForm";
 import { PlanCard } from "./PlanCard";
+import { bodyForTyped, FEAT_NEEDS_TEXT, featureWords } from "./featureCommand";
 import { LeadPanel } from "./LeadPanel";
 import { useChat } from "./useChat";
 import { useLead } from "./useLead";
@@ -35,6 +36,7 @@ export function ChatScreen() {
     { refreshOn: ["task-state", "run-state"], refreshDelayMs: 300 },
   );
   const [formOpen, setFormOpen] = useState(false);
+  const [commandProblem, setCommandProblem] = useState<string | null>(null);
   const [request, setRequest] = useState(EMPTY_REQUEST);
   const end = useRef<HTMLLIElement>(null);
   const count = chat.messages.length + chat.outbox.length;
@@ -128,11 +130,22 @@ export function ChatScreen() {
           </div>
 
           <Composer
-            onSend={(text) => chat.sendQueued({ kind: "message", text, request: null })}
+            onSend={async (text) => {
+              if (featureWords(text) === "") {
+                setCommandProblem(FEAT_NEEDS_TEXT);
+                return false;
+              }
+              setCommandProblem(null);
+              return chat.sendQueued(bodyForTyped(text));
+            }}
+            problem={commandProblem}
             onNewRequest={() => setFormOpen(true)}
             disabled={lead.starting}
             text={chat.draft}
-            onText={chat.setDraft}
+            onText={(t) => {
+              setCommandProblem(null);
+              chat.setDraft(t);
+            }}
           />
         </section>
 

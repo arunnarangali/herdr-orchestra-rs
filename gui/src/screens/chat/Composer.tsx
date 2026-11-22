@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "../../ui/Button";
 import { Icon } from "../../ui/Icon";
+import { FEAT_COMMAND, FEAT_HELP, suggestsFeat } from "./featureCommand";
 
 /**
  * The message box. Enter sends, Shift+Enter starts a new line. The text is cleared only when
@@ -12,6 +13,7 @@ export function Composer({
   disabled,
   text: kept,
   onText,
+  problem,
 }: {
   onSend: (text: string) => Promise<boolean>;
   onNewRequest?: () => void;
@@ -19,6 +21,8 @@ export function Composer({
   /** The unsent text, when the screen keeps it (so it survives leaving the page). */
   text?: string;
   onText?: (text: string) => void;
+  /** Why the last send was not made (said in plain words next to the box). */
+  problem?: string | null;
 }) {
   const [own, setOwn] = useState("");
   const text = kept ?? own;
@@ -26,6 +30,11 @@ export function Composer({
   const id = useId();
   const box = useRef<HTMLTextAreaElement>(null);
 
+  const suggest = suggestsFeat(text);
+  const complete = () => {
+    setText(`${FEAT_COMMAND} `);
+    box.current?.focus();
+  };
   const submit = async () => {
     const t = text.trim();
     if (t === "" || disabled) return;
@@ -35,7 +44,9 @@ export function Composer({
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      void submit();
+      // a command still being typed is completed, not sent
+      if (suggest) complete();
+      else void submit();
     }
   };
 
@@ -70,11 +81,27 @@ export function Composer({
         placeholder="Message the lead…"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
-        aria-describedby={`${id}-hint`}
+        aria-describedby={`${id}-hint${problem ? ` ${id}-problem` : ""}`}
+        aria-invalid={problem ? true : undefined}
       />
+      {suggest && (
+        <ul className="chat-suggest" role="listbox" aria-label="Commands">
+          <li role="option" aria-selected="true">
+            <button type="button" className="chat-suggest__item" onClick={complete}>
+              <code>{FEAT_COMMAND}</code>
+              <span className="muted">{FEAT_HELP}</span>
+            </button>
+          </li>
+        </ul>
+      )}
       <button type="submit" className="button button--primary composer__send" disabled={disabled || text.trim() === ""} aria-label="Send">
         Send
       </button>
+      {problem && (
+        <p id={`${id}-problem`} className="chat-problem" role="alert">
+          {problem}
+        </p>
+      )}
       <p id={`${id}-hint`} className="muted chat-hint">
         Enter sends · Shift+Enter for a new line
       </p>

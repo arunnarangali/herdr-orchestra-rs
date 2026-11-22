@@ -370,6 +370,46 @@
 .chat-hint {
   font-size: 0.8rem;
 }
+.chat-suggest {
+  flex-basis: 100%;
+  order: -1;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+.chat-suggest__item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.chat-suggest__item:hover,
+.chat-suggest__item:focus-visible {
+  background: var(--bg-hover);
+  outline: 1px solid var(--accent-cyan);
+}
+.chat-suggest__item code {
+  font: 13px var(--font-mono);
+  color: var(--accent-cyan);
+}
+.chat-composer .chat-problem {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--accent-amber);
+}
 
 /* ---------- feature form (inside the shared modal) ---------- */
 .chat-form {
