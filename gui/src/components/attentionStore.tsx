@@ -30,6 +30,13 @@ export type ResolvedItem = TaggedItem & {
   resolution: string;
 };
 
+/**
+ * The stream says when an item appears or goes, not when a blocked worker's prompt goes or
+ * changes (its item stays open while the milestone carries on). While any item of a source
+ * shows a prompt, that source's items are read again every `promptPollMs`. Tests shorten it.
+ */
+export const attentionTiming = { promptPollMs: 5_000 };
+
 const tag = (s: AttentionSource, item: AttentionItem): TaggedItem => ({
   ...item,
   uid: `${s.key}\u0000${item.id}`,
@@ -59,6 +66,10 @@ export interface AttentionStore {
   waitingItems: TaggedItem[];
   /** Items this app saw resolved, newest first. */
   resolvedItems: ResolvedItem[];
+  /** Replace one project's open items with what its server just answered (e.g. after answering a prompt). */
+  applyItems: (sourceKey: string, items: AttentionItem[]) => void;
+  /** Read one project's open items again and show them (e.g. to see whether a prompt went); rejects when that failed. */
+  recheckSource: (sourceKey: string) => Promise<void>;
   /** Take an item out of the waiting list (after its action succeeded) and keep it in the history. */
   resolveItem: (item: TaggedItem, resolution?: string) => void;
   currentItem: TaggedItem | null;
@@ -80,14 +91,35 @@ function SourceWatcher({
   source,
   onLoaded,
   onEvent,
+  hasPrompt,
 }: {
   source: AttentionSource;
-  onLoaded: (s: AttentionSource, items: AttentionItem[]) => void;
+  onLoaded: (s: AttentionSource, items: AttentionItem[], first: boolean) => void;
   onEvent: (s: AttentionSource, op: string, item: AttentionItem) => void;
+  /** An item of this source shows a prompt: read the items again now and then (see `attentionTiming`). */
+  hasPrompt: boolean;
 }) {
   const { client, subscribe } = source;
   const ref = useRef(source);
   ref.current = source;
+  useEffect(() => {
+    if (!hasPrompt) return;
+    let live = true;
+    const t = setInterval(() => {
+      client.attention().then(
+        (res) => {
+          if (live) onLoaded(ref.current, res.items, false);
+        },
+        () => {
+          // not readable now: the next read tries again
+        },
+      );
+    }, attentionTiming.promptPollMs);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [hasPrompt, client, onLoaded]);
   useEffect(() => {
     let cancelled = false;
     // What the stream reported while the first read was in flight is newer than that read.
@@ -114,7 +146,7 @@ function SourceWatcher({
         loaded = true;
         const items = res.items.filter((i) => !removed.has(i.id));
         for (const [id, item] of added) if (!items.some((i) => i.id === id)) items.push(item);
-        onLoaded(ref.current, items);
+        onLoaded(ref.current, items, true);
       },
       () => {
         // the run may not exist yet, or the route is missing: nothing waits
@@ -163,10 +195,17 @@ export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
     [addResolved],
   );
 
+  /**
+   * One source's open items as its server listed them. Only the `first` read of a source marks
+   * what it lists as seen (already waiting when the app opened: no popup). A later re-read can
+   * find a new item before the feed publishes its `add` event; that event must still alert, so
+   * a re-read shows the item without marking it seen.
+   */
   const onLoaded = useCallback(
-    (s: AttentionSource, loaded: AttentionItem[]) => {
+    (s: AttentionSource, loaded: AttentionItem[], first: boolean) => {
       const tagged = loaded.map((i) => tag(s, i));
-      for (const t of tagged) seen.current.add(t.uid);
+      if (first) for (const t of tagged) seen.current.add(t.uid);
+      const fresh = new Map(tagged.map((t) => [t.uid, t]));
       // An item of this source that disappeared was resolved elsewhere (the API only lists open items).
       const still = new Set(tagged.map((t) => t.uid));
       for (const gone of itemsRef.current.filter((x) => x.sourceKey === s.key && !still.has(x.uid))) {
@@ -175,6 +214,9 @@ export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
       setResolved((prev) => prev.filter((x) => !still.has(x.uid)));
       // replace this source's items (an item already shown by an event stays one item)
       setItems((prev) => [...prev.filter((x) => x.sourceKey !== s.key), ...tagged]);
+      // the popup's queue shows the same items as they are now: a prompt that went or changed
+      // is not left on screen, and an item that is no longer open leaves it
+      setQueue((q) => q.flatMap((x) => (x.sourceKey !== s.key ? [x] : fresh.has(x.uid) ? [fresh.get(x.uid)!] : [])));
     },
     [addResolved],
   );
@@ -183,7 +225,9 @@ export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
     (s: AttentionSource, op: string, item: AttentionItem) => {
       const t = tag(s, item);
       if (op === "add") {
-        setItems((prev) => (prev.some((x) => x.uid === t.uid) ? prev : [...prev, t]));
+        // an item already shown is replaced in place: its prompt may have changed (or gone)
+        setItems((prev) => (prev.some((x) => x.uid === t.uid) ? prev.map((x) => (x.uid === t.uid ? t : x)) : [...prev, t]));
+        setQueue((q) => q.map((x) => (x.uid === t.uid ? t : x)));
         setResolved((prev) => prev.filter((x) => x.uid !== t.uid));
         if (!seen.current.has(t.uid)) {
           seen.current.add(t.uid);
@@ -231,9 +275,27 @@ export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
     setQueue((q) => [item, ...q.filter((x) => x.uid !== item.uid)]);
     setIsListOpen(false);
   }, []);
+  const applyItems = useCallback(
+    (key: string, fresh: AttentionItem[]) => {
+      const s = sourcesRef.current.find((x) => x.key === key);
+      if (s) onLoaded(s, fresh, false);
+    },
+    [onLoaded],
+  );
   const clientFor = useCallback(
     (key: string) => sourcesRef.current.find((s) => s.key === key)?.client ?? null,
     [],
+  );
+  const recheckSource = useCallback(
+    async (key: string) => {
+      const s = sourcesRef.current.find((x) => x.key === key);
+      if (!s) throw new Error("This project is no longer open.");
+      const res = await s.client.attention();
+      // the project may have closed while it was read
+      const now = sourcesRef.current.find((x) => x.key === key);
+      if (now) onLoaded(now, res.items, false);
+    },
+    [onLoaded],
   );
 
   const counts = useMemo(() => {
@@ -245,7 +307,13 @@ export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
   const watchers = (
     <>
       {sources.map((s) => (
-        <SourceWatcher key={s.key} source={s} onLoaded={onLoaded} onEvent={onEvent} />
+        <SourceWatcher
+          key={s.key}
+          source={s}
+          onLoaded={onLoaded}
+          onEvent={onEvent}
+          hasPrompt={items.some((i) => i.sourceKey === s.key && i.prompt)}
+        />
       ))}
     </>
   );
@@ -254,6 +322,8 @@ export function useAttentionStore(sources: AttentionSource[]): AttentionStore {
     waitingItems: items,
     resolvedItems: resolved,
     resolveItem,
+    applyItems,
+    recheckSource,
     currentItem: queue[0] ?? null,
     dismissCurrent,
     openItem,

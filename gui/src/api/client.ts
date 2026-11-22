@@ -7,6 +7,7 @@ import type {
   AttentionResponse,
   ChatBody,
   LeadStartBody,
+  PromptAnswerBody,
   LeadView,
   ChatListResponse,
   ChatMessage,
@@ -132,6 +133,11 @@ export function createApiClient(options: ClientOptions) {
     // -- the Lead itself: where it stands, and starting it (answers for a project with no run too)
     lead: (o?: RequestOptions) => get<LeadView>("/lead", o),
     startLead: (body: LeadStartBody, o?: RequestOptions) => post<LeadView>("/lead/start", body, o),
+    /** Answer the prompt the Lead is blocked at with one of its options (answer: the Lead's state). */
+    answerLeadPrompt: (body: PromptAnswerBody, o?: RequestOptions) => post<LeadView>("/lead/prompt", body, o),
+    /** Answer a blocked worker's prompt (attention item `id`) with one of its options (answer: the open items). */
+    answerAttentionPrompt: (id: string, body: PromptAnswerBody, o?: RequestOptions) =>
+      post<AttentionResponse>(`/attention/${encodeURIComponent(id)}/prompt`, body, o),
 
     // -- actions (the event manager carries them out; the answer says whether it is running)
     dispatch: (body: DispatchBody, o?: RequestOptions) =>

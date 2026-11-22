@@ -40,6 +40,10 @@ export interface LeadControl {
   /** Ask for the Lead to start, once: a second call while one is open does nothing. */
   start: (message?: string | null) => Promise<StartResult>;
   reload: () => void;
+  /** Answer the prompt the Lead is blocked at with one of its options; rejects with the server's error. */
+  answerPrompt: (option: string) => Promise<LeadView>;
+  /** Read where the Lead stands now and show it (e.g. whether its prompt went); rejects when it could not be read. */
+  recheck: () => Promise<LeadView>;
 }
 
 /** Plain words for a start that cannot be asked yet. */
@@ -200,7 +204,28 @@ export function useLead(): LeadControl {
     [client],
   );
 
+  const answerPrompt = useCallback(
+    async (option: string): Promise<LeadView> => {
+      if (!client) throw new Error("Not connected to a project.");
+      const v = await client.answerLeadPrompt({ option });
+      setView(v);
+      setPhase0("known");
+      return v;
+    },
+    [client],
+  );
+
+  const recheck = useCallback(async (): Promise<LeadView> => {
+    if (!client) throw new Error("Not connected to a project.");
+    const v = await client.lead();
+    setView(v);
+    setPhase0("known");
+    return v;
+  }, [client]);
+
   return {
+    answerPrompt,
+    recheck,
     phase,
     view,
     agents,

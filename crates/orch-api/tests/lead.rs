@@ -322,6 +322,13 @@ async fn a_second_start_is_refused_and_opens_no_pane() {
         "lead_running",
     );
     assert!(m.contains("already starting"), "{m}");
+    // the first start opens its pane on its own thread after answering 202: wait for it, so a
+    // slow machine is not mistaken for "no pane" (a second pane would still show as 2)
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while rig.fake.panes(None).unwrap().is_empty() {
+        assert!(Instant::now() < deadline, "the first start never opened its pane");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert_eq!(
         rig.fake.panes(None).unwrap().len(),
         1,

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConnection } from "../app/connection";
 import type { AttentionAction } from "../api/types";
@@ -10,6 +10,7 @@ import { Drawer } from "../ui/Drawer";
 import { Icon } from "../ui/Icon";
 import { Modal } from "../ui/Modal";
 import { AttentionCard } from "./AttentionCard";
+import { PromptAnswer } from "./PromptAnswer";
 
 type AttentionContextValue = Omit<AttentionStore, "watchers">;
 
@@ -21,6 +22,29 @@ export function useAttention() {
     throw new Error("useAttention must be used within an AttentionProvider");
   }
   return ctx;
+}
+
+/**
+ * Answer the open prompt of a blocked worker's item, through that item's own project only;
+ * the project's items are then replaced by what its server answered.
+ */
+export function useAnswerItemPrompt() {
+  const { clientFor, applyItems } = useAttention();
+  return useCallback(
+    async (item: TaggedItem, option: string) => {
+      const client = clientFor(item.sourceKey);
+      if (!client) throw new Error("This project is no longer open, so the answer was not sent.");
+      const r = await client.answerAttentionPrompt(item.id, { option });
+      applyItems(item.sourceKey, r.items);
+    },
+    [clientFor, applyItems],
+  );
+}
+
+/** Read an item's project again, to see whether its worker's prompt went or changed. */
+export function useRecheckItemPrompt() {
+  const { recheckSource } = useAttention();
+  return useCallback((item: TaggedItem) => recheckSource(item.sourceKey), [recheckSource]);
 }
 
 /**
@@ -50,6 +74,8 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
 
 export function AttentionPopup() {
   const { currentItem, dismissCurrent, clientFor, resolveItem } = useAttention();
+  const answerPrompt = useAnswerItemPrompt();
+  const recheckPrompt = useRecheckItemPrompt();
   const { select } = useProjects();
   const navigate = useNavigate();
 
@@ -156,8 +182,13 @@ export function AttentionPopup() {
 
         {item.prompt && (
           <div className="attention-prompt">
-            <strong>Prompt:</strong>
-            <pre className="attention-text">{item.prompt.text}</pre>
+            <strong>{item.agent ?? "The agent"} is waiting for an answer:</strong>
+            <PromptAnswer
+              prompt={item.prompt}
+              who={item.agent ?? "the agent"}
+              onAnswer={(o) => answerPrompt(item, o)}
+              onRecheck={() => recheckPrompt(item)}
+            />
           </div>
         )}
 
@@ -286,6 +317,8 @@ export function NotificationBell() {
 /** The notification drawer: every item that waits, with a link to the Attention Center. */
 export function NotificationDrawer() {
   const { waitingItems, isListOpen, closeList, openItem } = useAttention();
+  const answerPrompt = useAnswerItemPrompt();
+  const recheckPrompt = useRecheckItemPrompt();
   const navigate = useNavigate();
   return (
     <Drawer
@@ -311,7 +344,7 @@ export function NotificationDrawer() {
       ) : (
         <ul className="att-list" aria-label="Waiting items">
           {waitingItems.map((item) => (
-            <AttentionCard key={item.uid} item={item} onReview={openItem} />
+            <AttentionCard key={item.uid} item={item} onReview={openItem} onAnswerPrompt={answerPrompt} onRecheckPrompt={recheckPrompt} />
           ))}
         </ul>
       )}

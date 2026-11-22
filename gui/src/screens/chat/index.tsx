@@ -13,6 +13,7 @@ import { EMPTY_REQUEST, FeatureForm } from "./FeatureForm";
 import { PlanCard } from "./PlanCard";
 import { bodyForTyped, FEAT_NEEDS_TEXT, featureWords } from "./featureCommand";
 import { LeadPanel } from "./LeadPanel";
+import { LeadPrompt } from "./LeadPrompt";
 import { useChat } from "./useChat";
 import { useLead } from "./useLead";
 import "./chat.css";
@@ -82,6 +83,10 @@ export function ChatScreen() {
           </header>
 
           <LeadPanel lead={lead} />
+
+          {(lead.phase === "running" || lead.phase === "starting") && lead.view?.prompt && (
+            <LeadPrompt prompt={lead.view.prompt} onAnswer={lead.answerPrompt} onRecheck={lead.recheck} />
+          )}
 
           {chat.leadProblem && <LeadUnavailable text={chat.leadProblem} />}
 
