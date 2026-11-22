@@ -17,6 +17,12 @@ export interface FakeServer {
   requests: SeenRequest[];
   /** Answer `METHOD path` (without the `/api/v1` prefix) with this status and JSON body. */
   respond: (method: string, path: string, status: number, body: unknown) => void;
+  /**
+   * Keep requests to `METHOD path` waiting (no answer yet) until the returned `release` is
+   * called; then they get the route's answer as it is at that moment. For tests that look at
+   * a request while it is in flight, with no timing to race.
+   */
+  hold: (method: string, path: string) => () => void;
   /** Answer 401 to everything, as if the token had been replaced. */
   rejectToken: (reject?: boolean) => void;
   /** Send an event on every open stream. */
@@ -43,6 +49,8 @@ export async function startFakeServer(options: { token?: string; run?: boolean; 
   const token = options.token ?? "t".repeat(64);
   const requests: SeenRequest[] = [];
   const routes = new Map<string, { status: number; body: unknown }>();
+  /** Held routes and the requests waiting on each. */
+  const held = new Map<string, (() => void)[]>();
   const streams = new Set<ServerResponse>();
   let rejectAll = false;
 
@@ -76,12 +84,19 @@ export async function startFakeServer(options: { token?: string; run?: boolean; 
         res.on("close", () => streams.delete(res));
         return;
       }
-      const custom = routes.get(`${seen.method} ${seen.path}`);
-      if (custom) return send(custom.status, custom.body);
-      if (seen.method === "GET" && seen.path === "/health") {
-        return send(200, { ...samples.health, run: options.run ?? true });
-      }
-      send(404, errorBody("not_found", "no such route"));
+      const key = `${seen.method} ${seen.path}`;
+      const answer = () => {
+        if (res.destroyed) return;
+        const custom = routes.get(key);
+        if (custom) return send(custom.status, custom.body);
+        if (seen.method === "GET" && seen.path === "/health") {
+          return send(200, { ...samples.health, run: options.run ?? true });
+        }
+        send(404, errorBody("not_found", "no such route"));
+      };
+      const waiting = held.get(key);
+      if (waiting) return void waiting.push(answer);
+      answer();
     });
   });
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
@@ -93,6 +108,15 @@ export async function startFakeServer(options: { token?: string; run?: boolean; 
     token,
     requests,
     respond: (method, path, status, body) => void routes.set(`${method} ${path}`, { status, body }),
+    hold: (method, path) => {
+      const key = `${method} ${path}`;
+      if (!held.has(key)) held.set(key, []);
+      return () => {
+        const waiting = held.get(key) ?? [];
+        held.delete(key);
+        for (const answer of waiting) answer();
+      };
+    },
     rejectToken: (reject = true) => void (rejectAll = reject),
     emit: (id, event, data) => {
       for (const s of streams) s.write(`id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
