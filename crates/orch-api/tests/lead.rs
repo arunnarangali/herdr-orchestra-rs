@@ -54,7 +54,8 @@ fn registry(dir: &Path) -> agents::Registry {
         format!(
             "[claude]\nbinary = \"{exe}\"\n\n\
              [ghost]\nbinary = \"/nonexistent/ghost\"\nlaunch = \"ghost\"\nroles = [\"lead\"]\n\n\
-             [helper]\nbinary = \"{exe}\"\nlaunch = \"helper\"\nroles = [\"coder\", \"reviewer\"]\n",
+             [helper]\nbinary = \"{exe}\"\nlaunch = \"helper\"\nroles = [\"coder\", \"reviewer\"]\n\n\
+             [no_invoke]\nbinary = \"{exe}\"\nlaunch = \"no_invoke\"\nroles = [\"lead\"]\n",
             exe = exe.display()
         ),
     )
@@ -63,11 +64,14 @@ fn registry(dir: &Path) -> agents::Registry {
 }
 
 fn options(dir: &Path) -> LeadOptions {
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).unwrap();
     LeadOptions {
         registry: Some(registry(dir)),
         catalog: Some(
             models::catalog(models::DEFAULT_TOML, Path::new("/nonexistent/m.toml")).unwrap(),
         ),
+        home: Some(home),
         server_wait_s: 1.0,
         agent_wait_s: 1.5,
         ready_wait_s: 1.5,
@@ -253,18 +257,15 @@ async fn a_start_opens_one_named_pane_in_the_project_and_hands_over_the_playbook
     let (to, text) = &ps[0];
     assert_eq!(to, "lead");
     assert!(
-        text.contains(orch_config::playbooks::PLAN),
-        "the planning playbook is handed over"
+        !text.contains(orch_config::playbooks::PLAN),
+        "the planning playbook is not typed into the pane"
+    );
+    assert!(
+        text.starts_with(&format!("/orch-plan {casual}")),
+        "starts with the kind's skill command plus the message as written"
     );
     assert!(text.contains(&format!("Herdr pane {pane}")));
     assert!(text.contains("`Lead: lead (claude)`"));
-    assert!(
-        text.ends_with(&format!(
-            "The developer's first message to you:\n\n{casual}\n"
-        )),
-        "the message is the last thing, passed on as written: {}",
-        &text[text.len().saturating_sub(200)..]
-    );
 }
 
 // AC5: the message is optional.
@@ -276,7 +277,10 @@ async fn a_start_without_a_message_tells_the_lead_to_wait() {
     assert_eq!(settled(&rig).await["state"], "running");
     let ps = prompts(&rig.fake);
     assert_eq!(ps.len(), 1);
-    assert!(ps[0].1.contains(orch_config::playbooks::PLAN));
+    assert!(
+        !ps[0].1.contains(orch_config::playbooks::PLAN),
+        "the planning playbook is not typed into the pane"
+    );
     assert!(ps[0].1.ends_with(
         "The developer has not written anything yet: say that you are ready, then wait for them.\n"
     ));
@@ -295,6 +299,7 @@ async fn a_start_without_a_message_tells_the_lead_to_wait() {
             .1
             .contains("has not written anything yet")
     );
+    assert!(!prompts(&rig.fake)[0].1.contains(orch_config::playbooks::PLAN));
 }
 
 // AC3: a second start while one runs, or while one is starting, starts nothing.
@@ -389,7 +394,7 @@ async fn starting_again_picks_up_the_pane_whose_agent_was_not_seen() {
     assert_eq!(runs, 1, "nothing typed into the waiting agent's pane");
     let ps = prompts(&rig.fake);
     assert_eq!(ps.len(), 1);
-    assert!(ps[0].1.ends_with("hello again\n"));
+    assert!(ps[0].1.starts_with("/orch-plan hello again"));
 }
 
 // AC3: two starts at the same moment start exactly one Lead.
@@ -429,6 +434,15 @@ async fn kinds_that_cannot_lead_here_are_refused_by_name() {
     );
     assert!(
         m.contains("`helper`") && m.contains("cannot be the Lead") && m.contains("coder"),
+        "{m}"
+    );
+    let m = refused(
+        &start(&rig, json!({ "agent": "no_invoke" })).await,
+        400,
+        "bad_request",
+    );
+    assert!(
+        m.contains("`no_invoke`") && m.contains("no `invoke` command"),
         "{m}"
     );
     let m = refused(&start(&rig, json!({})).await, 400, "bad_request");
@@ -840,4 +854,83 @@ async fn two_projects_never_share_a_lead_name() {
         "lead_running",
     );
     assert_eq!(fake.panes(None).unwrap().len(), 2);
+}
+
+// AC3: When the kind's orch skills are already installed nothing extra happens; when they
+// are not, the app installs them itself through orch's own skill installer before the Lead
+// starts, and a test with a fake home folder proves both cases.
+#[tokio::test]
+async fn skills_installed_when_missing_and_left_alone_when_present() {
+    let home = tempfile::tempdir().unwrap();
+    let home_path = home.path().to_path_buf();
+    let rig = rig_with(|opts| {
+        opts.home = Some(home_path.clone());
+    })
+    .await;
+
+    // Case 1: Skills are not installed yet in fake home
+    let skill_file = home_path.join(".claude/skills/orch-plan/SKILL.md");
+    let cmd_file = home_path.join(".claude/commands/orch-plan.md");
+    let manifest = home_path.join(".local/share/herdr-orchestra/manifest.txt");
+    assert!(!skill_file.exists());
+    assert!(!cmd_file.exists());
+    assert!(!manifest.exists());
+
+    // Starting installs the skills before the Lead starts
+    assert_eq!(
+        start(&rig, json!({ "agent": "claude", "message": "plan a feature" })).await.0,
+        202
+    );
+    assert_eq!(settled(&rig).await["state"], "running");
+    assert!(skill_file.exists(), "skill file was installed");
+    assert!(cmd_file.exists(), "command file was installed");
+    assert!(manifest.exists(), "manifest was written");
+
+    // Case 2: Skills already installed — nothing extra happens (file is not overwritten)
+    std::fs::write(&skill_file, "custom-existing-skill").unwrap();
+    let rig2 = rig_on(Arc::new(FakeHerdr::new()), "project2", |opts| {
+        opts.home = Some(home_path.clone());
+    })
+    .await;
+
+    assert_eq!(
+        start(&rig2, json!({ "agent": "claude", "message": "second feature" })).await.0,
+        202
+    );
+    assert_eq!(settled(&rig2).await["state"], "running");
+    assert_eq!(
+        std::fs::read_to_string(&skill_file).unwrap(),
+        "custom-existing-skill",
+        "existing installed skill was preserved without extra install"
+    );
+}
+
+// AC4: When installing the skills fails, the start is refused before any pane opens, with a
+// message naming the kind and what happened; nothing is typed into any pane.
+#[tokio::test]
+async fn failed_skill_installation_refuses_start_before_any_pane_opens() {
+    let home = tempfile::tempdir().unwrap();
+    // Block installation by creating a file where .claude folder needs to be created
+    std::fs::write(home.path().join(".claude"), "not a directory").unwrap();
+
+    let rig = rig_with(|opts| {
+        opts.home = Some(home.path().to_path_buf());
+    })
+    .await;
+
+    let res = start(&rig, json!({ "agent": "claude", "message": "hi" })).await;
+    let msg = refused(&res, 400, "bad_request");
+    assert!(
+        msg.contains("`claude`") && (msg.contains("cannot write") || msg.contains("cannot install")),
+        "message names kind and what happened: {msg}"
+    );
+    assert!(
+        rig.fake.panes(None).unwrap().is_empty(),
+        "no pane was opened"
+    );
+    assert!(
+        rig.fake.sent().is_empty(),
+        "nothing was typed into any pane"
+    );
+    assert_eq!(get_lead(&rig).await["state"], "none");
 }
